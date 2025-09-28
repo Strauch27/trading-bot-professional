@@ -1,4 +1,4 @@
-# trading.py - Trading-Funktionen und Order-Management
+# trading.py - Trading-Funktionen und Order-Management 
 import time
 import math
 import ccxt
@@ -958,18 +958,59 @@ def full_portfolio_reset(exchange, settlement_manager):
             step = 10 ** (-amount_precision)
             qty = floor_to_step(qty, step)
         
-        # Nur prüfen wenn price > 0
+        # Dust-Check mit robuster Limits-Prüfung
         if price > 0:
-            min_cost_raw = float((limits.get('cost') or {}).get('min') or 5.1)
-            min_cost = min_cost_raw * min_order_buffer
+            # Nutze get_symbol_limits für robuste Limits-Extraktion
+            limits_data = get_symbol_limits(exchange, symbol)
+            min_cost = float(limits_data.get("min_cost", 5.1))
+            amount_step = float(limits_data.get("amount_step", 0.001))
+            min_amount = float(limits_data.get("min_amount", 0.0))
+
+            # Kleinste verkaufbare Menge bei aktuellem Preis (Bid)
+            min_sell_qty_by_cost = (min_cost / price) if price else 0.0
+
+            # Quantize up - sicherstellen dass wir über Minimum sind
+            from utils import floor_to_step
+            def quantize_up(value, step):
+                """Rundet nach oben auf nächste gültige Stufe"""
+                if step <= 0:
+                    return value
+                import math
+                return math.ceil(value / step) * step
+
+            min_sell_qty = max(min_amount, quantize_up(min_sell_qty_by_cost, amount_step))
             order_value = qty * price
-            
+
+            # Dust-Prüfung: Wenn qty < min_sell_qty → Dust überspringen
+            if qty < min_sell_qty:
+                logger.info(f"DUST_SKIPPED - {symbol} qty={qty} < min_sell_qty={min_sell_qty}",
+                           extra={'event_type': 'DUST_SKIPPED', 'symbol': symbol,
+                                  'qty': qty, 'min_sell_qty': min_sell_qty, 'price': price,
+                                  'min_cost': min_cost, 'order_value': order_value})
+
+                # Dust zum Sweeper hinzufügen (wenn Settlement Manager verfügbar)
+                if settlement_manager and hasattr(settlement_manager, 'dust_sweeper'):
+                    dust_sweeper = settlement_manager.dust_sweeper
+                    if dust_sweeper:
+                        dust_sweeper.add_dust(symbol, qty, price)
+
+                continue  # KEIN Verkaufsversuch für Dust
+
+            # Zusätzliche Mindest-Order-Value Prüfung
             if order_value < min_cost:
-                logger.info(f"Reset: {symbol} ist Dust (Wert={order_value:.2f} < {min_cost:.2f} USDT, qty={qty})",
-                          extra={'event_type': 'RESET_SKIP_DUST', 'symbol': symbol, 
-                                'value': order_value, 'min_required': min_cost, 
-                                'qty': qty, 'price': price})
-                continue
+                logger.info(f"DUST_SKIPPED - {symbol} order_value={order_value:.2f} < min_cost={min_cost:.2f}",
+                           extra={'event_type': 'DUST_SKIPPED', 'symbol': symbol,
+                                  'value': order_value, 'min_required': min_cost,
+                                  'qty': qty, 'price': price})
+
+                # Dust zum Sweeper hinzufügen
+                if settlement_manager and hasattr(settlement_manager, 'dust_sweeper'):
+                    dust_sweeper = settlement_manager.dust_sweeper
+                    if dust_sweeper:
+                        dust_sweeper.add_dust(symbol, qty, price)
+
+                continue  # KEIN Verkaufsversuch für Dust
+
         else:
             order_value = 0  # Kein Preis verfügbar
         

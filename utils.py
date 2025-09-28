@@ -1,4 +1,4 @@
-# utils.py - Utility-Funktionen und State-Management
+# utils.py - Utility-Funktionen und State-Management 
 import os
 import json
 import pandas as pd
@@ -304,10 +304,11 @@ def save_trade_history(trade_data):
 # =================================================================================
 class SettlementManager:
     """Verwaltet pending settlements und verhindert Race-Conditions"""
-    def __init__(self):
+    def __init__(self, dust_sweeper=None):
         self.pending_settlements = {}  # order_id -> {'amount': x, 'timestamp': y}
         self.last_verified_budget = 0
         self.settlement_history = deque(maxlen=100)  # Für Statistiken
+        self.dust_sweeper = dust_sweeper  # Optional: DustSweeper für Dust-Handling
         
     def add_pending(self, order_id, amount, symbol="", **extra):
         """Fügt ein pending settlement hinzu mit optionalen Extra-Daten"""
@@ -660,10 +661,17 @@ class DustSweeper:
         if value < self.min_sweep_value:  # Unter min_sweep_value = Dust
             if symbol not in self.dust_accumulator:
                 self.dust_accumulator[symbol] = 0
+
+            previous_amount = self.dust_accumulator[symbol]
             self.dust_accumulator[symbol] += amount
-            logger.info(f"Dust hinzugefügt: {symbol} - {amount} (Wert: {value:.4f} USDT)",
-                       extra={'event_type': 'DUST_ADDED', 'symbol': symbol, 
-                             'amount': amount, 'value': value})
+            total_amount = self.dust_accumulator[symbol]
+            total_value = total_amount * price
+
+            logger.info(f"DUST_ACCUMULATED - {symbol}: +{amount} -> total={total_amount} (${total_value:.4f})",
+                       extra={'event_type': 'DUST_ACCUMULATED', 'symbol': symbol,
+                              'added_amount': amount, 'total_amount': total_amount,
+                              'added_value': value, 'total_value': total_value,
+                              'price': price, 'min_sweep_value': self.min_sweep_value})
             return True
         return False
     
@@ -772,9 +780,13 @@ class DustSweeper:
                             else:
                                 raise e
                         
-                        logger.info(f"Dust-Sweep erfolgreich: {symbol} - {precise_amount} für ~{order_value:.2f} USDT",
-                                   extra={'event_type': 'DUST_SWEPT', 'symbol': symbol, 
-                                         'amount': precise_amount, 'value': order_value})
+                        # Erweiterte Telemetrie für erfolgreichen Sweep
+                        avg_price = order_value / precise_amount if precise_amount > 0 else 0
+                        logger.info(f"DUST_SWEEP_EXECUTED - {symbol}: {precise_amount} @ ${avg_price:.6f} = ${order_value:.2f}",
+                                   extra={'event_type': 'DUST_SWEEP_EXECUTED', 'symbol': symbol,
+                                          'amount': precise_amount, 'cost_usd': order_value,
+                                          'avg_price': avg_price, 'order_id': order.get('id', 'unknown'),
+                                          'order_status': order.get('status', 'unknown')})
                         swept_symbols.append(symbol)
                     except Exception as e:
                         logger.error(f"Dust-Sweep fehlgeschlagen für {symbol}: {e}",

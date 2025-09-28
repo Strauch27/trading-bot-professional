@@ -7,7 +7,7 @@ os.environ.setdefault("PYTHONFAULTHANDLER", "1")
 STACKDUMP_FP = None
 
 try:
-    import numpy_fix  # NumPy Kompatibilitäts-Fix (optional)
+    import numpy_fix  # NumPy Kompatibilitäts-Fix (optional) 
 except Exception:
     pass
 
@@ -361,11 +361,66 @@ def main():
     backup_state_files()
     
     # Manager initialisieren
-    settlement_manager = SettlementManager()
-    dust_sweeper = DustSweeper(exchange, min_sweep_value=5.2) if exchange else None  # 5.2 > MEXC min (5.1)
+    from config import DUST_MIN_COST_USD
+    dust_sweeper = DustSweeper(exchange, min_sweep_value=DUST_MIN_COST_USD) if exchange else None
+    settlement_manager = SettlementManager(dust_sweeper)
     
     # Portfolio Manager
     portfolio = PortfolioManager(exchange, settlement_manager, dust_sweeper)
+
+    # Periodischer Dust-Sweep (Background-Thread)
+    from config import DUST_SWEEP_ENABLED, DUST_SWEEP_INTERVAL_MIN
+    from services.shutdown_coordinator import get_shutdown_coordinator
+    dust_sweep_thread = None
+    if DUST_SWEEP_ENABLED and dust_sweeper and exchange:
+        import threading, time
+
+        def _dust_loop():
+            """Background-Thread für periodische Dust-Sweeps"""
+            logger.info("Dust-Sweeper Thread gestartet",
+                       extra={'event_type': 'DUST_SWEEP_THREAD_START',
+                              'interval_min': DUST_SWEEP_INTERVAL_MIN})
+
+            while not get_shutdown_coordinator().is_shutdown_requested():
+                try:
+                    # Warte das konfigurierte Intervall
+                    sleep_seconds = max(60, int(DUST_SWEEP_INTERVAL_MIN) * 60)
+
+                    # Check for shutdown während sleep (responsive)
+                    for _ in range(sleep_seconds):
+                        if get_shutdown_coordinator().is_shutdown_requested():
+                            return
+                        time.sleep(1)
+
+                    # Preise für Dust-Bewertung holen
+                    try:
+                        # Verwende fetch_tickers für aktuelle Preise
+                        tickers = exchange.fetch_tickers()
+                        prices = {symbol: float(ticker.get('last', 0))
+                                 for symbol, ticker in tickers.items()
+                                 if ticker and ticker.get('last')}
+
+                        logger.debug(f"Dust-Sweep: {len(prices)} Preise geladen",
+                                   extra={'event_type': 'DUST_SWEEP_PRICES_LOADED', 'count': len(prices)})
+
+                        # Dust-Sweep ausführen
+                        if prices:
+                            dust_sweeper.sweep(prices)
+
+                    except Exception as price_error:
+                        logger.warning(f"Dust-Sweep: Konnte Preise nicht laden: {price_error}",
+                                     extra={'event_type': 'DUST_SWEEP_PRICE_ERROR', 'error': str(price_error)})
+
+                except Exception as e:
+                    logger.warning(f"Dust sweep failed: {e}",
+                                 extra={'event_type': 'DUST_SWEEP_ERROR', 'error': str(e)})
+
+        # Starte Dust-Sweep Thread
+        dust_sweep_thread = threading.Thread(target=_dust_loop, daemon=True, name="DustSweeper")
+        dust_sweep_thread.start()
+        logger.info("Periodischer Dust-Sweeper aktiviert",
+                   extra={'event_type': 'DUST_SWEEP_ACTIVATED',
+                          'interval_min': DUST_SWEEP_INTERVAL_MIN})
     
     # Sanity Check und Reconciliation mit robuster Market Data
     if exchange:
