@@ -1,4 +1,18 @@
-﻿# Python / Build
+﻿# Runtime / State
+sessions/
+reports/
+snapshots*/
+*.log
+*.jsonl
+*_anchors.json
+held_assets*.json
+open_buy_orders*.json
+load_markets.json
+orderbook_*.json
+*.csv
+*.parquet
+
+# Build/Cache/Artifacts
 __pycache__/
 *.pyc
 *.pyo
@@ -6,13 +20,10 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
-# Projekt
-sessions/
-reports/
-*.log
 *.zip
 *.patch
+
+# Legacy/Old
 __snapshots__/
 MEXC_Validation/
 testing_framework/
@@ -22,3 +33,7 @@ tools/
 
 # Secrets
 .env
+
+# Editor
+.vscode/
+.claude/

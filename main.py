@@ -12,6 +12,7 @@ except Exception:
     pass
 
 import ccxt
+import json
 import os
 import shutil
 import signal
@@ -118,6 +119,17 @@ def setup_exchange():
     try:
         exchange.load_markets(True)
         logger.info("Markets erfolgreich geladen", extra={'event_type': 'LOAD_MARKETS_SUCCESS'})
+
+        # Optional: load_markets Dump für Exchange-Tracing (einmal pro Session)
+        try:
+            markets_dump_path = os.path.join(SESSION_DIR, "logs", "load_markets.json")
+            os.makedirs(os.path.dirname(markets_dump_path), exist_ok=True)
+            with open(markets_dump_path, "w", encoding="utf-8") as fh:
+                json.dump(exchange.markets, fh, ensure_ascii=False, indent=2)
+            logger.info(f"Saved load_markets → {markets_dump_path}")
+        except Exception as e:
+            logger.warning(f"Could not dump markets: {e}")
+
     except Exception as e:
         logger.warning(f"load_markets(True) failed: {e}", extra={'event_type': 'LOAD_MARKETS_WARN'})
         # Bei Timestamp-Fehlern: Warnung und Hinweis
@@ -319,6 +331,12 @@ def main():
     
     # Exchange Setup
     exchange, has_api_keys = setup_exchange()
+
+    # Exchange Tracing Wrapper
+    if getattr(config_module, "EXCHANGE_TRACE_ENABLED", False) and exchange:
+        from adapters.exchange_tracer import TracedExchange
+        exchange = TracedExchange(exchange, config_module, logger)
+
     if not has_api_keys:
         global global_trading
         global_trading = False

@@ -966,6 +966,18 @@ DROP_ANCHORS_FILE = os.path.join(BASE_DIR, "drop_anchors.json")
 CONFIG_BACKUP_PATH = os.path.join(SESSION_DIR, "config_backup.py")
 
 # =============================================================================
+# ABSCHNITT 7.5: SIMULATION / TRACING
+# =============================================================================
+
+# === Exchange Tracing System ===
+# Protokolliert jeden Exchange-Call als JSONL für Replay/Testing
+EXCHANGE_TRACE_ENABLED = True              # Tracer aktivieren/deaktivieren
+EXCHANGE_TRACE_PATH = None                 # None = auto unter sessions/<id>/logs/exchange_trace.jsonl
+EXCHANGE_TRACE_ORDERBOOK_LEVELS = 10       # Top-N Bids/Asks, die mitgeloggt werden
+EXCHANGE_TRACE_SCRUB_IDS = True            # OrderIDs/ClientIDs anonymisieren (Hash)
+EXCHANGE_TRACE_MAX_ARGLEN = 2000           # sehr lange Payloads einkürzen (Sicherheit/Performance)
+
+# =============================================================================
 # ABSCHNITT 8: ERWEITERTE EINSTELLUNGEN
 # =============================================================================
 
