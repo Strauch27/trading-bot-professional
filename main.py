@@ -35,6 +35,10 @@ from config import *
 import config as config_module
 import config_lint
 from logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
+
+# --- direkt nach dem Import von config.py ---
+logger.info("CFG_SNAPSHOT: GLOBAL_TRADING=%s, ON_INSUFFICIENT_BUDGET=%s",
+            config_module.GLOBAL_TRADING, getattr(config_module, "ON_INSUFFICIENT_BUDGET", None))
 from loggingx import log_event, get_run_summary, setup_rotating_logger
 from utils import (
     SettlementManager, DustSweeper, log_initial_config
@@ -415,6 +419,14 @@ def main():
             logger.info("Bot beendet - Unzureichendes Budget",
                        extra={'event_type': 'BOT_EXIT_INSUFFICIENT_BUDGET'})
             return
+
+    # --- direkt danach ---
+    state = {
+        'has_api_keys': has_api_keys,
+        'budget_gate': portfolio.my_budget >= safe_min_budget if portfolio else False
+    }
+    logger.info("EFFECTIVE_MODE: global_trading=%s (post-gates), has_api_keys=%s, budget_gate=%s",
+                config_module.GLOBAL_TRADING, state.get('has_api_keys'), state.get('budget_gate'))
     
     # Trading Engine initialisieren und starten
     # Settings fuer Dependency Injection (robust)

@@ -183,9 +183,9 @@ MAX_PER_SYMBOL_USD = 60.0
 TRADE_TTL_MIN = 120
 
 # COOLDOWN_MIN: Wartezeit nach Verkauf bevor Coin wieder gekauft wird in MINUTEN
-# 60 = 60 Minuten Pause nach Verkauf (verhindert Overtrading)  
+# 15 = 15 Minuten Pause nach Verkauf (schnellere Re-Entries)
 # 0 = Keine Wartezeit (Coin kann sofort wieder gekauft werden)
-COOLDOWN_MIN = 30
+COOLDOWN_MIN = 15
 
 # --- 1.5 GUARDS (Qualitätsfilter) ---
 # Guards sind Sicherheitschecks die schlechte Trades verhindern
@@ -560,7 +560,7 @@ if USE_RELATIVE_TRAILING:
 
 # Breakeven: Absicherung bei Gewinnzone
 # BE_ACTIVATION_PCT: Ab wann auf Breakeven umschalten?
-# 1.0015 = Bei 100.15% vom Kaufpreis (+0.15% Gewinn)
+# None = Breakeven aus (aggressiver)
 # Stop-Loss wird dann auf Kaufpreis gesetzt (kein Verlust mehr möglich)
 BE_ACTIVATION_PCT = None
 
@@ -1011,6 +1011,7 @@ ALLOW_MARKET_FALLBACK = False
 
 # System-Konstanten (nicht ändern)
 MAX_TRADES_CONCURRENT = MAX_TRADES  # Alias
+MAX_CONCURRENT_POSITIONS = MAX_TRADES  # V11-Style Alias
 FEE_RT = FEE_RATE  # Alias
 RUN_ID = run_id  # Eindeutige Session-ID
 RUN_TIMESTAMP_UTC = run_timestamp_utc  # UTC-Zeit
