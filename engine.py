@@ -577,38 +577,18 @@ class TradingEngine:
                         md_start = time.time()
                         logger.info("📊 Updating market data...", extra={'event_type': 'MARKET_DATA_UPDATE'})
                         try:
-                            # Market data update with timeout protection
-                            try:
-                                import concurrent.futures
-                                def safe_market_update():
-                                    return self._update_market_data()
-
-                                # Import MAX_PARALLEL_UPDATES für Thread-Kontrolle
-                                try:
-                                    from config import MAX_PARALLEL_UPDATES
-                                    max_workers = MAX_PARALLEL_UPDATES
-                                except ImportError:
-                                    max_workers = 1  # Fallback: sequenziell
-
-                                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                                    future = executor.submit(safe_market_update)
-                                    future.result(timeout=10.0)  # 10 second timeout
-                                logger.info("📊 Market data updated successfully", extra={'event_type': 'MARKET_DATA_UPDATED'})
-                            except concurrent.futures.TimeoutError:
-                                logger.warning("Market data update timed out", extra={'event_type': 'MARKET_DATA_TIMEOUT'})
-                            except Exception as md_error:
-                                logger.warning(f"Market data update failed: {md_error}", extra={'event_type': 'MARKET_DATA_UPDATE_ERROR'})
+                            # Market data update - sequenziell (verhindert Windows TLS-Crashes)
+                            self._update_market_data()
+                            logger.info("📊 Market data updated successfully", extra={'event_type': 'MARKET_DATA_UPDATED'})
+                        except Exception as md_error:
+                            logger.warning(f"Market data update failed: {md_error}", extra={'event_type': 'MARKET_DATA_UPDATE_ERROR'})
+                        finally:
                             co.beat("after_update_market_data")
                             md_latency = time.time() - md_start
                             self.performance_metrics['market_data_latencies'].append(md_latency)
                             self.last_market_update = cycle_start
                             logger.info(f"📊 Market data updated in {md_latency:.3f}s", extra={'event_type': 'MARKET_DATA_UPDATED'})
                             logger.info("HEARTBEAT - Market data update completed",
-                                       extra={"event_type": "HEARTBEAT"})
-                        except Exception as e:
-                            co.beat("market_data_error")
-                            logger.error(f"Market data update failed: {e}")
-                            logger.info("HEARTBEAT - Market data update failed but handled",
                                        extra={"event_type": "HEARTBEAT"})
 
                     # 2. Process Exit Signals (every 1s)
@@ -1141,8 +1121,10 @@ class TradingEngine:
 
             # 4. Check minimums before evaluating buy signal
             if hasattr(self.exchange_adapter, 'meets_minimums'):
-                trace_step("check_minimum_sizing", symbol=symbol, position_size=getattr(config, 'POSITION_SIZE_USDT', 15.0))
-                sizing_ok, why = self.exchange_adapter.meets_minimums(symbol, current_price, getattr(config, 'POSITION_SIZE_USDT', 15.0))
+                # Import current POSITION_SIZE_USDT value
+                from config import POSITION_SIZE_USDT
+                trace_step("check_minimum_sizing", symbol=symbol, position_size=POSITION_SIZE_USDT)
+                sizing_ok, why = self.exchange_adapter.meets_minimums(symbol, current_price, POSITION_SIZE_USDT)
                 if not sizing_ok:
                     trace_step("sizing_failed", symbol=symbol, reason=why)
                     logger.info(f"[SIZING_BLOCK] {symbol} blocked: {why}")

@@ -89,11 +89,37 @@ def setup_exchange():
         log_event("API_KEYS_MISSING", message="API_KEY oder API_SECRET nicht in Umgebungsvariablen gefunden. Bot startet im Observe-Modus.", level="ERROR")
         return None, False
     
+    # Konservative requests Session für TLS-Stabilität (verhindert Windows crashes)
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(['GET', 'POST'])
+    )
+
+    # Konservatives Connection-Pooling (verhindert TLS-Race-Conditions)
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=1,  # Nur 1 Connection-Pool
+        pool_maxsize=1       # Max 1 Connection pro Pool
+    )
+
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+
     exchange = ccxt.mexc({
         'apiKey': api_key,
         'secret': api_secret,
         'enableRateLimit': True,
         'timeout': 30000,  # 30 Sekunden Timeout
+        'session': session,  # Verwende gemeinsame Session
         'options': {
             'adjustForTimeDifference': True,
             'recvWindow': 30000,  # 30s Toleranz (erhöht von 10s)
@@ -392,15 +418,28 @@ def main():
                             return
                         time.sleep(1)
 
-                    # Preise für Dust-Bewertung holen
+                    # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
-                        # Verwende fetch_tickers für aktuelle Preise
-                        tickers = exchange.fetch_tickers()
-                        prices = {symbol: float(ticker.get('last', 0))
-                                 for symbol, ticker in tickers.items()
-                                 if ticker and ticker.get('last')}
+                        from services.market_data import fetch_ticker_cached
+                        from config import SYMBOLS
 
-                        logger.debug(f"Dust-Sweep: {len(prices)} Preise geladen",
+                        # Nur aktive Symbole, max 50 pro Sweep-Zyklus
+                        symbols = list(SYMBOLS[:50]) if hasattr(config, 'SYMBOLS') else []
+                        prices = {}
+
+                        for symbol in symbols:
+                            try:
+                                # fetch_ticker_cached() statt frischem HTTP
+                                ticker = fetch_ticker_cached(exchange, symbol)
+                                if ticker and ticker.get('last'):
+                                    prices[symbol] = float(ticker.get('last'))
+                                # Drosseln: 200ms zwischen Calls
+                                time.sleep(0.2)
+                            except Exception as e:
+                                logger.debug(f"Dust-Sweep: Ticker für {symbol} fehlgeschlagen: {e}")
+                                continue
+
+                        logger.debug(f"Dust-Sweep: {len(prices)} Preise geladen (gedrosselt)",
                                    extra={'event_type': 'DUST_SWEEP_PRICES_LOADED', 'count': len(prices)})
 
                         # Dust-Sweep ausführen

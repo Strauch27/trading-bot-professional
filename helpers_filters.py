@@ -41,6 +41,7 @@ def _floor_to_step(qty: float, step: float) -> float:
 def size_buy_from_quote(quote_budget, best_ask, tickSize, stepSize, minNotional):
     """
     Robuste BUY-Order-Sizing aus Quote-Budget mit fail-safe Logik.
+    Enthält V9_3-style dynamisches Min-Notional-Sizing mit Puffer.
 
     Args:
         quote_budget: Verfügbares Quote-Budget
@@ -52,23 +53,33 @@ def size_buy_from_quote(quote_budget, best_ask, tickSize, stepSize, minNotional)
     Returns:
         (price, qty, notional, audit): Order-Parameter mit Audit-Trail
     """
+    # Dynamic Min-Notional sizing (wie V9_3) - 2% Puffer über Mindestnotional
+    buffer = 1.02
+    required_notional = max(quote_budget, minNotional * buffer)
+
     px = round_price_to_tick(best_ask, tickSize)
-    qty = _ceil_to_step(quote_budget / px, stepSize)
+    # Guard gegen 0-Preis
+    if px <= 0:
+        px = max(best_ask or 0.0, tickSize) or 1e-9
+
+    # Robuste Größenberechnung mit required_notional
+    raw_qty = required_notional / max(px, 1e-12)
+    qty = _ceil_to_step(raw_qty, stepSize)
     if qty <= 0:
         qty = stepSize  # nie 0
-    notion = px * qty
-    if notion < minNotional:
-        # hebe Menge an bis minNotional
-        qty = _ceil_to_step(minNotional / px, stepSize)
-        notion = px * qty
+    notional = px * qty
 
     audit = {
-        "sizing": "ceiling",
+        "sizing": "dynamic_min_notional",
+        "buffer": buffer,
+        "required_notional": required_notional,
+        "original_quote_budget": quote_budget,
         "minNotional": minNotional,
         "tickSize": tickSize,
-        "stepSize": stepSize
+        "stepSize": stepSize,
+        "price_adjusted": px != best_ask
     }
-    return px, qty, notion, audit
+    return px, qty, notional, audit
 
 def size_sell_from_base(base_qty_available: float, best_ask: float, f: ExchangeFilters) -> Tuple[float, float, float, dict]:
     """

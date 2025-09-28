@@ -511,6 +511,6 @@ def fetch_ticker_with_retry(exchange_or_provider, symbol: str, retries: int = 3,
         except Exception as e:
             if attempt == retries - 1:
                 raise e
-            time.sleep(base_sleep * (2 ** attempt))
+            time.sleep(min(1.0, base_sleep * (2 ** attempt)))
 
     return exchange_or_provider.fetch_ticker(symbol)

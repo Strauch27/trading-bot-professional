@@ -952,11 +952,14 @@ def full_portfolio_reset(exchange, settlement_manager):
         # Limits und Min-Order-Value prüfen (nur wenn wir einen Preis haben)
         limits = markets[symbol].get('limits', {})
         
-        # Amount-Präzision anwenden
-        amount_precision = (limits.get('amount') or {}).get('precision')
-        if amount_precision:
-            step = 10 ** (-amount_precision)
-            qty = floor_to_step(qty, step)
+        # Amount-Präzision anwenden (V9_3-style: richtige Tick/Step-Interpretation)
+        market_info = markets[symbol]
+        if market_info:
+            from helpers_filters import create_filters_from_market
+            f = create_filters_from_market(market_info)
+            # Floor für SELL-Orders (Inventar-begrenzt)
+            from helpers_filters import _floor_to_step
+            qty = _floor_to_step(qty, f.stepSize)
         
         # Dust-Check mit robuster Limits-Prüfung
         if price > 0:

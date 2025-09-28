@@ -600,7 +600,8 @@ MAX_HISTORY_LEN = 1440
 # DUST_SWEEP_ENABLED: Dust-Bereinigung aktivieren?
 # True = Verkaufe automatisch kleine Coin-Reste
 # False = Lasse kleine Reste liegen
-DUST_SWEEP_ENABLED = True
+# TEMPORÄR DEAKTIVIERT: Verhindert Windows TLS-Crashes durch fetch_tickers() Flut
+DUST_SWEEP_ENABLED = False
 
 # DUST_SWEEP_INTERVAL_MIN: Prüfintervall für Dust
 # 30 = Prüfe alle 30 Minuten auf Dust
@@ -1021,7 +1022,7 @@ ENABLE_TELEGRAM_COMMANDS = True        # TelegramCommands an
 ENABLE_HEARTBEAT_TELEMETRY = False     # HeartbeatTelemetry bleibt aus (nicht verwendet)
 
 # --- Concurrency-Limits (TLS-Stabilität) ---
-MAX_PARALLEL_UPDATES = 4               # Begrenzt gleichzeitige Market-Updates (konservativ)
+MAX_PARALLEL_UPDATES = 1               # Windows + TLS mögen kein Thread-Gewitter
 HTTP_SLOTS_LIMIT = 6                   # Max gleichzeitige TLS-Handshakes
 
 # =============================================================================

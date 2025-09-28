@@ -234,10 +234,19 @@ class ExchangeAdapterRobust(ExchangeInterface):
         return self._safe_ccxt_call(self.x.load_markets, reload)
 
     def amount_to_precision(self, symbol: str, amount: float) -> Union[str, float]:
-        return self.x.amount_to_precision(symbol, amount)
+        # delegiert an CCXT; liefert String → in Float umwandeln für weitere Berechnung
+        v = self.x.amount_to_precision(symbol, amount)
+        try:
+            return float(v)
+        except Exception:
+            return float(str(v))
 
     def price_to_precision(self, symbol: str, price: float) -> Union[str, float]:
-        return self.x.price_to_precision(symbol, price)
+        v = self.x.price_to_precision(symbol, price)
+        try:
+            return float(v)
+        except Exception:
+            return float(str(v))
 
 
 class ExchangeAdapter(ExchangeInterface):
@@ -623,11 +632,20 @@ class ExchangeAdapter(ExchangeInterface):
 
     def amount_to_precision(self, symbol: str, amount: float) -> Union[str, float]:
         """Converts amount to exchange precision"""
-        return self.exchange.amount_to_precision(symbol, amount)
+        # delegiert an CCXT; liefert String → in Float umwandeln für weitere Berechnung
+        v = self.exchange.amount_to_precision(symbol, amount)
+        try:
+            return float(v)
+        except Exception:
+            return float(str(v))
 
     def price_to_precision(self, symbol: str, price: float) -> Union[str, float]:
         """Converts price to exchange precision"""
-        return self.exchange.price_to_precision(symbol, price)
+        v = self.exchange.price_to_precision(symbol, price)
+        try:
+            return float(v)
+        except Exception:
+            return float(str(v))
 
     def get_market_info(self, symbol: str) -> Dict[str, Any]:
         """Gets market information for symbol"""
@@ -654,27 +672,31 @@ class ExchangeAdapter(ExchangeInterface):
 
             # Preis validieren; bei <=0 auf Orderbuch zurückfallen
             p = float(price or 0.0)
+            best_ask = p  # Default: use ticker price as ask
             if p <= 0:
                 try:
                     book = self.fetch_order_book(symbol, limit=5) or {}
                     best_bid = float((book.get("bids") or [[0,0]])[0][0])
                     best_ask = float((book.get("asks") or [[0,0]])[0][0])
-                    # konservativ: Kaufgrößen am BID bemessen
-                    p = best_bid if best_bid > 0 else best_ask
+                    # für BUY: nutze ASK-Preis
+                    p = best_ask if best_ask > 0 else best_bid
+                    best_ask = p
                 except Exception:
                     p = 0.0
+                    best_ask = 0.0
 
             if p <= 0:
                 return False, "price_zero_or_negative"
 
-            # robuste Größenberechnung
-            _, qty, notional, audit = size_buy_from_quote(quote_amt, p, f.tickSize, f.stepSize, f.minNotional)
+            # robuste Größenberechnung: BUY basiert auf ASK-Preis
+            _, qty, notional, audit = size_buy_from_quote(quote_amt, best_ask, f.tickSize, f.stepSize, f.minNotional)
 
             if qty <= 0:
                 logger.warning(f"Robust sizing resulted in zero qty for {symbol}", extra={'audit': audit})
                 return False, "qty_rounded_to_zero_after_robust_sizing"
 
-            if notional > quote_amt * 1.01:
+            # Prüfe Budget-Überschreitung mit 5% Toleranz (wie V9_3)
+            if notional > quote_amt * 1.05:
                 return False, f"insufficient_budget_after_sizing:{notional:.2f}>{quote_amt:.2f}"
 
             return True, "ok"

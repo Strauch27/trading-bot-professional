@@ -25,6 +25,49 @@ from loggingx import (
 import itertools
 import re
 
+# Self-Check für Min-Notional-Warnungen (V9_3-style)
+def log_min_notional_warnings(exchange, symbols, position_size_usdt, buffer=1.02):
+    """
+    Prüft alle Symbole gegen POSITION_SIZE_USDT und warnt bei knappen Notional-Limits.
+
+    Args:
+        exchange: Exchange-Adapter mit markets
+        symbols: Liste der zu prüfenden Symbole
+        position_size_usdt: Konfigurierte Position-Size
+        buffer: Puffer-Faktor für minNotional (default 2%)
+    """
+    warnings = []
+    for s in symbols:
+        try:
+            m = exchange.get_market_info(s)
+            if not m:
+                continue
+            limits = (m.get("limits") or {}).get("cost") or {}
+            min_cost = float(limits.get("min") or 0.0)
+            if min_cost > 0:
+                need = max(min_cost * buffer, position_size_usdt)
+                if position_size_usdt + 1e-9 < min_cost * buffer:
+                    warning_msg = f"[WARN] {s}: POSITION_SIZE_USDT ({position_size_usdt}) < minNotional*{buffer:.2f} ({need:.2f})"
+                    print(warning_msg)
+                    logger.warning(warning_msg, extra={
+                        'event_type': 'MIN_NOTIONAL_WARNING',
+                        'symbol': s,
+                        'position_size_usdt': position_size_usdt,
+                        'min_notional': min_cost,
+                        'buffer': buffer,
+                        'required': need
+                    })
+                    warnings.append({'symbol': s, 'current': position_size_usdt, 'required': need})
+        except Exception as e:
+            logger.error(f"Error checking min notional for {s}: {e}")
+
+    if warnings:
+        logger.info(f"Min-Notional check completed: {len(warnings)} warnings found")
+    else:
+        logger.info("Min-Notional check completed: All symbols OK")
+
+    return warnings
+
 # =================================================================================
 # Client Order ID Generator
 # =================================================================================

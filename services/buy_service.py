@@ -43,10 +43,19 @@ class BuyService:
 
     def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict[str, Any]]:
         coid = next_client_order_id(symbol, "BUY")
-        price_q = quantize_price(symbol, price, self.exchange)
+        # CCXT quantization for both price and amount (like V9_3)
+        price_q = float(self.exchange.price_to_precision(symbol, price))
+        qty_q = float(self.exchange.amount_to_precision(symbol, qty))
+
+        # Sicherheitsnetz nach der Quantisierung
+        if qty_q <= 0 or price_q <= 0:
+            log_event("BUY_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
+                     message=f"quantized qty/price invalid: qty={qty_q}, price={price_q}")
+            return None
+
         try:
             order = self.exchange.create_limit_order(
-                symbol, "buy", qty, price_q, "IOC", coid, False
+                symbol, "buy", qty_q, price_q, "IOC", coid, False
             )
             return order
         except Exception as e:
@@ -101,6 +110,15 @@ class BuyService:
         placed_any = False
 
         for idx, (px, step_config) in enumerate(price_tiers, start=1):
+            # Frischen Ticker für jede Ladder-Stufe holen (verhindert stale prices)
+            if idx > 1:  # Erste Stufe nutzt schon den aktuellen Ticker
+                fresh_ticker = fetch_ticker_cached(self.exchange, symbol)
+                fresh_ask = float(fresh_ticker.get("ask") or ask)  # Fallback auf originalen ask
+                if fresh_ask > 0:
+                    # Preis-Tier basierend auf frischem Ask neu berechnen
+                    premium_bps = step_config.get("premium_bps", 0)
+                    px = fresh_ask * (1 + premium_bps / 10_000.0)
+
             # Sizing: wie viel können wir uns bei diesem Limit leisten?
             qty, est_cost, min_required, sizing_reason = self.sizing.affordable_buy_qty(symbol, px, plan.quote_usdt)
             report_buy_sizing(symbol, {

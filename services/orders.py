@@ -65,11 +65,19 @@ class OrderService:
         """
         with self._lock:
             try:
+                # CCXT quantization before order (like V9_3)
+                qty = self.exchange.amount_to_precision(symbol, amount)
+                px = self.exchange.price_to_precision(symbol, price)
+
+                # Sicherheitsnetz nach der Quantisierung
+                if qty <= 0 or px <= 0:
+                    raise ValueError(f"quantized qty/price invalid: qty={qty}, px={px}")
+
                 order = self.exchange.create_limit_order(
                     symbol=symbol,
                     side=side,
-                    amount=amount,
-                    price=price,
+                    amount=qty,
+                    price=px,
                     time_in_force="IOC",
                     client_order_id=client_order_id,
                     post_only=False
@@ -134,10 +142,17 @@ class OrderService:
         """
         with self._lock:
             try:
+                # CCXT quantization before order (like V9_3)
+                qty = self.exchange.amount_to_precision(symbol, amount)
+
+                # Sicherheitsnetz nach der Quantisierung
+                if qty <= 0:
+                    raise ValueError(f"quantized qty invalid: qty={qty}")
+
                 order = self.exchange.create_market_order(
                     symbol=symbol,
                     side=side,
-                    amount=amount,
+                    amount=qty,
                     time_in_force="IOC",
                     client_order_id=client_order_id
                 )
@@ -203,11 +218,19 @@ class OrderService:
         """
         with self._lock:
             try:
+                # CCXT quantization before order (like V9_3)
+                qty = self.exchange.amount_to_precision(symbol, amount)
+                px = self.exchange.price_to_precision(symbol, price)
+
+                # Sicherheitsnetz nach der Quantisierung
+                if qty <= 0 or px <= 0:
+                    raise ValueError(f"quantized qty/price invalid: qty={qty}, px={px}")
+
                 order = self.exchange.create_limit_order(
                     symbol=symbol,
                     side=side,
-                    amount=amount,
-                    price=price,
+                    amount=qty,
+                    price=px,
                     time_in_force="GTC",
                     client_order_id=client_order_id,
                     post_only=post_only
