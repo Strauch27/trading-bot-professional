@@ -60,22 +60,22 @@ GLOBAL_TRADING = True
 # TAKE_PROFIT_THRESHOLD: Gewinnziel
 # 1.018 = 101.8% vom Kaufpreis = +1.8% Gewinn
 # Beispiel: Gekauft bei 100€ → Verkauf bei 101.80€
-TAKE_PROFIT_THRESHOLD = 1.0060  # +0.6% Take Profit
+TAKE_PROFIT_THRESHOLD = 1.0030  # +0.3% Take Profit (eng für Testzwecke)
 
 # STOP_LOSS_THRESHOLD: Maximaler akzeptierter Verlust
 # 0.985 = 98.5% vom Kaufpreis = -1.5% Verlust
 # Beispiel: Gekauft bei 100€ → Verkauf spätestens bei 98.50€
-STOP_LOSS_THRESHOLD = 0.9900  # -1.0% Stop Loss
+STOP_LOSS_THRESHOLD = 0.9980  # -0.2% Stop Loss (eng für Testzwecke)
 
 # SWITCH_TO_SL_THRESHOLD: Umschaltpunkt der Exit-Strategie
 # 0.992 = 99.2% vom Kaufpreis = -0.8% Verlust
 # Wenn Preis unter diesen Wert fällt, fokussiert Bot auf Stop-Loss statt Take-Profit
-SWITCH_TO_SL_THRESHOLD = 0.992
+SWITCH_TO_SL_THRESHOLD = 0.999  # bei -0.1% auf SL umschalten (eng für Testzwecke)
 
 # SWITCH_TO_TP_THRESHOLD: Rück-Umschaltpunkt zu Take-Profit
 # 1.0050 = 100.50% vom Kaufpreis = +0.50% Gewinn
 # Wenn Preis wieder über diesen Wert steigt, wechselt Bot zurück zu Take-Profit
-SWITCH_TO_TP_THRESHOLD = 1.0050
+SWITCH_TO_TP_THRESHOLD = 1.0020  # bei +0.2% zurück zu TP (eng für Testzwecke)
 
 # SWITCH_COOLDOWN_S: Minimale Wartezeit zwischen Umschaltungen
 # 20 = Warte mindestens 20 Sekunden zwischen TP/SL Wechseln
@@ -111,7 +111,7 @@ ATR_MIN_SAMPLES = 15
 # 0.995 = 99.5% vom Hochpunkt = -0.5% Preisrückgang
 # Beispiel: Coin war bei 100€ (Hoch) → Bot kauft wenn Preis auf 99.50€ fällt
 # Kleinerer Wert = größerer Rückgang nötig (0.99 = -1%, 0.995 = -0.5%)
-DROP_TRIGGER_VALUE = 0.985  # -1.5% Drop
+DROP_TRIGGER_VALUE = 0.995  # -0.5% Drop (für Testzwecke)
 
 # --- V9_3 STYLE: Trigger, Lookback, Mode ---
 LOOKBACK_S = 300           # 5m Anchor-Fenster
@@ -192,26 +192,19 @@ COOLDOWN_MIN = 15
 # ⚠️ ACHTUNG: Zu strikte Guards können ALLE Trades blockieren!
 
 # SMA Guard: Simple Moving Average - Trendfilter
-# USE_SMA_GUARD: Soll der SMA-Filter aktiviert werden?
-# False = Filter aus (mehr Trades, auch gegen den Trend)
-# True = Filter an (nur Trades in Trendrichtung)
+# TEST: komplett deaktiviert
 USE_SMA_GUARD = False
+# (Ratio bleibt ohne Wirkung, weil Guard off)
+SMA_GUARD_MIN_RATIO = 0.992
 
 # SMA_GUARD_WINDOW: Zeitraum für Durchschnittsberechnung
 # 50 = Durchschnitt der letzten 50 Kerzen (50 Minuten bei 1-Min-Kerzen)
 # Größerer Wert = langsamerer, stabilerer Trend
 SMA_GUARD_WINDOW = 50
 
-# SMA_GUARD_MIN_RATIO: Wie nah darf Preis am SMA sein?
-# 0.996 = Preis muss mindestens 99.6% des SMA sein (max -0.4% darunter)
-# Bei 1.0 würde NIE gekauft (Preis ist immer etwas unter/über SMA)
-SMA_GUARD_MIN_RATIO = 0.992
-
 # Volume Guard: Handelsvolumen-Filter (Liquidität)
-# USE_VOLUME_GUARD: Soll Volumen geprüft werden?
-# False = Filter aus (auch Trades bei niedrigem Volumen)
-# True = Filter an (nur Trades bei ausreichendem Volumen)
-USE_VOLUME_GUARD = True
+# TEST: komplett deaktiviert
+USE_VOLUME_GUARD = False
 
 # VOLUME_GUARD_WINDOW: Zeitraum für Volumen-Durchschnitt
 # 15 = Durchschnitt der letzten 15 Minuten
@@ -224,24 +217,20 @@ VOLUME_GUARD_FACTOR = 1.020
 
 # MIN_24HUSD_VOLUME: Mindest-24h-Volumen in USDT
 # 150000 = Mindestens 150.000 USDT Handelsvolumen in 24h (reduzierte Volumenhürde)
-MIN_24HUSD_VOLUME = 150000
+MIN_24HUSD_VOLUME = 150000        # ignoriert, weil Guard off
 
 # Spread Guard: Prüft Differenz zwischen Kauf- und Verkaufspreis
-# USE_SPREAD_GUARD: Spread-Filter aktivieren?
-# False = Ignoriere Spread (kann teuer werden bei illiquiden Coins)
-# True = Blockiere Trades mit zu hohem Spread
-USE_SPREAD_GUARD = True
+# TEST: komplett deaktiviert
+USE_SPREAD_GUARD = False
 
 # GUARD_MAX_SPREAD_BPS: Maximaler erlaubter Spread
 # 25 = Maximal 25 Basispunkte = 0.25% Differenz
 # Beispiel: Bid=99.75€, Ask=100€ → Spread=0.25% → Trade erlaubt
 # bps = Basispunkte (1 bps = 0.01%)
-GUARD_MAX_SPREAD_BPS = 35
+GUARD_MAX_SPREAD_BPS = 35               # ignoriert, weil Guard off
 
 # Volatilitäts-Guard: Prüft ob genug Preisbewegung vorhanden ist
-# USE_VOL_SIGMA_GUARD: Volatilitäts-Filter aktivieren?
-# False = Kaufe auch bei ruhigen Märkten
-# True = Kaufe nur bei ausreichender Volatilität (Bewegung)
+# TEST: komplett deaktiviert
 USE_VOL_SIGMA_GUARD = False
 
 # VOL_SIGMA_WINDOW: Zeitraum für Volatilitätsmessung
@@ -258,20 +247,15 @@ REQUIRE_VOL_SIGMA_BPS_MIN = 10
 # ⚠️ ACHTUNG: Diese Filter können bei Bärenmärkten ALLE Trades verhindern!
 
 # Bitcoin-Filter: Bitcoin als Markt-Indikator
-# USE_BTC_FILTER: Soll Bitcoin-Trend geprüft werden?
-# False = Ignoriere Bitcoin (trade unabhängig vom BTC-Kurs)
-# True = Keine Käufe wenn Bitcoin fällt (BTC = Marktführer)
+# TEST: komplett deaktiviert
 USE_BTC_FILTER = False
 
 # BTC_CHANGE_THRESHOLD: Wie stark darf BTC fallen?
-# 0.9900 = BTC muss mindestens bei 99.00% stehen (-1.0% ist OK)
-# Wenn BTC mehr als -1.0% gefallen ist → keine neuen Käufe
-BTC_CHANGE_THRESHOLD = 0.99
+# TEST: auf None gesetzt für komplette Deaktivierung
+BTC_CHANGE_THRESHOLD = None    # None/0.0 ⇒ deaktiviert
 
 # Falling-Coins-Filter: Prüft wie viele Coins fallen
-# USE_FALLING_COINS_FILTER: Marktbreite prüfen?
-# True = Blockiere Käufe wenn zu viele Coins fallen (Bärenmarkt-Schutz)
-# False = Kaufe auch wenn Gesamtmarkt fällt
+# TEST: komplett deaktiviert
 USE_FALLING_COINS_FILTER = False
 
 # FALLING_COINS_THRESHOLD: Wie viele Coins dürfen maximal fallen?
@@ -279,13 +263,21 @@ USE_FALLING_COINS_FILTER = False
 # Wenn mehr als 55% fallen → Markt zu schwach → keine Käufe
 FALLING_COINS_THRESHOLD = 0.55
 
+# BTC-Trend-Guard vollständig aus:
+# Falls dein Code ein Flag hat:
+try:
+    USE_BTC_TREND_GUARD
+except NameError:
+    USE_BTC_TREND_GUARD = False
+else:
+    USE_BTC_TREND_GUARD = False
+
 # --- 1.7 MACHINE LEARNING ---
 # KI-basierte Trade-Vorhersage (Fortgeschritten)
 # ⚠️ ACHTUNG: USE_ML_GATEKEEPER = True ohne trainierte Modelle blockiert ALLE Trades!
 
 # USE_ML_GATEKEEPER: Soll KI-Modell Trades genehmigen?
-# False = Keine KI-Prüfung (regelbasiertes Trading)
-# True = KI muss jeden Trade bestätigen (benötigt trainierte Modelle!)
+# TEST: sicherheitshalber aus, damit nichts blockiert
 USE_ML_GATEKEEPER = False
 
 # ML_BUY_THRESHOLD: Mindest-Konfidenz der KI für Kauf
@@ -474,12 +466,12 @@ USE_TRAILING_STOP = True
 # TRAILING_STOP_ACTIVATION_PCT: Ab wann aktiviert sich der Trailing Stop?
 # 1.0010 = Aktiviere wenn Preis 100.1% vom Kaufpreis erreicht (+0.1% Gewinn)
 # Erst wenn dieser Gewinn erreicht ist, beginnt der Stop nachzulaufen
-TRAILING_STOP_ACTIVATION_PCT = 1.003
+TRAILING_STOP_ACTIVATION_PCT = 1.001  # bei +0.1% aktivieren (eng für Testzwecke)
 
 # TRAILING_STOP_DISTANCE_PCT: Abstand des Stops vom Höchstpreis
 # 0.9980 = Stop liegt bei 99.80% vom erreichten Hoch (-0.20%)
 # Beispiel: Hoch bei 101€ → Stop bei 100.80€
-TRAILING_STOP_DISTANCE_PCT = 0.997
+TRAILING_STOP_DISTANCE_PCT = 0.999  # nur 0.1% Abstand (eng für Testzwecke)
 
 # Trailing Take Profit: Nachlaufende Gewinnmitnahme
 # USE_TRAILING_TP: Aktiviere nachlaufende Gewinnmitnahme?

@@ -661,6 +661,16 @@ def main():
 
         logger.info("Trading-Engine gestartet", extra={'event_type': 'ENGINE_START'})
 
+        # Guards-Status für TEST-Patch anzeigen
+        logger.info("GUARDS_OFF_TEST: sma=%s spread=%s volume=%s sigma=%s falling=%s btc_flag=%s btc_thr=%s",
+                    getattr(config, 'USE_SMA_GUARD', None),
+                    getattr(config, 'USE_SPREAD_GUARD', None),
+                    getattr(config, 'USE_VOLUME_GUARD', None),
+                    getattr(config, 'USE_VOL_SIGMA_GUARD', None),
+                    getattr(config, 'USE_FALLING_COINS_FILTER', None),
+                    getattr(config, 'USE_BTC_TREND_GUARD', None),
+                    getattr(config, 'BTC_CHANGE_THRESHOLD', None))
+
         # Register additional cleanup callbacks
         shutdown_coordinator.add_cleanup_callback(lambda: logger.info("Pre-shutdown log flush"))
 
