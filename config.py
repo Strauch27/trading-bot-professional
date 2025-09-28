@@ -134,7 +134,7 @@ USE_ROBUST_MARKET_FETCH = True
 # Mode 3: Der höhere Wert aus Mode 1 und 2 (Kombination)
 # Mode 4: Wie Mode 1, aber Reset nach jedem abgeschlossenen Trade (empfohlen)
 # Empfehlung: Mode 2 für Rolling-High (frische Marktstruktur)
-DROP_TRIGGER_MODE = 2        # Rolling High als Referenz
+DROP_TRIGGER_MODE = 1        # Rolling High als Referenz
 
 # DROP_TRIGGER_LOOKBACK_MIN: Zeitfenster für Mode 2/3
 # 5 = Betrachte die letzten 5 Minuten für Hochpunkt-Suche (Minimum)
@@ -165,7 +165,7 @@ MAX_TRADES = 3
 # POSITION_SIZE_USDT: Wie viel USDT pro Kauf einsetzen
 # 25.0 = Jeder Kauf verwendet 25 USDT (ca. 25 Dollar)
 # Bei MAX_TRADES=3 → Maximales Risiko = 3 × 25 = 75 USDT
-POSITION_SIZE_USDT = 15.0
+POSITION_SIZE_USDT = 16.0
 
 # --- Auto-Upsize bei knapper Rundung (MinNotional) ---
 ALLOW_AUTO_SIZE_UP = True          # darf die Menge leicht erhöht werden?
