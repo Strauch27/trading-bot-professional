@@ -673,6 +673,15 @@ def main():
             getattr(config_module, 'BTC_CHANGE_THRESHOLD', None)
         )
 
+        # Explizite Mode-Unterscheidung für Klarheit
+        logger.info(
+            "ENTRY_MODES: impulse_MODE=%s, DROP_TRIGGER_MODE=%s, LOOKBACK_S=%s, DROP_TRIGGER_LOOKBACK_MIN=%s",
+            config_module.MODE,
+            config_module.DROP_TRIGGER_MODE,
+            config_module.LOOKBACK_S,
+            config_module.DROP_TRIGGER_LOOKBACK_MIN
+        )
+
         # Register additional cleanup callbacks
         shutdown_coordinator.add_cleanup_callback(lambda: logger.info("Pre-shutdown log flush"))
 

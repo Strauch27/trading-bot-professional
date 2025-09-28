@@ -114,8 +114,8 @@ ATR_MIN_SAMPLES = 15
 DROP_TRIGGER_VALUE = 0.995  # -0.5% Drop (für Testzwecke)
 
 # --- V9_3 STYLE: Trigger, Lookback, Mode ---
-LOOKBACK_S = 300           # 5m Anchor-Fenster
-MODE = 2                   # Impulsmodus
+LOOKBACK_S = 300             # 5m Impulsfenster (ok)
+MODE = 2                     # Impulsmodus (ok)
 
 # Stabilisierung / Entprellen (V9_3 aggressiver, aber kontrolliert)
 CONFIRM_TICKS = 0          # sofort scharf (aggressiver)
@@ -128,18 +128,18 @@ USE_IOC_FOR_MODE2 = True
 # --- Marktdaten: robustes Orderbuch statt Basic-Fetch ---
 USE_ROBUST_MARKET_FETCH = True
 
-# DROP_TRIGGER_MODE: Welcher Hochpunkt wird als Referenz verwendet?
+# DROP_TRIGGER_MODE: Referenzhoch für den Drop-Trigger
 # Mode 1: Höchster Preis seit Bot-Start (einfach, aber kann veralten)
 # Mode 2: Höchster Preis der letzten X Minuten (dynamisch, kurzsichtig)
 # Mode 3: Der höhere Wert aus Mode 1 und 2 (Kombination)
 # Mode 4: Wie Mode 1, aber Reset nach jedem abgeschlossenen Trade (empfohlen)
 # Empfehlung: Mode 2 für Rolling-High (frische Marktstruktur)
-DROP_TRIGGER_MODE = 4
+DROP_TRIGGER_MODE = 2        # Rolling High als Referenz
 
-# DROP_TRIGGER_LOOKBACK_MIN: Zeitfenster für Mode 2 und 3
+# DROP_TRIGGER_LOOKBACK_MIN: Zeitfenster für Mode 2/3
 # 5 = Betrachte die letzten 5 Minuten für Hochpunkt-Suche (Minimum)
 # Größerer Wert = längerer Rückblick (träger, aber stabiler)
-DROP_TRIGGER_LOOKBACK_MIN = 60
+DROP_TRIGGER_LOOKBACK_MIN = 10
 
 # Drop Anchor System: Speichert Hochpunkte dauerhaft (überlebt Bot-Neustarts)
 
@@ -964,13 +964,59 @@ EXCHANGE_TRACE_SCRUB_IDS = True            # OrderIDs/ClientIDs anonymisieren (H
 EXCHANGE_TRACE_MAX_ARGLEN = 2000           # sehr lange Payloads einkürzen (Sicherheit/Performance)
 
 # =============================================================================
-# ABSCHNITT 8: ERWEITERTE EINSTELLUNGEN
+# TEST-SETTINGS (OVERRIDES)
 # =============================================================================
 
-# ALLOW_DUPLICATE_COINS: Mehrfach-Käufe erlauben?
-# False = Jeder Coin nur einmal im Portfolio
-# True = Erlaube mehrere Positionen pro Coin
-ALLOW_DUPLICATE_COINS = False
+# --- Positionsgröße & Slot-Deckel ---
+POSITION_SIZE_USDT = 16          # >=16 USDT → oberhalb üblicher Min-Notional-Grenzen
+MAX_TRADES = 3                    # Deckel auf 3 gleichzeitige Trades (für 2 → 2 setzen)
+COOLDOWN_MIN = 0                  # kein Cooldown für schnelle Tests
+ALLOW_DUPLICATE_COINS = False     # keine doppelten Positionen im selben Symbol
+
+# --- Drop-Trigger (Entry) → viele Signale, aber kontrolliert ---
+DROP_TRIGGER_VALUE = 0.997        # ≈ -0.3% unter Referenzhoch (aggressiv)
+DROP_TRIGGER_MODE = 2             # Rolling High als Referenz
+DROP_TRIGGER_LOOKBACK_MIN = 10    # kurzes Fenster → reaktiv
+
+# --- Impuls-/Signallogik (Timing) ---
+MODE = 2                          # Rolling-Impulse + IOC
+LOOKBACK_S = 180                  # 3 Minuten Impulsfenster → reaktiver als 5m
+DEBOUNCE_S = 1                    # minimale Entprellung → mehr Auslösungen
+CONFIRM_TICKS = 0                 # keine zusätzliche Bestätigung
+HYSTERESIS_BPS = 0                # kein Puffer um die Schwelle
+USE_IOC_FOR_MODE2 = True          # sofort füllen oder verwerfen
+
+# --- Exits (schnelles Rein/Raus im Test) ---
+TAKE_PROFIT_THRESHOLD = 1.003     # +0.3% Take Profit
+STOP_LOSS_THRESHOLD = 0.998       # -0.2% Stop Loss
+
+# --- Guards (für Test KOMPLETT AUS) ---
+USE_SMA_GUARD = False
+SMA_GUARD_MIN_RATIO = 0.994       # ohne Wirkung, Guard aus
+USE_SPREAD_GUARD = False
+GUARD_MAX_SPREAD_BPS = 35         # ohne Wirkung, Guard aus
+USE_VOLUME_GUARD = False
+MIN_24HUSD_VOLUME = 150000        # ohne Wirkung, Guard aus
+USE_VOL_SIGMA_GUARD = False
+USE_FALLING_COINS_FILTER = False
+USE_BTC_TREND_GUARD = False
+BTC_CHANGE_THRESHOLD = None
+USE_ML_GATEKEEPER = False
+
+# --- Sichtbarkeit im Heartbeat / Debug ---
+TOP_DROPS_WITHIN_BPS_OF_TRIGGER = 300   # zeigt Kandidaten bis 3.00 pp vom Trigger
+
+# --- Exchange Tracer (für Analyse) ---
+EXCHANGE_TRACE_ENABLED = True
+EXCHANGE_TRACE_PATH = None              # None = Session-Ordner
+EXCHANGE_TRACE_ORDERBOOK_LEVELS = 10
+EXCHANGE_TRACE_SCRUB_IDS = True
+EXCHANGE_TRACE_MAX_ARGLEN = 2000
+
+# =============================================================================
+# ABSCHNITT 8: ERWEITERTE EINSTELLUNGEN
+# =============================================================================
+# (ALLOW_DUPLICATE_COINS bereits in TEST-SETTINGS überschrieben)
 
 # TICKER_THREADPOOL_SIZE: Anzahl paralleler Preis-Abrufe
 # 6 = Nutze 6 Threads für schnellere API-Abfragen
@@ -1244,9 +1290,9 @@ verbose_guard_logs = VERBOSE_GUARD_LOGS
 ENABLE_TOP_DROPS_TICKER = True        # Ein/Aus
 TOP_DROPS_INTERVAL_S = 60             # Intervall in Sekunden
 TOP_DROPS_LIMIT = 10                  # Anzahl Einträge in der Liste
-# Optionaler Fokus: Nur Coins, die "nahe" am Trigger sind. 200 bps = 2.00 Prozentpunkte Restweg.
-# 0 = Filter aus (zeige alle)
-TOP_DROPS_WITHIN_BPS_OF_TRIGGER = 0
+# Ticker-Visualisierung in der Nähe des Triggers (hilfreich fürs Debuggen)
+# 200 bps = 2.00 Prozentpunkte Restweg zum Trigger
+TOP_DROPS_WITHIN_BPS_OF_TRIGGER = 200
 
 # (Optional) Aliase, falls du sie im Code kleingeschrieben importierst:
 enable_top_drops_ticker = ENABLE_TOP_DROPS_TICKER
