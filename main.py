@@ -572,22 +572,27 @@ def main():
         # Register shutdown callback for trade cache
         shutdown_coordinator.add_cleanup_callback(shutdown_trade_cache)
 
-        # Register memory manager for cleanup and monitoring
-        from services.memory_manager import get_memory_manager, shutdown_memory_manager
-        memory_manager = get_memory_manager()
-        shutdown_coordinator.register_component("memory_manager", memory_manager)
-        shutdown_coordinator.add_cleanup_callback(shutdown_memory_manager)
+        # Register memory manager for cleanup and monitoring (optional)
+        if getattr(config_module, 'ENABLE_MEMORY_MONITORING', True):
+            from services.memory_manager import get_memory_manager, shutdown_memory_manager
+            memory_manager = get_memory_manager()
+            shutdown_coordinator.register_component("memory_manager", memory_manager)
+            shutdown_coordinator.add_cleanup_callback(shutdown_memory_manager)
 
-        # Add memory cleanup callback to trade cache
-        def memory_cleanup_callback() -> int:
-            """Cleanup callback for memory pressure"""
-            try:
-                # Force cache cleanup and return items cleaned
-                return trade_cache.cleanup_expired()
-            except Exception:
-                return 0
+            # Add memory cleanup callback to trade cache
+            def memory_cleanup_callback() -> int:
+                """Cleanup callback for memory pressure"""
+                try:
+                    # Force cache cleanup and return items cleaned
+                    return trade_cache.cleanup_expired()
+                except Exception:
+                    return 0
 
-        memory_manager.add_cleanup_callback(memory_cleanup_callback)
+            memory_manager.add_cleanup_callback(memory_cleanup_callback)
+            logger.info("Memory monitoring enabled", extra={'event_type': 'MEMORY_MANAGER_ENABLED'})
+        else:
+            logger.info("Memory monitoring disabled (ENABLE_MEMORY_MONITORING=False)",
+                       extra={'event_type': 'MEMORY_MANAGER_DISABLED'})
 
     except Exception as engine_init_error:
         logger.error(f"CRITICAL: TradingEngine initialization failed: {engine_init_error}",
@@ -608,13 +613,17 @@ def main():
 
     # --- Telegram-Kommandos (optional) ---
     # requires: telegram_commands.py im Projektordner
-    try:
-        logger.info("Starting Telegram command server...", extra={'event_type': 'TELEGRAM_COMMANDS_STARTING'})
-        start_telegram_command_server(engine)
-        logger.info("Telegram command server gestartet.", extra={'event_type': 'TELEGRAM_COMMANDS_STARTED'})
-    except Exception as e:
-        logger.warning(f"Telegram command server konnte nicht starten: {e}",
-                       extra={'event_type': 'TELEGRAM_COMMANDS_ERROR', 'error': str(e)})
+    if getattr(config_module, 'ENABLE_TELEGRAM_COMMANDS', True):
+        try:
+            logger.info("Starting Telegram command server...", extra={'event_type': 'TELEGRAM_COMMANDS_STARTING'})
+            start_telegram_command_server(engine)
+            logger.info("Telegram command server gestartet.", extra={'event_type': 'TELEGRAM_COMMANDS_STARTED'})
+        except Exception as e:
+            logger.warning(f"Telegram command server konnte nicht starten: {e}",
+                           extra={'event_type': 'TELEGRAM_COMMANDS_ERROR', 'error': str(e)})
+    else:
+        logger.info("Telegram command server disabled (ENABLE_TELEGRAM_COMMANDS=False)",
+                   extra={'event_type': 'TELEGRAM_COMMANDS_DISABLED'})
     
     # Modus-Anzeige
     mode_str = "LIVE-MODUS" if global_trading and exchange else "OBSERVE-MODUS"
@@ -681,6 +690,19 @@ def main():
             config_module.LOOKBACK_S,
             config_module.DROP_TRIGGER_LOOKBACK_MIN
         )
+
+        # Heartbeat Telemetry (optional)
+        if getattr(config_module, 'ENABLE_HEARTBEAT_TELEMETRY', False):
+            try:
+                from heartbeat_telemetry import start_auto_heartbeat
+                start_auto_heartbeat(getattr(config_module, 'HEARTBEAT_INTERVAL_S', 60.0))
+                logger.info("Heartbeat telemetry enabled", extra={'event_type': 'HEARTBEAT_TELEMETRY_ENABLED'})
+            except Exception as e:
+                logger.warning(f"Failed to start heartbeat telemetry: {e}",
+                              extra={'event_type': 'HEARTBEAT_TELEMETRY_ERROR', 'error': str(e)})
+        else:
+            logger.info("Heartbeat telemetry disabled (ENABLE_HEARTBEAT_TELEMETRY=False)",
+                       extra={'event_type': 'HEARTBEAT_TELEMETRY_DISABLED'})
 
         # Register additional cleanup callbacks
         shutdown_coordinator.add_cleanup_callback(lambda: logger.info("Pre-shutdown log flush"))
