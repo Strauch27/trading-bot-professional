@@ -43,23 +43,23 @@ class BuyService:
 
     def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict[str, Any]]:
         coid = next_client_order_id(symbol, "BUY")
-        # CCXT quantization for both price and amount (like V9_3)
-        price_q = float(self.exchange.price_to_precision(symbol, price))
-        qty_q = float(self.exchange.amount_to_precision(symbol, qty))
+        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+        px = float(self.exchange.price_to_precision(symbol, price))
+        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
         # Sicherheitsnetz nach der Quantisierung
-        if qty_q <= 0 or price_q <= 0:
+        if qty <= 0 or px <= 0:
             log_event("BUY_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty/price invalid: qty={qty_q}, price={price_q}")
+                     message=f"quantized qty/price invalid: qty={qty}, price={px}")
             return None
 
         try:
             order = self.exchange.create_limit_order(
-                symbol, "buy", qty_q, price_q, "IOC", coid, False
+                symbol, "buy", qty, px, "IOC", coid, False
             )
             return order
         except Exception as e:
-            log_event("BUY_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": price_q, "qty": qty})
+            log_event("BUY_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": px, "qty": qty})
             return None
 
     def _tiers(self, ask: float, escalation_steps: List[Dict[str, Any]]) -> List[Tuple[float, Dict[str, Any]]]:

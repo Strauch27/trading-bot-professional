@@ -65,9 +65,9 @@ class OrderService:
         """
         with self._lock:
             try:
-                # CCXT quantization before order (like V9_3)
-                qty = self.exchange.amount_to_precision(symbol, amount)
-                px = self.exchange.price_to_precision(symbol, price)
+                # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+                px = float(self.exchange.price_to_precision(symbol, price))
+                qty = float(self.exchange.amount_to_precision(symbol, amount))
 
                 # Sicherheitsnetz nach der Quantisierung
                 if qty <= 0 or px <= 0:
@@ -142,8 +142,8 @@ class OrderService:
         """
         with self._lock:
             try:
-                # CCXT quantization before order (like V9_3)
-                qty = self.exchange.amount_to_precision(symbol, amount)
+                # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+                qty = float(self.exchange.amount_to_precision(symbol, amount))
 
                 # Sicherheitsnetz nach der Quantisierung
                 if qty <= 0:
@@ -218,9 +218,9 @@ class OrderService:
         """
         with self._lock:
             try:
-                # CCXT quantization before order (like V9_3)
-                qty = self.exchange.amount_to_precision(symbol, amount)
-                px = self.exchange.price_to_precision(symbol, price)
+                # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+                px = float(self.exchange.price_to_precision(symbol, price))
+                qty = float(self.exchange.amount_to_precision(symbol, amount))
 
                 # Sicherheitsnetz nach der Quantisierung
                 if qty <= 0 or px <= 0:

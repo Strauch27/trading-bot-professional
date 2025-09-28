@@ -43,41 +43,41 @@ class SellService:
 
     def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict]:
         coid = next_client_order_id(symbol, "SELL")
-        # CCXT quantization for both price and amount (like V9_3)
-        price_q = float(self.exchange.price_to_precision(symbol, price))
-        qty_q = float(self.exchange.amount_to_precision(symbol, qty))
+        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+        px = float(self.exchange.price_to_precision(symbol, price))
+        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
         # Sicherheitsnetz nach der Quantisierung
-        if qty_q <= 0 or price_q <= 0:
+        if qty <= 0 or px <= 0:
             log_event("SELL_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty/price invalid: qty={qty_q}, price={price_q}")
+                     message=f"quantized qty/price invalid: qty={qty}, price={px}")
             return None
 
         try:
             order = self.exchange.create_limit_order(
-                symbol, "sell", qty_q, price_q, "IOC", coid, False
+                symbol, "sell", qty, px, "IOC", coid, False
             )
             return order
         except Exception as e:
-            log_event("EXIT_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": price_q, "qty": qty})
+            log_event("EXIT_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": px, "qty": qty})
             return None
 
     def _market_ioc(self, symbol: str, qty: float) -> Optional[Dict]:
         if self.never_market_sells:
             return None
         coid = next_client_order_id(symbol, "SELL")
-        # CCXT quantization for amount (like V9_3)
-        qty_q = float(self.exchange.amount_to_precision(symbol, qty))
+        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
+        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
         # Sicherheitsnetz nach der Quantisierung
-        if qty_q <= 0:
+        if qty <= 0:
             log_event("SELL_MARKET_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty invalid: qty={qty_q}")
+                     message=f"quantized qty invalid: qty={qty}")
             return None
 
         try:
             order = self.exchange.create_market_order(
-                symbol, "sell", qty_q, "IOC", coid
+                symbol, "sell", qty, "IOC", coid
             )
             return order
         except Exception as e:

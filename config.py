@@ -1063,7 +1063,7 @@ BUY_ESCALATION_EXTRA_BPS = 20
 # ALLOW_MARKET_FALLBACK: Market-Orders als Fallback?
 # False = Niemals Market-Orders (außer TTL)
 # Separat von TTL-Fallback Einstellung
-ALLOW_MARKET_FALLBACK = False
+ALLOW_MARKET_FALLBACK = True  # Ermöglicht Market-Orders als Fallback
 
 # System-Konstanten (nicht ändern)
 MAX_TRADES_CONCURRENT = MAX_TRADES  # Alias
