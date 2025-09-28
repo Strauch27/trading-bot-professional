@@ -32,8 +32,11 @@ except ImportError:
     def load_dotenv():
         pass
 
+# Einheitlicher Config-Import + Alias
+import config as config_module  # config.py liegt im Projektwurzelordner
+
+# Importiere alle Config-Werte für lokale Nutzung
 from config import *
-import config as config_module
 import config_lint
 from logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
 
@@ -58,7 +61,7 @@ def _ensure_runtime_dirs():
     without causing side-effects during import (which affected tests,
     tools, linter, and IDE indexing).
     """
-    from config import SESSION_DIR, LOG_DIR, STATE_DIR, REPORTS_DIR, SNAPSHOTS_DIR
+    # Config-Werte sind bereits über 'from config import *' verfügbar
 
     for directory in (SESSION_DIR, LOG_DIR, STATE_DIR, REPORTS_DIR, SNAPSHOTS_DIR):
         pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
@@ -321,7 +324,7 @@ def main():
     # Config bereits oben validiert
     
     # Config-Backup erstellen
-    from config import backup_config
+    backup_config = config_module.backup_config
     backup_config()
     
     # Split-Logs gleich zu Beginn aktivieren (an Root-Logger)
@@ -331,11 +334,11 @@ def main():
     
     # Config-Snapshot loggen
     from loggingx import config_snapshot
-    import config as C
+    C = config_module
     config_snapshot({k: getattr(C, k) for k in dir(C) if k.isupper()})
     
     # Rotating Logger initialisieren (jeder Logger -> eigene Datei)
-    from config import LOG_MAX_BYTES, LOG_BACKUP_COUNT, EVENTS_LOG, MEXC_ORDERS_LOG, AUDIT_EVENTS_LOG, DROP_AUDIT_LOG
+    # Config-Werte sind bereits über 'from config import *' verfügbar
     setup_rotating_logger("events", log_file=EVENTS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
     setup_rotating_logger("mexc", log_file=MEXC_ORDERS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
     setup_rotating_logger("audit", log_file=AUDIT_EVENTS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
@@ -387,7 +390,7 @@ def main():
     backup_state_files()
     
     # Manager initialisieren
-    from config import DUST_MIN_COST_USD
+    DUST_MIN_COST_USD = config_module.DUST_MIN_COST_USD
     dust_sweeper = DustSweeper(exchange, min_sweep_value=DUST_MIN_COST_USD) if exchange else None
     settlement_manager = SettlementManager(dust_sweeper)
     
@@ -395,7 +398,8 @@ def main():
     portfolio = PortfolioManager(exchange, settlement_manager, dust_sweeper)
 
     # Periodischer Dust-Sweep (Background-Thread)
-    from config import DUST_SWEEP_ENABLED, DUST_SWEEP_INTERVAL_MIN
+    DUST_SWEEP_ENABLED = config_module.DUST_SWEEP_ENABLED
+    DUST_SWEEP_INTERVAL_MIN = config_module.DUST_SWEEP_INTERVAL_MIN
     from services.shutdown_coordinator import get_shutdown_coordinator
     dust_sweep_thread = None
     if DUST_SWEEP_ENABLED and dust_sweeper and exchange:
@@ -421,10 +425,10 @@ def main():
                     # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
                         from services.market_data import fetch_ticker_cached
-                        from config import SYMBOLS
+                        SYMBOLS = config_module.SYMBOLS
 
                         # Nur aktive Symbole, max 50 pro Sweep-Zyklus
-                        symbols = list(SYMBOLS[:50]) if hasattr(config, 'SYMBOLS') else []
+                        symbols = list(SYMBOLS[:50]) if hasattr(config_module, 'SYMBOLS') else []
                         prices = {}
 
                         for symbol in symbols:
@@ -469,7 +473,7 @@ def main():
         from services.robust_market_data import RobustMarketDataProvider
 
         # V9_3-Style: Robuste Orderbuch-Nutzung aktivieren
-        from config import USE_ROBUST_MARKET_FETCH
+        USE_ROBUST_MARKET_FETCH = config_module.USE_ROBUST_MARKET_FETCH
         if not USE_ROBUST_MARKET_FETCH:
             logger.info("GENERAL - Using basic market data fetch (robust system bypassed)")
             preise = {}
@@ -543,9 +547,9 @@ def main():
     # Trading Engine initialisieren und starten
     # Settings fuer Dependency Injection (robust)
     try:
-        from config import Settings
+        Settings = config_module.Settings
     except ImportError:
-        import config as _cfg
+        _cfg = config_module
         Settings = getattr(_cfg, "C", None)
         if Settings is None:
             # Fallback: Klasse Settings aus Modul-Konstanten bauen
