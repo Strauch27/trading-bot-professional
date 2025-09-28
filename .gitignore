@@ -1,0 +1,24 @@
+﻿# Python / Build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Projekt
+sessions/
+reports/
+*.log
+*.zip
+*.patch
+__snapshots__/
+MEXC_Validation/
+testing_framework/
+tests/
+other/
+tools/
+
+# Secrets
+.env

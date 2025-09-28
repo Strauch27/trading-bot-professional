@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for file in C:/01_Programmieren/03_Trading_Bot_Professional/v8/*.py)",
+      "Bash(done)",
+      "Bash(for file in C:/01_Programmieren/03_Trading_Bot_Professional/v8/MEXC_Validation/*.py)",
+      "Bash(python:*)",
+      "Bash(taskkill:*)",
+      "Bash(dir:*)",
+      "Bash(grep:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(xcopy:*)",
+      "Bash(robocopy:*)",
+      "Bash(powershell:*)",
+      "Bash(del C:01_Programmieren03_Trading_Bot_Professionalv9anchor_config.txt)",
+      "Read(//c/01_Programmieren/03_Trading_Bot_Professional/**)",
+      "Bash(del \"C:\\01_Programmieren\\03_Trading_Bot_Professional\\v10\\drop_anchors.json\")",
+      "Bash(find:*)",
+      "Bash(chcp:*)",
+      "Bash(timeout:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(cut:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(chmod:*)",
+      "Bash(mkdir:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

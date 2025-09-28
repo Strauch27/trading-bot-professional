@@ -1,0 +1,20 @@
+# Trading Bot V7 - Python Dependencies
+# =====================================
+
+# Core Trading Libraries
+ccxt>=4.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Logging
+python-json-logger>=2.0.0
+
+# Excel Export für Trade Analyzer
+openpyxl>=3.1.0
+
+# Optional - für Parquet Snapshots
+pyarrow>=14.0.0
+
+# Environment Variables
+python-dotenv>=1.0.0

@@ -1,0 +1,24 @@
+# Development Dependencies für Trading Bot V11
+# ================================================
+
+# Laufzeit Dependencies
+-r requirements.txt
+
+# Tests & Tools
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+psutil>=5.9.0
+
+# Timezone handling (optional, für Europe/Berlin-Heuristik in utils.py)
+pytz>=2024.1
+
+# Code Quality
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Performance Profiling
+line_profiler>=4.0.0
+memory_profiler>=0.61.0
