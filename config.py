@@ -165,7 +165,9 @@ MAX_TRADES = 3
 # POSITION_SIZE_USDT: Wie viel USDT pro Kauf einsetzen
 # 25.0 = Jeder Kauf verwendet 25 USDT (ca. 25 Dollar)
 # Bei MAX_TRADES=3 → Maximales Risiko = 3 × 25 = 75 USDT
-POSITION_SIZE_USDT = 16.0
+# Viele Märkte benötigen nach Rundung >16 USDT Notional.
+# 25 USDT ist ein robuster Untergrenzwert; bei Bedarf weiter erhöhen.
+POSITION_SIZE_USDT = 25.0
 
 # --- Auto-Upsize bei knapper Rundung (MinNotional) ---
 ALLOW_AUTO_SIZE_UP = True          # darf die Menge leicht erhöht werden?
@@ -968,7 +970,7 @@ EXCHANGE_TRACE_MAX_ARGLEN = 2000           # sehr lange Payloads einkürzen (Sic
 # =============================================================================
 
 # --- Positionsgröße & Slot-Deckel ---
-POSITION_SIZE_USDT = 16          # >=16 USDT → oberhalb üblicher Min-Notional-Grenzen
+POSITION_SIZE_USDT = 25.0        # >=25 USDT → verhindert Sizing-Blocks nach Rundung
 MAX_TRADES = 3                    # Deckel auf 3 gleichzeitige Trades (für 2 → 2 setzen)
 COOLDOWN_MIN = 0                  # kein Cooldown für schnelle Tests
 ALLOW_DUPLICATE_COINS = False     # keine doppelten Positionen im selben Symbol

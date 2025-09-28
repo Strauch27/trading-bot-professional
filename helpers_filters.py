@@ -19,10 +19,12 @@ def _round_to_tick(price: float, tick: float) -> float:
     return round(price / tick) * tick
 
 def round_price_to_tick(price, tick):
-    """Nearest tick (Maker: evtl. 1 Tick unter Bid/über Ask setzen)"""
+    """Nearest tick (Maker: ggf. 1 Tick unter Bid/über Ask setzen)"""
     if tick <= 0:
         return price
-    return round(price / tick) * tick
+    rounded = round(price / tick) * tick
+    # Guard: verhindere 0 durch Rundung, wenn tick > price
+    return rounded if rounded > 0 else tick
 
 def _ceil_to_step(x, step):
     """Rundet Wert zum nächsthöheren erlaubten Step (CEILING)"""
@@ -256,23 +258,32 @@ def apply_exchange_filters(symbol: str, side: str, price: float, qty: float,
 
 # Convenience function für direkten Import
 def create_filters_from_market(market_info: dict) -> ExchangeFilters:
-    """Erstellt ExchangeFilters aus CCXT Market-Info"""
-    limits = market_info.get("limits", {})
-    precision = market_info.get("precision", {})
+    """Erstellt ExchangeFilters aus CCXT Market-Info.
+    WICHTIG: CCXT liefert precision.price/amount in der Regel als Tick-/Step-**Größe** (z. B. 0.0001),
+    nicht als Anzahl Dezimalstellen."""
+    limits = market_info.get("limits", {}) or {}
+    precision = market_info.get("precision", {}) or {}
 
-    # Extract stepSize from precision (CCXT format)
-    amount_precision = precision.get("amount")
-    step_size = 10 ** (-amount_precision) if amount_precision else 0.001
+    def _to_increment(val, fallback):
+        try:
+            v = float(val)
+            if v <= 0:
+                return fallback
+            # Wenn v < 1 ⇒ bereits Inkrement; wenn v >= 1 ⇒ als Dezimalstellen interpretieren
+            return v if v < 1 else (10.0 ** (-int(v)))
+        except Exception:
+            return fallback
 
-    # Extract tickSize from precision (CCXT format)
-    price_precision = precision.get("price")
-    tick_size = 10 ** (-price_precision) if price_precision else 0.01
+    tick_size = _to_increment(precision.get("price"), 0.01)
+    step_size = _to_increment(precision.get("amount"), 0.001)
+    min_notional = float((limits.get("cost") or {}).get("min") or 10.0)
+    min_qty = float((limits.get("amount") or {}).get("min") or 0.0)
 
     return ExchangeFilters(
         tickSize=tick_size,
         stepSize=step_size,
-        minNotional=float(limits.get("cost", {}).get("min", 10.0)),
-        minQty=float(limits.get("amount", {}).get("min", 0.0))
+        minNotional=min_notional,
+        minQty=min_qty,
     )
 
 import time
