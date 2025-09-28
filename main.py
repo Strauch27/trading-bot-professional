@@ -17,7 +17,7 @@ import os
 import shutil
 import signal
 import sys
-import time
+import time as tmod
 import pathlib
 import faulthandler
 import threading
@@ -237,7 +237,7 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
                              'current': portfolio.my_budget,
                              'required': safe_min_budget})
             
-            time.sleep(60)
+            tmod.sleep(60)
             portfolio.refresh_budget()
             
             # Check for Ctrl+C während des Wartens
@@ -403,7 +403,7 @@ def main():
     from services.shutdown_coordinator import get_shutdown_coordinator
     dust_sweep_thread = None
     if DUST_SWEEP_ENABLED and dust_sweeper and exchange:
-        import threading, time
+        import threading
 
         def _dust_loop():
             """Background-Thread für periodische Dust-Sweeps"""
@@ -420,7 +420,7 @@ def main():
                     for _ in range(sleep_seconds):
                         if get_shutdown_coordinator().is_shutdown_requested():
                             return
-                        time.sleep(1)
+                        tmod.sleep(1)
 
                     # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
@@ -438,7 +438,7 @@ def main():
                                 if ticker and ticker.get('last'):
                                     prices[symbol] = float(ticker.get('last'))
                                 # Drosseln: 200ms zwischen Calls
-                                time.sleep(0.2)
+                                tmod.sleep(0.2)
                             except Exception as e:
                                 logger.debug(f"Dust-Sweep: Ticker für {symbol} fehlgeschlagen: {e}")
                                 continue
@@ -697,14 +697,14 @@ def main():
     # Brief stabilization pause (resolves timing-sensitive engine startup issues)
     # Note: These print statements are critical for preventing race conditions
     print("Starting Trading Engine...", flush=True)
-    time.sleep(0.2)
+    tmod.sleep(0.2)
 
     # Hauptloop starten
     try:
         # Start engine with timeout monitoring
-        start_time = time.time()
+        start_time = tmod.time()
         engine.start()
-        start_duration = time.time() - start_time
+        start_duration = tmod.time() - start_time
         print("Trading Engine initialized successfully", flush=True)
 
         if start_duration > 10:
@@ -760,7 +760,7 @@ def main():
         # Thread-safe main loop using shutdown coordinator
         logger.info("Thread-safe hauptschleife gestartet", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_STARTED'})
 
-        next_heartbeat = time.time() + 60  # Minütliche Updates statt alle 30s
+        next_heartbeat = tmod.time() + 60  # Minütliche Updates statt alle 30s
         heartbeat_failures = 0
         max_heartbeat_failures = 3
 
@@ -773,7 +773,7 @@ def main():
                 break
 
             # Send detailed heartbeat log every 60 seconds
-            if time.time() >= next_heartbeat:
+            if tmod.time() >= next_heartbeat:
                 try:
                     budget = portfolio.my_budget if portfolio else 0.0
                     mode = "LIVE" if global_trading and exchange else "OBSERVE"
@@ -847,7 +847,7 @@ def main():
                         shutdown_coordinator.request_shutdown(request)
                         break
 
-                next_heartbeat = time.time() + 60  # Nächster Heartbeat in 60s
+                next_heartbeat = tmod.time() + 60  # Nächster Heartbeat in 60s
 
         logger.info("Thread-safe main loop ended", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_ENDED'})
 
