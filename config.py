@@ -1013,10 +1013,14 @@ EXCHANGE_TRACE_ORDERBOOK_LEVELS = 10
 EXCHANGE_TRACE_SCRUB_IDS = True
 EXCHANGE_TRACE_MAX_ARGLEN = 2000
 
-# --- Thread-Reduktion (Services 2,3,4 deaktivieren) ---
-ENABLE_MEMORY_MONITORING = False       # MemoryManager aus
-ENABLE_TELEGRAM_COMMANDS = False       # TelegramCommands aus
-ENABLE_HEARTBEAT_TELEMETRY = False     # HeartbeatTelemetry aus
+# --- Thread-Kontrolle (Services wieder aktiviert) ---
+ENABLE_MEMORY_MONITORING = True        # MemoryManager an
+ENABLE_TELEGRAM_COMMANDS = True        # TelegramCommands an
+ENABLE_HEARTBEAT_TELEMETRY = False     # HeartbeatTelemetry bleibt aus (nicht verwendet)
+
+# --- Concurrency-Limits (TLS-Stabilität) ---
+MAX_PARALLEL_UPDATES = 4               # Begrenzt gleichzeitige Market-Updates (konservativ)
+HTTP_SLOTS_LIMIT = 6                   # Max gleichzeitige TLS-Handshakes
 
 # =============================================================================
 # ABSCHNITT 8: ERWEITERTE EINSTELLUNGEN

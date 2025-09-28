@@ -13,6 +13,8 @@ import logging
 import ccxt
 import socket
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from adapters.retry import with_backoff
 
 logger = logging.getLogger(__name__)
@@ -259,6 +261,16 @@ class ExchangeAdapter(ExchangeInterface):
         self._timeout_s = 10
         self._retry_backoff = (0.25, 0.5, 1.0, 2.0)
 
+        # HTTP Slots: Begrenzt gleichzeitige TLS-Handshakes für Stabilität
+        try:
+            from config import HTTP_SLOTS_LIMIT
+            self._http_slots = threading.Semaphore(HTTP_SLOTS_LIMIT)
+        except ImportError:
+            self._http_slots = threading.Semaphore(6)  # Fallback
+
+        # Gemeinsame Session mit Pooling und Retries
+        self._shared_session = self._build_shared_session()
+
         # Rekursionsschutz für Connection Recovery
         self._in_recovery = threading.local()
 
@@ -266,14 +278,44 @@ class ExchangeAdapter(ExchangeInterface):
         self.exchange.enableRateLimit = True
         self.exchange.timeout = 15000  # 15s timeout
 
-        # Verhindere Keep-Alive-Probleme unter Windows
+        # Verwende gemeinsame Session für Connection-Pooling
         if hasattr(self.exchange, 'session'):
-            self.exchange.session.headers.update({'Connection': 'close'})
+            self.exchange.session = self._shared_session
 
         # Connection recovery
         self._connection_recovery = None
         if enable_connection_recovery:
             self._setup_connection_recovery()
+
+    def _build_shared_session(self, verify: bool = True) -> requests.Session:
+        """
+        Erstellt eine gemeinsame Session mit Connection-Pooling und Retries.
+        Verbessert TLS-Stabilität durch weniger Handshake-Overhead.
+        """
+        session = requests.Session()
+
+        # Retry-Strategie für robuste Verbindungen
+        retry_strategy = Retry(
+            total=5,
+            connect=5,
+            read=5,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset(['GET', 'POST'])
+        )
+
+        # HTTP-Adapter mit Connection-Pooling
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=32,  # Connection-Pool-Größe
+            pool_maxsize=64       # Max Connections pro Pool
+        )
+
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        session.verify = verify
+
+        return session
 
     def _setup_connection_recovery(self):
         """Setup connection recovery service"""
@@ -411,14 +453,16 @@ class ExchangeAdapter(ExchangeInterface):
 
                 self._rate_limit()
 
-                # KRITISCH: Alle ccxt-Calls müssen serialisiert werden!
-                # Verhindert Access Violations durch parallele OpenSSL/HTTP-Zugriffe
-                with self._http_lock:
-                    # ccxt akzeptiert "params={'timeout': sec}" je nach Methode;
-                    # fallback: client hat globales Timeout; hier defensiv erzwingen
-                    if "params" in kwargs and isinstance(kwargs["params"], dict):
-                        kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
-                    result = func(*args, **kwargs)
+                # Begrenzt gleichzeitige TLS-Handshakes für Stabilität
+                with self._http_slots:
+                    # KRITISCH: Alle ccxt-Calls müssen serialisiert werden!
+                    # Verhindert Access Violations durch parallele OpenSSL/HTTP-Zugriffe
+                    with self._http_lock:
+                        # ccxt akzeptiert "params={'timeout': sec}" je nach Methode;
+                        # fallback: client hat globales Timeout; hier defensiv erzwingen
+                        if "params" in kwargs and isinstance(kwargs["params"], dict):
+                            kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
+                        result = func(*args, **kwargs)
 
                 # Mark successful request in connection recovery
                 if self._connection_recovery:

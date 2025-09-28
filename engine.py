@@ -583,7 +583,14 @@ class TradingEngine:
                                 def safe_market_update():
                                     return self._update_market_data()
 
-                                with concurrent.futures.ThreadPoolExecutor() as executor:
+                                # Import MAX_PARALLEL_UPDATES für Thread-Kontrolle
+                                try:
+                                    from config import MAX_PARALLEL_UPDATES
+                                    max_workers = MAX_PARALLEL_UPDATES
+                                except ImportError:
+                                    max_workers = 1  # Fallback: sequenziell
+
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                                     future = executor.submit(safe_market_update)
                                     future.result(timeout=10.0)  # 10 second timeout
                                 logger.info("📊 Market data updated successfully", extra={'event_type': 'MARKET_DATA_UPDATED'})
