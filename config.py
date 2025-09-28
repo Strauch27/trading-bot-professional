@@ -263,14 +263,8 @@ USE_FALLING_COINS_FILTER = False
 # Wenn mehr als 55% fallen → Markt zu schwach → keine Käufe
 FALLING_COINS_THRESHOLD = 0.55
 
-# BTC-Trend-Guard vollständig aus:
-# Falls dein Code ein Flag hat:
-try:
-    USE_BTC_TREND_GUARD
-except NameError:
-    USE_BTC_TREND_GUARD = False
-else:
-    USE_BTC_TREND_GUARD = False
+# BTC-Trend-Guard vollständig aus (statisch, linter-freundlich)
+USE_BTC_TREND_GUARD = False
 
 # --- 1.7 MACHINE LEARNING ---
 # KI-basierte Trade-Vorhersage (Fortgeschritten)
