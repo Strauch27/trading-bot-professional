@@ -255,8 +255,14 @@ class TradingEngine:
             verbose=getattr(config, "VERBOSE_GUARD_LOGS", False)
         )
 
+        # Sizing Service with Portfolio Management Integration
+        from services.sizing_service import SizingService
+        self.sizing_service = SizingService(
+            exchange=exchange,
+            portfolio_manager=self.portfolio
+        )
+
         # Legacy Services - functionality moved to other services
-        self.sizing_service = None
         self.buy_service = None
         self.sell_service = None
 
