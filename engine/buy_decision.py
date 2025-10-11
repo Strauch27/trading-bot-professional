@@ -440,30 +440,29 @@ class BuyDecisionHandler:
             timestamp=order_start_time
         )
 
-        # Place buy order via Order Service - Mode-2 uses IOC, others use GTC
-        from config import MODE, USE_IOC_FOR_MODE2
-        use_ioc = (MODE == 2 and USE_IOC_FOR_MODE2)
+        # Place buy order with IOC for aggressive fills (slight overpay but guaranteed execution)
+        from config import BUY_LIMIT_PREMIUM_BPS
 
-        trace_step("placing_order", symbol=symbol, amount=amount, price=current_price,
-                  client_order_id=client_order_id, use_ioc=use_ioc)
+        # Calculate aggressive price: ASK + premium for guaranteed fill
+        bid = coin_data.get('bid', current_price) if coin_data else current_price
+        ask = coin_data.get('ask', current_price) if coin_data else current_price
+        premium_bps = getattr(config, 'BUY_LIMIT_PREMIUM_BPS', 10)
 
-        if use_ioc:
-            order = self.engine.order_service.place_limit_ioc(
-                symbol=symbol,
-                side="buy",
-                amount=amount,
-                price=current_price,
-                client_order_id=client_order_id
-            )
-        else:
-            # Use traditional GTC order for other modes
-            order_cfg = {"tif": "GTC", "post_only": True}
-            market_data = {"book": {"best_bid": current_price, "best_ask": current_price},
-                          "filters": {"tickSize": 0.01, "stepSize": 0.001, "minNotional": 10.0}}
-            order = self.engine.exchange_adapter.place_limit_buy(
-                symbol, amount * current_price, order_cfg, market_data,
-                meta={"decision_id": decision_id, "client_order_id": client_order_id}
-            )
+        # BUY aggressively: Limit price slightly above ASK (TAKER side)
+        aggressive_price = ask * (1 + premium_bps / 10000.0)
+
+        trace_step("placing_order", symbol=symbol, amount=amount, price=aggressive_price,
+                  client_order_id=client_order_id, premium_bps=premium_bps,
+                  original_price=current_price, bid=bid, ask=ask)
+
+        # Use IOC for guaranteed fills
+        order = self.engine.order_service.place_limit_ioc(
+            symbol=symbol,
+            side="buy",
+            amount=amount,
+            price=aggressive_price,
+            client_order_id=client_order_id
+        )
 
         trace_step("order_placed", symbol=symbol, order_id=order.get('id') if order else None,
                   status=order.get('status') if order else None)
