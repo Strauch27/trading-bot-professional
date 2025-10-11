@@ -49,6 +49,7 @@ from core.utils import (
 )
 from core.portfolio import PortfolioManager
 from engine import TradingEngine
+from engine.hybrid_engine import HybridEngine
 from integrations.telegram import init_telegram_from_config, tg
 from integrations.telegram import start_telegram_command_server
 
@@ -579,7 +580,12 @@ def main():
 
     orderbookprovider = SimpleOrderbookProvider()
 
-    logger.info("Creating TradingEngine...", extra={'event_type': 'BEFORE_ENGINE_INIT'})
+    # FSM Engine Selection
+    FSM_ENABLED = getattr(config_module, 'FSM_ENABLED', False)
+    FSM_MODE = getattr(config_module, 'FSM_MODE', 'legacy')
+
+    logger.info(f"Creating TradingEngine (FSM_ENABLED={FSM_ENABLED}, FSM_MODE={FSM_MODE})...",
+               extra={'event_type': 'BEFORE_ENGINE_INIT', 'fsm_enabled': FSM_ENABLED, 'fsm_mode': FSM_MODE})
     try:
         # Prepare watchlist for engine (keys only, values not needed)
         engine_watchlist = {symbol: {} for symbol in topcoins.keys()} if topcoins else {}
@@ -588,21 +594,48 @@ def main():
                           'symbol_count': len(engine_watchlist),
                           'symbols_preview': list(engine_watchlist.keys())[:10]})
 
-        engine = TradingEngine(
-            exchange=exchange,
-            portfolio=portfolio,
-            orderbookprovider=orderbookprovider,
-            telegram=None,  # Telegram wird später gesetzt
-            mock_mode=False
-        )
+        # Engine initialization: FSM-aware or legacy
+        if FSM_ENABLED:
+            logger.info(f"Initializing HybridEngine in mode: {FSM_MODE}",
+                       extra={'event_type': 'HYBRID_ENGINE_INIT', 'mode': FSM_MODE})
 
-        # >>> WICHTIG: Engine mit Watchlist füttern (nur Keys werden genutzt)
-        engine.topcoins = {symbol: {} for symbol in topcoins.keys()}
-        # BTC/USDT sicherstellen – Guards/BTC-Filter brauchen BTC-Daten
-        engine.topcoins.setdefault("BTC/USDT", {})
+            # Prepare engine_config for legacy engine (if needed by hybrid mode)
+            engine_config = {
+                'settings': settings,
+                'topcoins': topcoins,
+            }
 
-        logger.info(f"Engine topcoins configured: {len(engine.topcoins)} symbols",
-                   extra={'event_type': 'ENGINE_TOPCOINS_CONFIGURED', 'count': len(engine.topcoins)})
+            engine = HybridEngine(
+                exchange=exchange,
+                portfolio=portfolio,
+                orderbookprovider=orderbookprovider,
+                telegram=None,  # Telegram wird später gesetzt
+                watchlist=engine_watchlist,
+                mode=FSM_MODE,
+                engine_config=engine_config
+            )
+            logger.info(f"HybridEngine created: {engine}",
+                       extra={'event_type': 'HYBRID_ENGINE_CREATED', 'mode': FSM_MODE})
+        else:
+            logger.info("Initializing legacy TradingEngine (FSM disabled)",
+                       extra={'event_type': 'LEGACY_ENGINE_INIT'})
+
+            engine = TradingEngine(
+                exchange=exchange,
+                portfolio=portfolio,
+                orderbookprovider=orderbookprovider,
+                telegram=None,  # Telegram wird später gesetzt
+                mock_mode=False
+            )
+
+            # >>> WICHTIG: Engine mit Watchlist füttern (nur Keys werden genutzt)
+            engine.topcoins = {symbol: {} for symbol in topcoins.keys()}
+            # BTC/USDT sicherstellen – Guards/BTC-Filter brauchen BTC-Daten
+            engine.topcoins.setdefault("BTC/USDT", {})
+
+            logger.info(f"Engine topcoins configured: {len(engine.topcoins)} symbols",
+                       extra={'event_type': 'ENGINE_TOPCOINS_CONFIGURED', 'count': len(engine.topcoins)})
+
         logger.info("TradingEngine created successfully", extra={'event_type': 'ENGINE_INIT_COMPLETE'})
 
         # Register engine with shutdown coordinator
@@ -667,7 +700,62 @@ def main():
     else:
         logger.info("Telegram command server disabled (ENABLE_TELEGRAM_COMMANDS=False)",
                    extra={'event_type': 'TELEGRAM_COMMANDS_DISABLED'})
-    
+
+    # --- FSM Optional Features ---
+    if FSM_ENABLED:
+        # Prometheus Metrics Server
+        ENABLE_PROMETHEUS = getattr(config_module, 'ENABLE_PROMETHEUS', False)
+        PROMETHEUS_PORT = getattr(config_module, 'PROMETHEUS_PORT', 8000)
+
+        if ENABLE_PROMETHEUS:
+            try:
+                from telemetry.phase_metrics import start_metrics_server
+                start_metrics_server(port=PROMETHEUS_PORT)
+                logger.info(f"Prometheus metrics server started on port {PROMETHEUS_PORT}",
+                           extra={'event_type': 'PROMETHEUS_STARTED', 'port': PROMETHEUS_PORT})
+            except Exception as e:
+                logger.warning(f"Failed to start Prometheus server: {e}",
+                              extra={'event_type': 'PROMETHEUS_START_FAILED', 'error': str(e)})
+
+        # Rich Terminal Status Table
+        ENABLE_RICH_TABLE = getattr(config_module, 'ENABLE_RICH_TABLE', False)
+
+        if ENABLE_RICH_TABLE:
+            try:
+                from interfaces.status_table import run_live_table
+                import threading
+
+                RICH_TABLE_REFRESH_HZ = getattr(config_module, 'RICH_TABLE_REFRESH_HZ', 2.0)
+                RICH_TABLE_SHOW_IDLE = getattr(config_module, 'RICH_TABLE_SHOW_IDLE', False)
+
+                def status_table_thread():
+                    """Background thread for Rich status table"""
+                    try:
+                        logger.info("Starting Rich status table...",
+                                   extra={'event_type': 'RICH_TABLE_STARTING'})
+                        run_live_table(
+                            get_states_func=lambda: engine.get_states(),
+                            refresh_hz=RICH_TABLE_REFRESH_HZ,
+                            show_idle=RICH_TABLE_SHOW_IDLE
+                        )
+                    except Exception as e:
+                        logger.warning(f"Rich status table error: {e}",
+                                      extra={'event_type': 'RICH_TABLE_ERROR', 'error': str(e)})
+
+                rich_table_thread = threading.Thread(
+                    target=status_table_thread,
+                    daemon=True,
+                    name="RichStatusTable"
+                )
+                rich_table_thread.start()
+                logger.info("Rich status table thread started",
+                           extra={'event_type': 'RICH_TABLE_STARTED',
+                                  'refresh_hz': RICH_TABLE_REFRESH_HZ,
+                                  'show_idle': RICH_TABLE_SHOW_IDLE})
+            except Exception as e:
+                logger.warning(f"Failed to start Rich status table: {e}",
+                              extra={'event_type': 'RICH_TABLE_START_FAILED', 'error': str(e)})
+
     # Modus-Anzeige
     mode_str = "LIVE-MODUS" if global_trading and exchange else "OBSERVE-MODUS"
     mode_reason = ""

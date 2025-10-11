@@ -366,7 +366,41 @@ ACTIVE_ORDER_SYNC_INTERVAL_S = 60
 ACTIVE_ORDER_SYNC_JITTER_S = 5
 
 # =============================================================================
-# 11. STATE FILES & PERSISTENCE
+# 11. FSM (FINITE STATE MACHINE) CONFIGURATION
+# =============================================================================
+
+# Master Switch & Mode Selection
+FSM_ENABLED = False  # False = Legacy engine (default), True = Use FSM_MODE
+FSM_MODE = "legacy"  # Options: "legacy", "fsm", or "both" (parallel validation)
+
+# Phase Event Logging (JSONL audit trail for all phase transitions)
+PHASE_LOG_FILE = os.path.join(LOG_DIR, f"phase_events_{run_timestamp}.jsonl")
+PHASE_LOG_BUFFER_SIZE = 8192  # Write buffer size
+
+# Rich Terminal Status Table (live FSM visualization)
+ENABLE_RICH_TABLE = False  # Enable live-updating FSM status table
+RICH_TABLE_REFRESH_HZ = 2.0  # Refresh rate (updates per second)
+RICH_TABLE_SHOW_IDLE = False  # Show IDLE/WARMUP symbols in table
+
+# Prometheus Metrics Server
+ENABLE_PROMETHEUS = False  # Enable Prometheus HTTP server for metrics
+PROMETHEUS_PORT = 8000  # Metrics endpoint: http://localhost:8000/metrics
+
+# FSM Phase Timeouts (seconds)
+BUY_ORDER_TIMEOUT_SECONDS = 30  # Max time in WAIT_FILL phase
+SELL_ORDER_TIMEOUT_SECONDS = 20  # Max time in WAIT_SELL_FILL phase
+MAX_POSITION_HOLD_MINUTES = 60  # Auto-exit timeout (overrides TRADE_TTL_MIN if lower)
+
+# FSM Error Recovery
+FSM_MAX_RETRIES = 5  # Max retry attempts before ERROR phase
+FSM_BACKOFF_BASE_SECONDS = 10  # Exponential backoff base (max: 300s)
+
+# Hybrid Mode Validation (when FSM_MODE="both")
+HYBRID_VALIDATION_INTERVAL_S = 60  # Comparison check interval
+HYBRID_LOG_DIVERGENCES = True  # Log when legacy/FSM states diverge
+
+# =============================================================================
+# 12. STATE FILES & PERSISTENCE
 # =============================================================================
 
 STATE_FILE_HELD = os.path.join(BASE_DIR, "held_assets.json")
@@ -376,7 +410,7 @@ DROP_ANCHORS_FILE = os.path.join(BASE_DIR, "drop_anchors.json")
 CONFIG_BACKUP_PATH = os.path.join(SESSION_DIR, "config_backup.py")
 
 # =============================================================================
-# 12. SIMULATION / TRACING
+# 13. SIMULATION / TRACING
 # =============================================================================
 
 EXCHANGE_TRACE_ENABLED = True
@@ -386,7 +420,7 @@ EXCHANGE_TRACE_SCRUB_IDS = True
 EXCHANGE_TRACE_MAX_ARGLEN = 2000
 
 # =============================================================================
-# 13. ERWEITERTE EINSTELLUNGEN
+# 14. ERWEITERTE EINSTELLUNGEN
 # =============================================================================
 
 TICKER_THREADPOOL_SIZE = 6
@@ -405,7 +439,7 @@ RUN_TIMESTAMP_LOCAL = run_timestamp
 PREDICTIVE_BUY_ZONE_PCT = 1.0 + (PREDICTIVE_BUY_ZONE_BPS / 10_000.0)
 
 # =============================================================================
-# 14. WATCHLIST
+# 15. WATCHLIST
 # =============================================================================
 
 topcoins_keys = [
@@ -428,7 +462,7 @@ topcoins_keys = [
 ]
 
 # =============================================================================
-# 15. MARKET DATA & RETENTION
+# 16. MARKET DATA & RETENTION
 # =============================================================================
 
 MARKET_DATA_FLUSH_INTERVAL_S = 5
@@ -438,7 +472,7 @@ RETENTION = {
 }
 
 # =============================================================================
-# 16. TERMINAL UI
+# 17. TERMINAL UI
 # =============================================================================
 
 TERMINAL_PRESET = "verbose"
@@ -486,7 +520,7 @@ SHOW_INDIVIDUAL_POSITIONS = True
 SHOW_TOTAL_SUMMARY = True
 
 # =============================================================================
-# 17. HELPER FUNCTIONS
+# 18. HELPER FUNCTIONS
 # =============================================================================
 
 def backup_config():

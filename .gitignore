@@ -1,39 +1,57 @@
-﻿# Runtime / State
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment Variables (WICHTIG: Enthält API-Keys!)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Trading Bot Runtime Files
 sessions/
-reports/
-snapshots*/
+logs/
 *.log
 *.jsonl
-*_anchors.json
-held_assets*.json
-open_buy_orders*.json
-load_markets.json
-orderbook_*.json
-*.csv
+
+# State Files (können lokal wiederhergestellt werden)
+held_assets.json
+open_buy_orders.json
+drop_anchors.json
+trade_history.csv
+
+# Reports & Snapshots
+reports/
+snapshots/
 *.parquet
 
-# Build/Cache/Artifacts
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
+# Backups
+*.backup
+*.bak
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Distribution
 dist/
 build/
-*.zip
-*.patch
-
-# Legacy/Old
-__snapshots__/
-MEXC_Validation/
-testing_framework/
-tests/
-other/
-tools/
-
-# Secrets
-.env
-
-# Editor
-.vscode/
-.claude/
+*.egg-info/
