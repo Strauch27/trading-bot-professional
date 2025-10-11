@@ -189,6 +189,11 @@ TRADE_TTL_MIN = 120
 # 0 = Keine Wartezeit (Coin kann sofort wieder gekauft werden)
 COOLDOWN_MIN = 15
 
+# ALLOW_DUPLICATE_COINS: Dürfen mehrere Positionen im gleichen Symbol eröffnet werden?
+# False = Nur eine Position pro Symbol (empfohlen, verhindert Überkonzentration)
+# True = Mehrere Positionen im gleichen Symbol erlaubt (höheres Risiko)
+ALLOW_DUPLICATE_COINS = False
+
 # --- 1.5 GUARDS (Qualitätsfilter) ---
 # Guards sind Sicherheitschecks die schlechte Trades verhindern
 # ⚠️ ACHTUNG: Zu strikte Guards können ALLE Trades blockieren!
