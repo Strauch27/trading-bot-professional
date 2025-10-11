@@ -114,8 +114,8 @@ ATR_MIN_SAMPLES = 15
 DROP_TRIGGER_VALUE = 0.997  # -0.3% Drop
 
 # --- V9_3 STYLE: Trigger, Lookback, Mode ---
-LOOKBACK_S = 300             # 5m Impulsfenster (ok)
-MODE = 2                     # Impulsmodus (ok)
+LOOKBACK_S = 120             # 2min Lookback-Fenster (zentral)
+MODE = 4                     # Mode 4: Drop-Trigger ohne Impuls (FIXED: Mode 2 Impuls-Check nicht implementiert)
 
 # Stabilisierung / Entprellen (V9_3 aggressiver, aber kontrolliert)
 CONFIRM_TICKS = 0          # sofort scharf (aggressiver)
@@ -137,9 +137,10 @@ USE_ROBUST_MARKET_FETCH = True
 DROP_TRIGGER_MODE = 4        # Reset nach jedem Trade
 
 # DROP_TRIGGER_LOOKBACK_MIN: Zeitfenster für Mode 2/3
-# 5 = Betrachte die letzten 5 Minuten für Hochpunkt-Suche (Minimum)
+# 2 = Betrachte die letzten 2 Minuten für Hochpunkt-Suche
 # Größerer Wert = längerer Rückblick (träger, aber stabiler)
-DROP_TRIGGER_LOOKBACK_MIN = 5
+# HINWEIS: Inaktiv bei MODE=4 (persistente Anchors)
+DROP_TRIGGER_LOOKBACK_MIN = 2
 
 # Drop Anchor System: Speichert Hochpunkte dauerhaft (überlebt Bot-Neustarts)
 
@@ -158,9 +159,9 @@ ANCHOR_UPDATES_WHEN_FLAT = True
 # Risikomanagement: Wie viel investiert der Bot?
 
 # MAX_TRADES: Maximale Anzahl verschiedener Coins gleichzeitig
-# 3 = Bot kann maximal 3 verschiedene Coins gleichzeitig halten
+# 10 = Bot kann maximal 10 verschiedene Coins gleichzeitig halten
 # Hilft Risiko zu streuen (Diversifikation)
-MAX_TRADES = 3
+MAX_TRADES = 10
 
 # POSITION_SIZE_USDT: Wie viel USDT pro Kauf einsetzen
 # 25.0 = Jeder Kauf verwendet 25 USDT (ca. 25 Dollar)
@@ -1492,7 +1493,7 @@ def validate_config_schema():
     # 4. ENTRY STRATEGIE
     check_range("DROP_TRIGGER_VALUE", DROP_TRIGGER_VALUE, 0.5, 0.999, float)
     check_enum("DROP_TRIGGER_MODE", DROP_TRIGGER_MODE, [1, 2, 3, 4])
-    check_range("DROP_TRIGGER_LOOKBACK_MIN", DROP_TRIGGER_LOOKBACK_MIN, 5, 1440, int)
+    check_range("DROP_TRIGGER_LOOKBACK_MIN", DROP_TRIGGER_LOOKBACK_MIN, 1, 1440, int)  # Min. 1 Minute erlaubt
 
     # 5. POSITION MANAGEMENT
     check_range("MAX_TRADES", MAX_TRADES, 1, 50, int)

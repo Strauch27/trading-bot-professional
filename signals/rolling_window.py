@@ -17,6 +17,10 @@ class RollingWindow:
         if len(self.q) == self.q.maxlen and self._max not in self.q:
             self._max = max(self.q) if self.q else None
 
+    def add(self, timestamp, price: float):
+        """Add new price to rolling window (alias for push, ignores timestamp)"""
+        self.push(price)
+
     @property
     def max(self):
         """Get current maximum value in window"""

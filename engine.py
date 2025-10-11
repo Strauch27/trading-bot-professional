@@ -1151,46 +1151,11 @@ class TradingEngine:
             now_ts = time.time()
             self.rolling_windows[symbol].add(now_ts, current_price)
 
-            # Re-anchor if new high
-            rolling_high = self.rolling_windows[symbol].max()
-            anchor_price = self.drop_trigger.reanchor(symbol, rolling_high)
+            # NOTE: Anchor management is handled by BuySignalService (line 1058 update_price)
+            # DO NOT call reanchor() here as it overrides proper MODE 4 persistent anchor logic
+            # The BuySignalService calculates anchors correctly in evaluate_buy_signal() (line 1082)
 
-            # 5b. Evaluate Drop Trigger with Hysteresis and Debounce
-            trace_step("evaluate_drop_trigger", symbol=symbol)
-            drop_fired, drop_info = self.drop_trigger.evaluate(symbol, current_price)
-
-            if not drop_fired:
-                # Drop trigger not fired - log reason and return
-                trace_step("drop_trigger_not_fired", symbol=symbol, reason=drop_info["reason"])
-
-                # Track decision timing
-                decision_time = time.time() - decision_start_time
-                self.performance_metrics['decision_times'].append(decision_time)
-
-                self.jsonl_logger.decision_end(
-                    decision_id=decision_id,
-                    symbol=symbol,
-                    decision="no_buy",
-                    reason=drop_info["reason"],
-                    drop_trigger_info=drop_info,
-                    anchor_price=anchor_price,
-                    decision_time_ms=decision_time * 1000
-                )
-                return None
-
-            # Drop trigger fired - emit TRIGGER_CONFIRMED
-            trace_step("drop_trigger_confirmed", symbol=symbol)
-            logger.info(f"[TRIGGER_CONFIRMED] {symbol} @ {current_price:.8f} | {drop_info}")
-            self.jsonl_logger.log_raw_event("TRIGGER_CONFIRMED", {
-                "symbol": symbol,
-                "side": "BUY",
-                "anchor_price": drop_info.get("anchor", anchor_price),
-                "drop_bp": drop_info.get("drop_bp", 0),
-                "current_price": current_price,
-                "timestamp": now_ts
-            })
-
-            # 5c. Signal Stabilization Check
+            # 5b. Signal Stabilization Check
             trace_step("signal_stabilization", symbol=symbol)
             # Simple condition: spread reasonable (could be enhanced)
             stabilize_condition = True
@@ -1211,12 +1176,11 @@ class TradingEngine:
                     symbol=symbol,
                     decision="no_buy",
                     reason="awaiting_stabilization",
-                    drop_trigger_info=drop_info,
                     decision_time_ms=decision_time * 1000
                 )
                 return None
 
-            # 5d. Evaluate buy signal with DROP_TRIGGER logic (legacy compatibility)
+            # 5c. Evaluate buy signal with DROP_TRIGGER logic
             trace_step("evaluate_buy_signal_start", symbol=symbol)
             buy_triggered, context = self.buy_signal_service.evaluate_buy_signal(symbol, current_price)
             trace_step("evaluate_buy_signal_result", symbol=symbol, triggered=buy_triggered, context=context)
