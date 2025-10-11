@@ -778,8 +778,8 @@ class ExchangeAdapter(ExchangeInterface):
             post_only = bool(order_cfg.get("post_only", False))
             if post_only and not post_only_guard_buy(price, best_bid, f):
                 if order_cfg.get("force_adjust_price_for_post_only", True):
-                    # Adjust price to ensure maker status
-                    price = max(0.0, best_bid - f.tickSize)
+                    # Adjust price to ensure maker status - BUY must be at/below bid
+                    price = max(0.0, best_bid)
                     logger.info(f"Adjusted price for post_only: {symbol} price={price}",
                                extra={'event_type': 'POST_ONLY_PRICE_ADJUST', 'meta': meta})
                 else:
@@ -958,9 +958,11 @@ class ExchangeAdapter(ExchangeInterface):
         price, qty, notional, audit = size_buy_from_quote(
             quote_budget, ask, f.tickSize, f.stepSize, f.minNotional
         )
-        # Post-Only-Absicherung
+        # Post-Only-Absicherung: BUY muss auf/unter bid sein (Maker-Seite)
         if order_cfg.get("post_only", False):
-            price = min(price, bid - f.tickSize)
+            # Für BUY: Preis darf nicht über bid liegen, sonst wird es ein Taker
+            # Sicherstellen dass Preis im Orderbuch ist: <= bid
+            price = min(price, bid)
         evt = {
             "event_type":"ORDER_SENT","symbol":symbol,"side":"BUY",
             "price":price,"qty":qty,"notional":notional,
