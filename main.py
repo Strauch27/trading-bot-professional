@@ -782,15 +782,6 @@ def main():
                     # Gather extended heartbeat information
                     positions_count = len(engine.positions) if engine and hasattr(engine, 'positions') else 0
 
-                    # Get robust market data stats if available
-                    market_health = "unknown"
-                    if 'robust_market_data_provider' in globals():
-                        try:
-                            health_info = globals()['robust_market_data_provider'].get_health_status()
-                            market_health = health_info.get('status', 'unknown')
-                        except Exception:
-                            pass
-
                     # Get memory status if available
                     memory_status = "unknown"
                     try:
@@ -803,13 +794,12 @@ def main():
 
                     # Enhanced heartbeat log
                     logger.info(f"📊 HEARTBEAT - engine={engine_running}, mode={mode}, budget={budget:.2f} USDT, "
-                               f"positions={positions_count}, market_health={market_health}, memory={memory_status}",
+                               f"positions={positions_count}, memory={memory_status}",
                                extra={'event_type': 'HEARTBEAT',
                                       'engine_running': engine_running,
                                       'mode': mode,
                                       'budget': budget,
                                       'positions_count': positions_count,
-                                      'market_health': market_health,
                                       'memory_status': memory_status})
 
                     # If engine stopped unexpectedly, request shutdown
