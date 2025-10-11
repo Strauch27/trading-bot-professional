@@ -115,7 +115,7 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
     from core.logging.loggingx import log_mexc_cancel
     from .helpers import amount_to_precision, price_to_precision
     from .settlement import refresh_budget_from_exchange
-    from core.utils import get_symbol_limits, next_client_order_id
+    from core.utils.utils import get_symbol_limits, next_client_order_id
     # Note: PORTFOLIO_RESET_START already logged in portfolio.py - no duplicate needed
 
     try:
