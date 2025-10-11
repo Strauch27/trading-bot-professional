@@ -942,7 +942,17 @@ class ExchangeAdapter(ExchangeInterface):
     # Simple V9_3-style methods (as specified in patch)
     @with_backoff(max_attempts=4, base_delay=0.25, max_delay=1.0, total_time_cap_s=5.0)
     def place_limit_buy(self, symbol, quote_budget, order_cfg, market, meta=None):
-        f = market["filters"]
+        filters_raw = market["filters"]
+        # Convert dict to ExchangeFilters if needed
+        if isinstance(filters_raw, dict):
+            f = ExchangeFilters(
+                tickSize=float(filters_raw.get("tickSize", 0.01)),
+                stepSize=float(filters_raw.get("stepSize", 0.001)),
+                minNotional=float(filters_raw.get("minNotional", 10.0)),
+                minQty=float(filters_raw.get("minQty", 0.0))
+            )
+        else:
+            f = filters_raw
         bid = market["book"]["best_bid"]
         ask = market["book"]["best_ask"]
         price, qty, notional, audit = size_buy_from_quote(
@@ -955,7 +965,7 @@ class ExchangeAdapter(ExchangeInterface):
             "event_type":"ORDER_SENT","symbol":symbol,"side":"BUY",
             "price":price,"qty":qty,"notional":notional,
             "tif":order_cfg.get("tif","GTC"),"post_only":order_cfg.get("post_only", False),
-            "filters":f,"audit":audit
+            "filters":f.__dict__,"audit":audit
         }
         _emit_order_sent(logger, evt)
         # >>> hier tatsächlichen Börsen-Submit ausführen <<<
@@ -963,7 +973,17 @@ class ExchangeAdapter(ExchangeInterface):
 
     @with_backoff(max_attempts=4, base_delay=0.25, max_delay=1.0, total_time_cap_s=5.0)
     def place_limit_sell(self, symbol, base_qty, order_cfg, market, meta=None):
-        f = market["filters"]
+        filters_raw = market["filters"]
+        # Convert dict to ExchangeFilters if needed
+        if isinstance(filters_raw, dict):
+            f = ExchangeFilters(
+                tickSize=float(filters_raw.get("tickSize", 0.01)),
+                stepSize=float(filters_raw.get("stepSize", 0.001)),
+                minNotional=float(filters_raw.get("minNotional", 10.0)),
+                minQty=float(filters_raw.get("minQty", 0.0))
+            )
+        else:
+            f = filters_raw
         bid = market["book"]["best_bid"]
         price = max(0.0, bid - f.tickSize)
         notional = price * base_qty
@@ -971,7 +991,7 @@ class ExchangeAdapter(ExchangeInterface):
             "event_type":"ORDER_SENT","symbol":symbol,"side":"SELL",
             "price":price,"qty":base_qty,"notional":notional,
             "tif":order_cfg.get("tif","GTC"),"post_only":order_cfg.get("post_only", False),
-            "filters":f,"audit":{"sizing":"base_qty","tickSize":f.tickSize,"stepSize":f.stepSize}
+            "filters":f.__dict__,"audit":{"sizing":"base_qty","tickSize":f.tickSize,"stepSize":f.stepSize}
         }
         _emit_order_sent(logger, evt)
         # >>> hier tatsächlichen Börsen-Submit ausführen <<<
