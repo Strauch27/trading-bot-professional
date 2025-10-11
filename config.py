@@ -158,13 +158,13 @@ ANCHOR_UPDATES_WHEN_FLAT = True
 # Risikomanagement: Wie viel investiert der Bot?
 
 # MAX_TRADES: Maximale Anzahl verschiedener Coins gleichzeitig
-# 3 = Bot kann maximal 3 verschiedene Coins gleichzeitig halten
+# 10 = Bot kann maximal 10 verschiedene Coins gleichzeitig halten
 # Hilft Risiko zu streuen (Diversifikation)
-MAX_TRADES = 3
+MAX_TRADES = 10
 
 # POSITION_SIZE_USDT: Wie viel USDT pro Kauf einsetzen
 # 25.0 = Jeder Kauf verwendet 25 USDT (ca. 25 Dollar)
-# Bei MAX_TRADES=3 → Maximales Risiko = 3 × 25 = 75 USDT
+# Bei MAX_TRADES=10 → Maximales Risiko = 10 × 25 = 250 USDT
 # Viele Märkte benötigen nach Rundung >16 USDT Notional.
 # 25 USDT ist ein robuster Untergrenzwert; bei Bedarf weiter erhöhen.
 POSITION_SIZE_USDT = 25.0
