@@ -557,7 +557,7 @@ class BuyDecisionHandler:
                 self.engine.rolling_stats.add_fill(trade_fill_event["ts"], slippage_bp)
 
             # Process fill event through order flow
-            from order_flow import on_order_update
+            from core.utils.order_flow import on_order_update
             on_order_update(trade_fill_event, self.engine.pnl_tracker)
 
             # Log TRADE_FILL event
