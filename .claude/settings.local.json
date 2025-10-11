@@ -25,7 +25,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(chmod:*)",
       "Bash(mkdir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []

@@ -1200,9 +1200,10 @@ def validate_config():
     return True
 
 # =============================================================================
-# ENV-OVERRIDES (optional für CI/Sandbox)
+# ENV-OVERRIDES (optional für LOG_LEVEL)
 # =============================================================================
-GLOBAL_TRADING = os.getenv("BOT_TRADING", "1") == "1"
+# GLOBAL_TRADING wird NICHT überschrieben - nur der Wert aus Zeile 55 gilt!
+# Entfernt: GLOBAL_TRADING = os.getenv("BOT_TRADING", "1") == "1"
 LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", LOG_LEVEL)
 
 # =============================================================================
