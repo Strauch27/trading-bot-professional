@@ -15,8 +15,8 @@ import logging
 from typing import Dict
 
 import config
-from logger import new_decision_id
-from risk_guards import atr_stop_hit, trailing_stop_hit
+from core.logging.logger import new_decision_id
+from core.portfolio.risk_guards import atr_stop_hit, trailing_stop_hit
 
 logger = logging.getLogger(__name__)
 

@@ -18,8 +18,8 @@ import html
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
-from telegram_notify import tg
-from telegram_service_adapter import TelegramServiceAdapter
+from integrations.telegram.telegram_notify import tg
+from integrations.telegram.telegram_service_adapter import TelegramServiceAdapter
 import re
 import logging
 import tempfile

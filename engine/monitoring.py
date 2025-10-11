@@ -15,7 +15,7 @@ from typing import Dict, Any
 from collections import deque
 
 import config
-from adaptive_logger import (
+from core.logging.adaptive_logger import (
     should_log_event, should_log_performance_metric,
     flush_performance_buffer
 )

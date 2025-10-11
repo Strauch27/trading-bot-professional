@@ -44,16 +44,17 @@ from config import (
     use_drop_anchor_since_last_close,
     DUST_TARGET_QUOTE, DUST_MIN_COST_USD, DUST_FORCE_MARKET_IOC
 )
-from logger_setup import logger
-from loggingx import log_event, log_metric, log_audit_event
-from utils import (
+from core.logging.logger_setup import logger
+from core.logging.loggingx import log_event, log_metric, log_audit_event
+from core.utils import (
     save_state_safe, load_state, save_trade_history,
     SettlementManager, get_symbol_limits
 )
 from trading import (
-    refresh_budget_from_exchange, _get_free, _base_currency,
+    refresh_budget_from_exchange,
     full_portfolio_reset
 )
+from trading.helpers import _get_free, _base_currency
 
 
 class DustLedger:
@@ -292,7 +293,7 @@ class PortfolioManager:
                    extra={'event_type': 'STATE_SANITY_CHECK_START'})
         
         try:
-            from utils import with_backoff
+            from core.utils import with_backoff
             actual_balances = self.exchange.fetch_balance()
             total_balances = actual_balances.get('total', {})
             

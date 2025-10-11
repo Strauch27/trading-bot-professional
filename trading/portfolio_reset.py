@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def cleanup_stale_orders(exchange, held_assets, open_buy_orders, max_age_minutes=60):
     """Bereinigt alte offene Orders die Kapital blockieren - mit Crash-Recovery"""
-    from loggingx import log_mexc_update, log_mexc_cancel
+    from core.logging.loggingx import log_mexc_update, log_mexc_cancel
     try:
         from config import take_profit_threshold, stop_loss_threshold
         cleaned_count = 0
@@ -111,10 +111,10 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
     Diese Funktion dient dazu, mit einem sauberen Zustand zu starten.
     Returns: True bei Erfolg (auch wenn keine Assets zu verkaufen waren), False bei Fehler
     """
-    from loggingx import log_mexc_cancel
+    from core.logging.loggingx import log_mexc_cancel
     from .helpers import amount_to_precision, price_to_precision
     from .settlement import refresh_budget_from_exchange
-    from utils import get_symbol_limits, next_client_order_id
+    from core.utils import get_symbol_limits, next_client_order_id
     # Note: PORTFOLIO_RESET_START already logged in portfolio.py - no duplicate needed
 
     try:

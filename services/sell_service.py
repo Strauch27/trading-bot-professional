@@ -5,11 +5,11 @@ from config import (
     TRADE_TTL_MIN, NEVER_MARKET_SELLS, ALLOW_MARKET_FALLBACK_TTL,
     EXIT_ESCALATION_BPS, EXIT_LADDER_BPS, EXIT_IOC_TTL_MS, MAX_SLIPPAGE_BPS_EXIT
 )
-from utils import (
+from core.utils import (
     next_client_order_id, fetch_ticker_cached, quantize_price,
     compute_avg_fill_and_fees, compute_realized_pnl_net_sell, save_trade_history
 )
-from loggingx import log_event, exit_placed, exit_filled
+from core.logging.loggingx import log_event, exit_placed, exit_filled
 from .sizing_service import SizingService
 
 class SellService:

@@ -37,20 +37,20 @@ import config as config_module  # config.py liegt im Projektwurzelordner
 
 # Importiere alle Config-Werte für lokale Nutzung
 from config import *
-import config_lint
-from logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
+from scripts import config_lint
+from core.logging.logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
 
 # --- direkt nach dem Import von config.py ---
 logger.info("CFG_SNAPSHOT: GLOBAL_TRADING=%s, ON_INSUFFICIENT_BUDGET=%s",
             config_module.GLOBAL_TRADING, getattr(config_module, "ON_INSUFFICIENT_BUDGET", None))
-from loggingx import log_event, get_run_summary, setup_rotating_logger
-from utils import (
+from core.logging.loggingx import log_event, get_run_summary, setup_rotating_logger
+from core.utils import (
     SettlementManager, DustSweeper, log_initial_config
 )
-from portfolio import PortfolioManager
+from core.portfolio import PortfolioManager
 from engine import TradingEngine
-from telegram_notify import init_telegram_from_config, tg
-from telegram_commands import start_telegram_command_server
+from integrations.telegram import init_telegram_from_config, tg
+from integrations.telegram import start_telegram_command_server
 
 
 def _ensure_runtime_dirs():
@@ -328,12 +328,12 @@ def main():
     backup_config()
     
     # Split-Logs gleich zu Beginn aktivieren (an Root-Logger)
-    from logger_setup import setup_split_logging
+    from core.logging.logger_setup import setup_split_logging
     import logging
     setup_split_logging(logging.getLogger())  # Root-Logger bekommt die Split-Handler
-    
+
     # Config-Snapshot loggen
-    from loggingx import config_snapshot
+    from core.logging.loggingx import config_snapshot
     C = config_module
     config_snapshot({k: getattr(C, k) for k in dir(C) if k.isupper()})
     
@@ -737,7 +737,7 @@ def main():
         # Heartbeat Telemetry (optional)
         if getattr(config_module, 'ENABLE_HEARTBEAT_TELEMETRY', False):
             try:
-                from heartbeat_telemetry import start_auto_heartbeat
+                from core.utils.heartbeat_telemetry import start_auto_heartbeat
                 start_auto_heartbeat(getattr(config_module, 'HEARTBEAT_INTERVAL_S', 60.0))
                 logger.info("Heartbeat telemetry enabled", extra={'event_type': 'HEARTBEAT_TELEMETRY_ENABLED'})
             except Exception as e:
@@ -915,7 +915,7 @@ def main():
 def _telegram_shutdown_cleanup():
     """Cleanup callback for stopping Telegram services"""
     try:
-        from telegram_commands import stop_telegram_command_server
+        from integrations.telegram import stop_telegram_command_server
         stop_telegram_command_server()
         logger.info("Telegram command server stopped")
     except Exception as e:
@@ -924,7 +924,7 @@ def _telegram_shutdown_cleanup():
 def _telegram_shutdown_summary():
     """Cleanup callback for Telegram shutdown summary"""
     try:
-        from loggingx import get_run_summary
+        from core.logging.loggingx import get_run_summary
         tg.notify_shutdown(get_run_summary())
     except Exception as e:
         logger.debug(f"Telegram shutdown summary failed: {e}")

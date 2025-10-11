@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Tuple
 from config import FEE_RATE, MIN_ORDER_BUFFER, ALLOW_AUTO_SIZE_UP, MAX_AUTO_SIZE_UP_BPS, MAX_AUTO_SIZE_UP_ABS_USDT
-from utils import (
+from core.utils import (
     get_symbol_limits,
     quantize_price,
     quantize_amount,

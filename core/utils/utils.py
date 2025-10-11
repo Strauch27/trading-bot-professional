@@ -16,9 +16,9 @@ from config import (
     use_trailing_take_profit, trailing_tp_activation_pct,
     trailing_tp_step_bp, trailing_tp_under_high_bp
 )
-from logger_setup import logger
-from loggingx import (
-    log_event, log_metric, sl_breakeven_bump, 
+from core.logging.logger_setup import logger
+from core.logging.loggingx import (
+    log_event, log_metric, sl_breakeven_bump,
     sl_trail_update, tp_trail_update,
     trailing_bump, trailing_hit
 )
@@ -487,8 +487,8 @@ class SettlementManager:
     def on_sell_settled(self, order_id, symbol, exit_price, amount, fee=0.0, **extra):
         """Handler für abgeschlossene SELL-Orders mit PnL-Berechnung"""
         import time
-        from loggingx import on_order_filled
-        from telegram_notify import tg
+        from core.logging.loggingx import on_order_filled
+        from integrations.telegram import tg
         
         # Get pending settlement data
         settlement = self.pending_settlements.get(order_id, {})
@@ -527,7 +527,7 @@ class SettlementManager:
         
         # Entkopplung via Runtime-Event; Engine-Hook aktualisiert PnL & Telegram
         try:
-            from event_bus import emit
+            from core.events.event_bus import emit
             emit(
                 "EXIT_FILLED",
                 symbol=symbol,

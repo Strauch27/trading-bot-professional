@@ -48,14 +48,14 @@ from services import (
 from adapters.exchange import ExchangeAdapter, MockExchange
 
 # Logging Imports
-from logger import JsonlLogger, new_decision_id, new_client_order_id
-from adaptive_logger import get_adaptive_logger, guard_stats_maybe_summarize
+from core.logging.logger import JsonlLogger, new_decision_id, new_client_order_id
+from core.logging.adaptive_logger import get_adaptive_logger, guard_stats_maybe_summarize
 
 # Buy Flow Logger
 from services.buy_flow_logger import get_buy_flow_logger, shutdown_buy_flow_logger
 
 # Debug Tracing System
-from debug_tracer import trace_function, trace_step, get_execution_summary
+from core.logging.debug_tracer import trace_function, trace_step, get_execution_summary
 
 # Shutdown Coordinator
 from services.shutdown_coordinator import get_shutdown_coordinator
@@ -66,9 +66,9 @@ from signals.rolling_window import RollingWindow
 from signals.confirm import Stabilizer
 
 # PnL and Telemetry System
-from pnl import PnLTracker
-from order_flow import on_order_update
-from telemetry import RollingStats, heartbeat_emit
+from core.utils.pnl import PnLTracker
+from core.utils.order_flow import on_order_update
+from core.utils.telemetry import RollingStats, heartbeat_emit
 
 # Refactored Modules
 from .monitoring import EngineMonitoring
@@ -153,12 +153,12 @@ class TradingEngine:
         self.monitoring.log_configuration_snapshot(self.config)
 
         # Start log management
-        from log_manager import start_log_management
+        from core.logging.log_manager import start_log_management
         start_log_management()
 
         # Subscribe to event bus for unified PnL handling
         try:
-            from event_bus import subscribe
+            from core.events.event_bus import subscribe
             subscribe("EXIT_FILLED", self.exit_handler.on_exit_filled_event)
             logger.info("Subscribed to EXIT_FILLED events for unified PnL handling")
         except Exception as e:
@@ -330,7 +330,7 @@ class TradingEngine:
         shutdown_buy_flow_logger()
 
         # Stop log management
-        from log_manager import stop_log_management
+        from core.logging.log_manager import stop_log_management
         stop_log_management()
 
         logger.info("Trading Engine stopped")

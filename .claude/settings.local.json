@@ -50,7 +50,14 @@
       "Bash(for file in buy_decision.py exit_handler.py position_manager.py monitoring.py)",
       "Bash(do echo \"=== $file ===\")",
       "Bash(tree:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git push:*)",
+      "Bash(pip3 install:*)",
+      "Bash(brew install:*)",
+      "Bash(/opt/homebrew/bin/python3.12:*)",
+      "Bash(source:*)",
+      "Bash(for:*)",
+      "Bash(if [ -f \"$file\" ])"
     ],
     "deny": [],
     "ask": []

@@ -14,7 +14,7 @@ import re
 import logging
 from typing import Optional
 from config import min_order_buffer, DUST_FACTOR
-from utils import get_symbol_limits, floor_to_step
+from core.utils import get_symbol_limits, floor_to_step
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def price_to_precision(exchange, symbol, price):
 def get_free(exchange, currency: str) -> float:
     """Holt freien Bestand einer Währung"""
     try:
-        from utils import with_backoff
+        from core.utils import with_backoff
         bal = with_backoff(exchange.fetch_balance)
         # Prefer standardized structure
         free_map = bal.get("free", {})

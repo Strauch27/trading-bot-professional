@@ -27,7 +27,7 @@ NETWORK_ERRORS = (ccxt.NetworkError, ccxt.DDoSProtection, requests.RequestExcept
 from services.shutdown_coordinator import get_shutdown_coordinator
 
 # Import robust sizing logic
-from helpers_filters import (
+from core.utils.helpers_filters import (
     ExchangeFilters,
     size_buy_from_quote,
     size_sell_from_base,
