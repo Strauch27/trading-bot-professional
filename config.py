@@ -58,24 +58,24 @@ GLOBAL_TRADING = True
 # Diese Werte bestimmen, wann der Bot eine Position schließt:
 
 # TAKE_PROFIT_THRESHOLD: Gewinnziel
-# 1.018 = 101.8% vom Kaufpreis = +1.8% Gewinn
-# Beispiel: Gekauft bei 100€ → Verkauf bei 101.80€
-TAKE_PROFIT_THRESHOLD = 1.0030  # +0.3% Take Profit (eng für Testzwecke)
+# 1.005 = 100.5% vom Kaufpreis = +0.5% Gewinn
+# Beispiel: Gekauft bei 100€ → Verkauf bei 100.50€
+TAKE_PROFIT_THRESHOLD = 1.005  # +0.5% Take Profit
 
 # STOP_LOSS_THRESHOLD: Maximaler akzeptierter Verlust
-# 0.985 = 98.5% vom Kaufpreis = -1.5% Verlust
-# Beispiel: Gekauft bei 100€ → Verkauf spätestens bei 98.50€
-STOP_LOSS_THRESHOLD = 0.9980  # -0.2% Stop Loss (eng für Testzwecke)
+# 0.990 = 99.0% vom Kaufpreis = -1.0% Verlust
+# Beispiel: Gekauft bei 100€ → Verkauf spätestens bei 99.00€
+STOP_LOSS_THRESHOLD = 0.990  # -1.0% Stop Loss
 
 # SWITCH_TO_SL_THRESHOLD: Umschaltpunkt der Exit-Strategie
-# 0.992 = 99.2% vom Kaufpreis = -0.8% Verlust
+# 0.995 = 99.5% vom Kaufpreis = -0.5% Verlust
 # Wenn Preis unter diesen Wert fällt, fokussiert Bot auf Stop-Loss statt Take-Profit
-SWITCH_TO_SL_THRESHOLD = 0.999  # bei -0.1% auf SL umschalten (eng für Testzwecke)
+SWITCH_TO_SL_THRESHOLD = 0.995  # bei -0.5% auf SL umschalten
 
 # SWITCH_TO_TP_THRESHOLD: Rück-Umschaltpunkt zu Take-Profit
-# 1.0050 = 100.50% vom Kaufpreis = +0.50% Gewinn
+# 1.002 = 100.2% vom Kaufpreis = +0.2% Gewinn
 # Wenn Preis wieder über diesen Wert steigt, wechselt Bot zurück zu Take-Profit
-SWITCH_TO_TP_THRESHOLD = 1.0020  # bei +0.2% zurück zu TP (eng für Testzwecke)
+SWITCH_TO_TP_THRESHOLD = 1.002  # bei +0.2% zurück zu TP
 
 # SWITCH_COOLDOWN_S: Minimale Wartezeit zwischen Umschaltungen
 # 20 = Warte mindestens 20 Sekunden zwischen TP/SL Wechseln
@@ -108,10 +108,10 @@ ATR_MIN_SAMPLES = 15
 # Der Bot kauft, wenn der Preis stark gefallen ist ("Buy the Dip" Strategie)
 
 # DROP_TRIGGER_VALUE: Wie tief muss der Preis fallen für ein Kaufsignal?
-# 0.995 = 99.5% vom Hochpunkt = -0.5% Preisrückgang
-# Beispiel: Coin war bei 100€ (Hoch) → Bot kauft wenn Preis auf 99.50€ fällt
-# Kleinerer Wert = größerer Rückgang nötig (0.99 = -1%, 0.995 = -0.5%)
-DROP_TRIGGER_VALUE = 0.995  # -0.5% Drop (für Testzwecke)
+# 0.997 = 99.7% vom Hochpunkt = -0.3% Preisrückgang
+# Beispiel: Coin war bei 100€ (Hoch) → Bot kauft wenn Preis auf 99.70€ fällt
+# Kleinerer Wert = größerer Rückgang nötig (0.99 = -1%, 0.997 = -0.3%)
+DROP_TRIGGER_VALUE = 0.997  # -0.3% Drop
 
 # --- V9_3 STYLE: Trigger, Lookback, Mode ---
 LOOKBACK_S = 300             # 5m Impulsfenster (ok)
@@ -133,13 +133,13 @@ USE_ROBUST_MARKET_FETCH = True
 # Mode 2: Höchster Preis der letzten X Minuten (dynamisch, kurzsichtig)
 # Mode 3: Der höhere Wert aus Mode 1 und 2 (Kombination)
 # Mode 4: Wie Mode 1, aber Reset nach jedem abgeschlossenen Trade (empfohlen)
-# Empfehlung: Mode 2 für Rolling-High (frische Marktstruktur)
-DROP_TRIGGER_MODE = 1        # Rolling High als Referenz
+# Empfehlung: Mode 4 für frische Anchors nach jedem Trade-Zyklus
+DROP_TRIGGER_MODE = 4        # Reset nach jedem Trade
 
 # DROP_TRIGGER_LOOKBACK_MIN: Zeitfenster für Mode 2/3
 # 5 = Betrachte die letzten 5 Minuten für Hochpunkt-Suche (Minimum)
 # Größerer Wert = längerer Rückblick (träger, aber stabiler)
-DROP_TRIGGER_LOOKBACK_MIN = 2
+DROP_TRIGGER_LOOKBACK_MIN = 5
 
 # Drop Anchor System: Speichert Hochpunkte dauerhaft (überlebt Bot-Neustarts)
 

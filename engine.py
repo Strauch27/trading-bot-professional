@@ -1194,10 +1194,11 @@ class TradingEngine:
             trace_step("signal_stabilization", symbol=symbol)
             # Simple condition: spread reasonable (could be enhanced)
             stabilize_condition = True
-            if coin_data and 'bid' in coin_data and 'ask' in coin_data:
-                spread_bp = ((coin_data['ask'] - coin_data['bid']) / coin_data['ask'] * 10000.0)
-                max_spread = getattr(config, 'MAX_SPREAD_BP_BY_SYMBOL', {}).get(symbol, 30)
-                stabilize_condition = spread_bp <= max_spread
+            if getattr(config, 'USE_SPREAD_GUARD', False):
+                if coin_data and 'bid' in coin_data and 'ask' in coin_data:
+                    spread_bp = ((coin_data['ask'] - coin_data['bid']) / coin_data['ask'] * 10000.0)
+                    max_spread = getattr(config, 'MAX_SPREAD_BP_BY_SYMBOL', {}).get(symbol, 30)
+                    stabilize_condition = spread_bp <= max_spread
 
             if not self.stabilizer.step(stabilize_condition):
                 trace_step("stabilization_waiting", symbol=symbol)
