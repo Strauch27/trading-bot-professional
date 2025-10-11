@@ -49,6 +49,10 @@ MIGRATIONS = {}
 
 GLOBAL_TRADING = True  # True = Live Trading, False = Nur Beobachten
 
+# Portfolio Reset beim Start (nur für Testing!)
+# ⚠️ ACHTUNG: Verkauft ALLE Assets beim Start - nur für Tests aktivieren!
+RESET_PORTFOLIO_ON_START = True  # True = Verkaufe alles beim Start, False = Normal (empfohlen)
+
 # =============================================================================
 # 2. EXIT STRATEGIE
 # =============================================================================
@@ -237,7 +241,6 @@ BE_ACTIVATION_PCT = None
 # 8. RISIKO & BUDGET MANAGEMENT
 # =============================================================================
 
-RESET_PORTFOLIO_ON_START = True
 SAFE_MIN_BUDGET = 10.0
 CASH_RESERVE_USDT = 0.0
 ON_INSUFFICIENT_BUDGET = "wait"
