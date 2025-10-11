@@ -7,7 +7,7 @@ os.environ.setdefault("PYTHONFAULTHANDLER", "1")
 STACKDUMP_FP = None
 
 try:
-    import numpy_fix  # NumPy Kompatibilitäts-Fix (optional) 
+    from core.utils import numpy_fix  # NumPy Kompatibilitäts-Fix (optional)
 except Exception:
     pass
 
