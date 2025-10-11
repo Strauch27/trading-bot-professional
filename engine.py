@@ -62,6 +62,9 @@ from adaptive_logger import (
     guard_stats_record, guard_stats_maybe_summarize
 )
 
+# Buy Flow Logger
+from services.buy_flow_logger import get_buy_flow_logger, shutdown_buy_flow_logger
+
 # Debug Tracing System
 from debug_tracer import trace_function, trace_step, trace_error, get_execution_summary
 
@@ -176,6 +179,9 @@ class TradingEngine:
         self.jsonl_logger = JsonlLogger()
         self.current_decision_id = None
         self.adaptive_logger = get_adaptive_logger()
+
+        # Buy Flow Logger
+        self.buy_flow_logger = get_buy_flow_logger()
 
         # Performance Metrics
         self.performance_metrics = {
@@ -384,6 +390,9 @@ class TradingEngine:
 
         # Print final statistics
         self._log_final_statistics()
+
+        # Shutdown buy flow logger
+        shutdown_buy_flow_logger()
 
         # Stop log management
         from log_manager import stop_log_management
@@ -1049,6 +1058,9 @@ class TradingEngine:
             market_health=market_health,
             timestamp=decision_start_time
         )
+
+        # Start Buy Flow Logger
+        self.buy_flow_logger.start_evaluation(symbol)
 
         try:
             trace_step("decision_started", symbol=symbol, price=current_price, decision_id=decision_id)
