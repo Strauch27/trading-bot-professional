@@ -654,10 +654,10 @@ def log_event(event_type: str, *,
                     "original_event_type": event_type,
                     "error": str(e)[:200]
                 })
-            except:
+            except Exception:
                 # If even basic logging fails, continue silently
                 pass
-        except:
+        except Exception:
             # Ultimate fallback - continue execution without logging
             pass
 
@@ -681,7 +681,7 @@ def log_audit_event(event_type: str, details: dict, level: str = "INFO"):
         try:
             timestamp = datetime.now().isoformat()
             print(f"[{timestamp}] AUDIT_LOGGER_ERROR: {str(e)[:200]} (event_type: {event_type})")
-        except:
+        except Exception:
             # Silent continuation if even console output fails
             pass
 

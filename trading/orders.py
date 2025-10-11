@@ -647,8 +647,6 @@ def place_ioc_sell_with_depth_sweep(exchange, symbol, amount, tif="IOC"):
 def place_market_ioc_buy_with_coid(exchange, symbol: str, quote_amount: float, coid: str):
     """
     Place IOC market buy order with clientOrderId (quote amount)
-
-    TODO: Kopiere vollständige Implementierung aus trading_legacy.py:1559-1563
     """
     return exchange.create_order(symbol, "market", "buy", None, None,
                                 {"cost": quote_amount, "timeInForce": "IOC", "clientOrderId": coid})

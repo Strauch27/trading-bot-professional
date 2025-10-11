@@ -64,15 +64,28 @@ class TelegramNotifier:
         return (text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
     
     def _request(self, method: str, payload: dict, *, max_retries: int = 3):
-        """Internal request method with retry logic"""
+        """Internal request method with retry logic (shutdown-aware)"""
         if not self.is_configured():
             return None
+
+        # Try to get shutdown coordinator (optional)
+        shutdown_coordinator = None
+        try:
+            from services.shutdown_coordinator import get_shutdown_coordinator
+            shutdown_coordinator = get_shutdown_coordinator()
+        except ImportError:
+            pass
+
         url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
         data = json.dumps(payload).encode('utf-8')
         headers = {"Content-Type": "application/json"}
         backoff = 1.0
-        
+
         for attempt in range(max_retries):
+            # Check shutdown before each attempt
+            if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():
+                return None
+
             try:
                 req = urllib.request.Request(url, data=data, headers=headers)
                 with urllib.request.urlopen(req, timeout=35) as r:
@@ -86,25 +99,49 @@ class TelegramNotifier:
                 except Exception:
                     pass
                 if e.code == 429 and retry_after:
-                    time.sleep(float(retry_after) + 0.2)
+                    # Shutdown-aware wait for rate limit
+                    if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=float(retry_after) + 0.2):
+                        return None
+                    elif not shutdown_coordinator:
+                        time.sleep(float(retry_after) + 0.2)
                     continue
                 if e.code >= 500:
-                    time.sleep(backoff)
+                    # Shutdown-aware backoff for server errors
+                    if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=backoff):
+                        return None
+                    elif not shutdown_coordinator:
+                        time.sleep(backoff)
                     backoff *= 1.6
                     continue
                 raise
             except Exception:
-                time.sleep(backoff)
+                # Shutdown-aware backoff for other errors
+                if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=backoff):
+                    return None
+                elif not shutdown_coordinator:
+                    time.sleep(backoff)
                 backoff *= 1.6
         return None
     
     def _should_send(self, dedup_key: Optional[str]):
-        """Check if message should be sent (rate limiting and deduplication)"""
+        """Check if message should be sent (rate limiting and deduplication, shutdown-aware)"""
+        # Try to get shutdown coordinator (optional)
+        shutdown_coordinator = None
+        try:
+            from services.shutdown_coordinator import get_shutdown_coordinator
+            shutdown_coordinator = get_shutdown_coordinator()
+        except ImportError:
+            pass
+
         now = time.time()
         with self._lock:
             dt = now - self.last_send_time
             if dt < self.rate_limit_s:
-                time.sleep(self.rate_limit_s - dt)
+                # Shutdown-aware rate limit wait
+                if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=self.rate_limit_s - dt):
+                    return False  # Abort send if shutdown requested
+                elif not shutdown_coordinator:
+                    time.sleep(self.rate_limit_s - dt)
             self.last_send_time = time.time()
             if dedup_key:
                 ts = self._dedup.get(dedup_key)
@@ -255,7 +292,10 @@ class TelegramNotifier:
             with urllib.request.urlopen(req, timeout=60):
                 return True
         except Exception as e:
-            print(f"Telegram document send error: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Telegram document send failed: {e}",
+                         extra={'event_type': 'TELEGRAM_DOCUMENT_SEND_ERROR', 'error': str(e)})
             return False
     
     def notify_startup(self, mode: str, budget: float):
@@ -481,9 +521,15 @@ def init_telegram_from_config():
         pass
     
     tg = TelegramNotifier()
+
+    import logging
+    logger = logging.getLogger(__name__)
+
     if tg.is_configured():
-        print(f"[OK] Telegram notifier initialized (chat_id: {tg.chat_id})")
+        logger.info(f"Telegram notifier initialized (chat_id: {tg.chat_id})",
+                   extra={'event_type': 'TELEGRAM_INITIALIZED', 'chat_id': tg.chat_id})
         return True
     else:
-        print("[INFO] Telegram notifier disabled or not configured")
+        logger.info("Telegram notifier disabled or not configured",
+                   extra={'event_type': 'TELEGRAM_DISABLED'})
         return False

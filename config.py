@@ -528,13 +528,18 @@ SHOW_TOTAL_SUMMARY = True
 
 def backup_config():
     """Erstellt eine Kopie der config.py im Session-Ordner"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         config_source = os.path.join(BASE_DIR, "config.py")
         shutil.copy2(config_source, CONFIG_BACKUP_PATH)
-        print(f"Config backed up to: {CONFIG_BACKUP_PATH}")
+        logger.info(f"Config backed up to: {CONFIG_BACKUP_PATH}",
+                   extra={'event_type': 'CONFIG_BACKUP_SUCCESS', 'path': CONFIG_BACKUP_PATH})
         return True
     except Exception as e:
-        print(f"Could not backup config: {e}")
+        logger.warning(f"Could not backup config: {e}",
+                      extra={'event_type': 'CONFIG_BACKUP_FAILED', 'error': str(e)})
         return False
 
 def validate_config():
@@ -766,9 +771,14 @@ except NameError:
     max_trades = MAX_TRADES
 
 if __name__ != "__main__":
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         validate_config_schema()
-        print("[OK] Config Schema Validation: PASSED")
+        logger.info("Config Schema Validation: PASSED",
+                   extra={'event_type': 'CONFIG_VALIDATION_SUCCESS'})
     except ValueError as e:
-        print(f"[FAIL] Config Schema Validation: FAILED\n{e}")
+        logger.error(f"Config Schema Validation: FAILED\n{e}",
+                    extra={'event_type': 'CONFIG_VALIDATION_FAILED', 'error': str(e)})
         raise

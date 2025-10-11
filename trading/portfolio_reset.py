@@ -84,7 +84,8 @@ def cleanup_stale_orders(exchange, held_assets, open_buy_orders, max_age_minutes
                                 # Log MEXC cancel
                                 try:
                                     log_mexc_cancel(order['id'], symbol, reason="stale_cleanup")
-                                except:
+                                except Exception:
+                                    # Logging is optional, don't fail cleanup
                                     pass
                                 logger.info(f"Alte Order storniert: {symbol} - {order['id']}",
                                           extra={'event_type': 'STALE_ORDER_CLEANED', 'symbol': symbol,
@@ -174,7 +175,8 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
                         # Log MEXC cancel
                         try:
                             log_mexc_cancel(o['id'], symbol, reason="portfolio_reset")
-                        except:
+                        except Exception:
+                            # Logging is optional, don't fail reset
                             pass
                     except Exception as ce:
                         logger.warning(f"Cancel fehlgeschlagen {symbol}: {ce}",

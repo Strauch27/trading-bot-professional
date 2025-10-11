@@ -1,0 +1,21 @@
+# Trading Bot Professional - Unpinned Dependencies (Range-based)
+# ================================================================
+# Use this file for flexible dependency management in development
+#
+# For production/CI, use requirements.txt (pinned versions)
+
+# Core Trading Libraries
+ccxt>=4.5.0,<5.0.0
+pandas>=2.3.0,<3.0.0
+numpy>=2.3.0,<3.0.0
+scipy>=1.16.0,<2.0.0
+
+# Logging & Monitoring
+python-json-logger>=4.0.0,<5.0.0
+
+# Data Export & Analysis
+openpyxl>=3.1.0,<4.0.0
+pyarrow>=21.0.0,<22.0.0
+
+# Configuration & Environment
+python-dotenv>=1.1.0,<2.0.0

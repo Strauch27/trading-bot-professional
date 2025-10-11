@@ -48,7 +48,6 @@ def log_min_notional_warnings(exchange, symbols, position_size_usdt, buffer=1.02
                 need = max(min_cost * buffer, position_size_usdt)
                 if position_size_usdt + 1e-9 < min_cost * buffer:
                     warning_msg = f"[WARN] {s}: POSITION_SIZE_USDT ({position_size_usdt}) < minNotional*{buffer:.2f} ({need:.2f})"
-                    print(warning_msg)
                     logger.warning(warning_msg, extra={
                         'event_type': 'MIN_NOTIONAL_WARNING',
                         'symbol': s,

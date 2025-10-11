@@ -238,7 +238,8 @@ def setup_logger():
     if hasattr(console_handler.stream, 'reconfigure'):
         try:
             console_handler.stream.reconfigure(encoding='utf-8')
-        except:
+        except (AttributeError, OSError):
+            # Console reconfigure not supported on this platform
             pass
     # Entferne den restriktiven Filter für mehr Console-Output
     # console_handler.addFilter(ConsoleImportantInfoFilter())  # Mehr Events anzeigen
@@ -278,7 +279,8 @@ def log_detailed_error(logger, error_tracker, error_type, symbol, error, context
             import json
             if hasattr(error, 'response') and error.response:
                 error_data['exchange_response'] = error.response
-        except:
+        except (AttributeError, TypeError, ValueError):
+            # Failed to parse exchange response
             pass
     
     # Füge Kontext hinzu wenn vorhanden
@@ -298,7 +300,8 @@ def log_detailed_error(logger, error_tracker, error_type, symbol, error, context
             'pending_settlements': settlement_manager.get_total_pending() if settlement_manager else 0,
             'pending_settlements_count': len(settlement_manager.pending_settlements) if settlement_manager else 0
         }
-    except:
+    except (AttributeError, TypeError, KeyError):
+        # System status collection failed, skip
         pass
     
     # Prüfe auf kritische Fehler-Häufung

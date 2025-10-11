@@ -205,7 +205,8 @@ def _positions_text() -> str:
                 "current_price": position.current_price,
                 "unrealized_pnl": position.unrealized_pnl
             }
-    except:
+    except (AttributeError, TypeError, KeyError) as e:
+        # Failed to parse position data
         pos = {}
     if not pos:
         return "📦 <b>Positions</b>\nKeine offenen Positionen."
@@ -863,7 +864,8 @@ def _format_top_drops_msg(drops: list):
         import config as C
         trigger_pct = (1.0 - float(C.DROP_TRIGGER_VALUE)) * 100.0
         lines.append(f"🎯 Drop-Trigger: <b>-{trigger_pct:.1f}%</b>\n")
-    except:
+    except (ImportError, AttributeError, ValueError):
+        # Config not available or invalid value
         pass
     
     signal_count = 0
@@ -1194,7 +1196,6 @@ def start_telegram_command_server(engine):
         _command_thread.start()
         
         logger.info("Telegram command server started", extra={"event_type": "TELEGRAM_SERVER_STARTED"})
-        print("[OK] Telegram command server started")
         return True
 
 def stop_telegram_command_server():

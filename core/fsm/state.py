@@ -238,7 +238,10 @@ def set_phase(
             log.info(evt)
         except Exception as e:
             # Don't let logging errors break state transitions
-            print(f"Warning: Phase event logging failed: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Phase event logging failed: {e}",
+                          extra={'event_type': 'PHASE_LOG_ERROR', 'error': str(e)})
 
     # Update metrics (Prometheus)
     if metrics:
@@ -256,7 +259,10 @@ def set_phase(
                 ).set(metrics.PHASE_MAP.get(to, -1))
         except Exception as e:
             # Don't let metrics errors break state transitions
-            print(f"Warning: Phase metrics update failed: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Phase metrics update failed: {e}",
+                          extra={'event_type': 'PHASE_METRICS_ERROR', 'error': str(e)})
 
     return evt
 

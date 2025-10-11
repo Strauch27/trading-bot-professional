@@ -376,7 +376,10 @@ class HeartbeatManager:
 
     def _default_log(self, event_type: str, **kwargs):
         """Default logging fallback"""
-        print(f"[{event_type}] {kwargs}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[{event_type}] {kwargs}",
+                   extra={'event_type': event_type, **kwargs})
 
     def start_auto_heartbeat(self):
         """Startet automatische Heartbeat-Emission"""
@@ -395,18 +398,33 @@ class HeartbeatManager:
 
     def _heartbeat_loop(self):
         """Heartbeat-Loop für automatische Emission"""
+        try:
+            from services.shutdown_coordinator import get_shutdown_coordinator
+            shutdown_coordinator = get_shutdown_coordinator()
+        except ImportError:
+            shutdown_coordinator = None
+
         while self.running:
             try:
                 # Generate and emit heartbeat
                 # Note: Requires PnL snapshot from external source
                 self.emit_heartbeat({})  # Empty snapshot as fallback
 
-                # Wait for next interval
-                time.sleep(self.heartbeat_interval)
+                # Wait for next interval (shutdown-aware)
+                if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=self.heartbeat_interval):
+                    self.log_function("HEARTBEAT_SHUTDOWN", message="Shutdown requested, stopping heartbeat loop")
+                    break
+                elif not shutdown_coordinator:
+                    # Fallback if shutdown coordinator not available
+                    time.sleep(self.heartbeat_interval)
 
             except Exception as e:
                 self.log_function("HEARTBEAT_ERROR", error=str(e))
-                time.sleep(10)  # Error recovery delay
+                # Error recovery delay (shutdown-aware)
+                if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=10.0):
+                    break
+                elif not shutdown_coordinator:
+                    time.sleep(10)
 
     def record_trade_fill(self, symbol: str, side: str, qty: float, price: float, slippage_bp: float = 0.0):
         """Record a trade fill for telemetry"""

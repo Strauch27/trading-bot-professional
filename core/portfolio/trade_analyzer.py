@@ -111,7 +111,8 @@ def create_trade_summary(trades: List[Dict]) -> pd.DataFrame:
                 close_dt = datetime.fromisoformat(trade['close_timestamp'].replace('Z', '+00:00'))
                 duration = close_dt - open_dt
                 trade['duration_minutes'] = duration.total_seconds() / 60
-            except:
+            except (ValueError, KeyError, TypeError) as e:
+                # Handle invalid timestamp formats or missing keys
                 trade['duration_minutes'] = 0
             
             summary_data.append(trade)
@@ -302,20 +303,27 @@ def analyze_current_run():
     """
     Analysiert den aktuellen Bot-Run und erstellt Excel-Report.
     """
-    print("Analysiere Trade-Logs...")
-    
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info("Analysiere Trade-Logs...",
+               extra={'event_type': 'TRADE_ANALYSIS_START'})
+
     # Parse Logs
     trades = parse_jsonl_logs()
-    print(f"Gefunden: {len(trades)} Trade-Events")
-    
+    logger.info(f"Gefunden: {len(trades)} Trade-Events",
+               extra={'event_type': 'TRADE_EVENTS_PARSED', 'count': len(trades)})
+
     # Erstelle Summary
     df = create_trade_summary(trades)
-    print(f"Verarbeitet: {len(df)} Trades")
-    
+    logger.info(f"Verarbeitet: {len(df)} Trades",
+               extra={'event_type': 'TRADE_SUMMARY_CREATED', 'count': len(df)})
+
     # Exportiere zu Excel
     output_file = export_to_excel(df)
-    print(f"Excel-Report erstellt: {output_file}")
-    
+    logger.info(f"Excel-Report erstellt: {output_file}",
+               extra={'event_type': 'TRADE_REPORT_EXPORTED', 'file': output_file})
+
     return output_file
 
 if __name__ == "__main__":

@@ -98,7 +98,7 @@ def heartbeat_emit(log_event, pnl_snapshot: dict, rolling: RollingStats, positio
         equity_delta=round(pnl_snapshot["equity_delta"],6),
         fills_last_5m=len(rolling.last_5m(now_ts)) if rolling else 0,
         avg_slippage_bp_last_5m=round(rolling.avg_slip_5m(now_ts),2) if rolling else 0.0,
-        session_drawdown_peak_pct=round(0.0,3),  # TODO: echte DD-Logik
+        session_drawdown_peak_pct=round(rolling.drawdown_peak if rolling else 0.0, 3),
         positions_open=positions_open,
         equity=round(equity,6)
     )

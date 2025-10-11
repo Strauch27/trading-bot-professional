@@ -130,9 +130,21 @@ def sync_active_order_and_state(exchange, symbol, held_assets, my_budget, settle
 
 def refresh_budget_from_exchange(exchange, my_budget, max_retries=3, delay=2.0) -> float:
     """
-    Holt das aktuelle USDT-Budget von der Exchange mit Retry-Logik
+    Holt das aktuelle USDT-Budget von der Exchange mit Retry-Logik (shutdown-aware)
     """
+    # Try to get shutdown coordinator (optional)
+    shutdown_coordinator = None
+    try:
+        from services.shutdown_coordinator import get_shutdown_coordinator
+        shutdown_coordinator = get_shutdown_coordinator()
+    except ImportError:
+        pass
+
     for attempt in range(int(max_retries)):
+        # Check shutdown before each attempt
+        if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():
+            return my_budget
+
         try:
             usdt_free = get_free(exchange, "USDT")
             old_budget = my_budget
@@ -148,7 +160,11 @@ def refresh_budget_from_exchange(exchange, my_budget, max_retries=3, delay=2.0) 
             if attempt < max_retries - 1:
                 logger.warning(f"Budget-Refresh fehlgeschlagen (Versuch {attempt+1}/{max_retries}), warte {delay}s...",
                              extra={'event_type': 'BUDGET_REFRESH_RETRY'})
-                time.sleep(delay)
+                # Shutdown-aware delay
+                if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=delay):
+                    return my_budget
+                elif not shutdown_coordinator:
+                    time.sleep(delay)
             else:
                 logger.error(f"Budget-Refresh endgültig fehlgeschlagen nach {max_retries} Versuchen",
                            extra={'event_type': 'BUDGET_REFRESH_FAILED'})
@@ -158,7 +174,15 @@ def refresh_budget_from_exchange(exchange, my_budget, max_retries=3, delay=2.0) 
 
 def wait_for_balance_settlement(my_budget, expected_increase, settlement_manager, refresh_func,
                                 max_wait=15, check_interval=1.0) -> bool:
-    """Wartet bis eine erwartete Gutschrift auf der Exchange angekommen ist"""
+    """Wartet bis eine erwartete Gutschrift auf der Exchange angekommen ist (shutdown-aware)"""
+    # Try to get shutdown coordinator (optional)
+    shutdown_coordinator = None
+    try:
+        from services.shutdown_coordinator import get_shutdown_coordinator
+        shutdown_coordinator = get_shutdown_coordinator()
+    except ImportError:
+        pass
+
     initial_budget = my_budget
     target_budget = initial_budget + (expected_increase * 0.98)  # 2% Toleranz für Fees
 
@@ -170,7 +194,13 @@ def wait_for_balance_settlement(my_budget, expected_increase, settlement_manager
     adjusted_max_wait = max(max_wait, avg_settlement_time * 2)  # Mindestens 2x durchschnittliche Zeit
 
     for i in range(int(adjusted_max_wait / check_interval)):
-        time.sleep(check_interval)
+        # Shutdown-aware sleep
+        if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=check_interval):
+            logger.info("Shutdown requested during settlement wait")
+            return False
+        elif not shutdown_coordinator:
+            time.sleep(check_interval)
+
         current = refresh_func()
 
         # Update Settlement Manager
@@ -198,24 +228,43 @@ def wait_for_balance_settlement(my_budget, expected_increase, settlement_manager
 
 
 def poll_order_canceled(exchange, symbol, order_id, timeout_s=6.0):
-    """Wartet auf Bestätigung der Order-Stornierung"""
+    """Wartet auf Bestätigung der Order-Stornierung (shutdown-aware)"""
     from loggingx import log_mexc_update
     from utils import with_backoff
+
+    # Try to get shutdown coordinator (optional)
+    shutdown_coordinator = None
+    try:
+        from services.shutdown_coordinator import get_shutdown_coordinator
+        shutdown_coordinator = get_shutdown_coordinator()
+    except ImportError:
+        pass
+
     t0 = time.time()
     while time.time() - t0 <= timeout_s:
+        # Check shutdown
+        if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():
+            return None
+
         try:
             st = with_backoff(exchange.fetch_order, order_id, symbol)
             # Log MEXC update
             try:
                 log_mexc_update(order_id, st or {})
-            except:
+            except Exception:
+                # Logging is optional, don't fail order polling
                 pass
             if st and st.get("status") in ("canceled", "closed"):
                 return st
         except (ccxt.OrderNotFound, ccxt.BadRequest):
             # Consider it gone
             return None
-        time.sleep(0.4)
+
+        # Shutdown-aware sleep
+        if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=0.4):
+            return None
+        elif not shutdown_coordinator:
+            time.sleep(0.4)
     return None
 
 
@@ -239,8 +288,21 @@ def place_safe_market_sell(exchange, symbol, desired_amount, held_assets, preise
     amt = compute_safe_sell_amount(exchange, symbol, desired_amount, held_assets, preise, consider_order_remaining=True)
     if amt <= 0:
         # Graceful handling: might be already filled or funds not yet released
+        # Try to get shutdown coordinator (optional)
+        shutdown_coordinator = None
+        try:
+            from services.shutdown_coordinator import get_shutdown_coordinator
+            shutdown_coordinator = get_shutdown_coordinator()
+        except ImportError:
+            pass
+
         for _ in range(8):
-            time.sleep(0.4)
+            # Shutdown-aware sleep
+            if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=0.4):
+                return None
+            elif not shutdown_coordinator:
+                time.sleep(0.4)
+
             try:
                 sync_active_order_and_state(exchange, symbol, held_assets, 0, None)
             except Exception:
@@ -265,10 +327,24 @@ def place_safe_market_sell(exchange, symbol, desired_amount, held_assets, preise
             pass
         return order
     except Exception as e:
-        # Retry once after short wait with a fresh balance check
+        # Retry once after short wait with a fresh balance check (shutdown-aware)
         logger.warning(f"SAFE_SELL_RETRY {symbol}: first attempt failed: {e}",
                       extra={"event_type":"SAFE_SELL_RETRY","symbol":symbol})
-        time.sleep(0.6)
+
+        # Try to get shutdown coordinator (optional)
+        shutdown_coordinator = None
+        try:
+            from services.shutdown_coordinator import get_shutdown_coordinator
+            shutdown_coordinator = get_shutdown_coordinator()
+        except ImportError:
+            pass
+
+        # Shutdown-aware sleep
+        if shutdown_coordinator and shutdown_coordinator.wait_for_shutdown(timeout=0.6):
+            return None
+        elif not shutdown_coordinator:
+            time.sleep(0.6)
+
         amt = compute_safe_sell_amount(exchange, symbol, desired_amount, held_assets, preise, consider_order_remaining=False)
         if amt <= 0:
             return None

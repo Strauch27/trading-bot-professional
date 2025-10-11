@@ -479,9 +479,9 @@ class GuardRollingStats:
         logger = logging.getLogger(__name__)
         logger.info(msg, extra={'event_type': 'GUARD_ROLLING_SUMMARY'})
         try:
-            from logger import JsonlLogger
+            from core.logging.logger import JsonlLogger
             JsonlLogger().write("guard_summary", json_payload)
-        except Exception:
+        except (ImportError, AttributeError) as e:
             # JSONL-Logger optional – kein Crash, wenn nicht verfügbar
             pass
 

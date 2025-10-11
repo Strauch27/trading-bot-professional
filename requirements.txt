@@ -1,20 +1,28 @@
-# Trading Bot V7 - Python Dependencies
-# =====================================
+# Trading Bot Professional - Python Dependencies (Pinned Versions)
+# ==================================================================
+# Generated: 2025-10-11
+# Python Version: 3.12+
+#
+# IMPORTANT: These are pinned versions for reproducible builds.
+# Update with: pip list --format=freeze > requirements.txt
+#
+# For range-based requirements, see requirements-unpinned.txt
 
 # Core Trading Libraries
-ccxt>=4.0.0
-pandas>=2.0.0
-numpy>=1.24.0
-scipy>=1.10.0
+ccxt==4.5.9
+pandas==2.3.3
+numpy==2.3.3
+scipy==1.16.2
 
-# Logging
-python-json-logger>=2.0.0
+# Logging & Monitoring
+python-json-logger==4.0.0
 
-# Excel Export für Trade Analyzer
-openpyxl>=3.1.0
+# Data Export & Analysis
+openpyxl==3.1.5
+pyarrow==21.0.0
 
-# Optional - für Parquet Snapshots
-pyarrow>=14.0.0
+# Configuration & Environment
+python-dotenv==1.1.1
 
-# Environment Variables
-python-dotenv>=1.0.0
+# Note: Standard library dependencies (json, logging, threading, etc.)
+# are included with Python and don't need to be listed here.

@@ -57,7 +57,16 @@
       "Bash(/opt/homebrew/bin/python3.12:*)",
       "Bash(source:*)",
       "Bash(for:*)",
-      "Bash(if [ -f \"$file\" ])"
+      "Bash(if [ -f \"$file\" ])",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Read(//Users/stenrauch/Library/**)",
+      "Bash(vm_stat)",
+      "Bash(system_profiler:*)",
+      "Bash(top:*)",
+      "Bash(./venv/bin/python -m pip list:*)",
+      "Bash(sort:*)"
     ],
     "deny": [],
     "ask": []

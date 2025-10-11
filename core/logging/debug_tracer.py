@@ -164,7 +164,8 @@ class DebugTracer:
                                     variables[var_name] = f"<{type(var_value).__name__} object>"
                                 else:
                                     variables[var_name] = str(type(var_value).__name__)
-                            except:
+                            except Exception:
+                                # Catch all serialization errors for variable inspection
                                 variables[var_name] = "<unserializable>"
 
                 step = ExecutionStep(

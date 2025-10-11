@@ -84,11 +84,23 @@ def legacy_signal_handler(signum, frame):
 def setup_exchange():
     """Initialisiert Exchange-Verbindung"""
     load_dotenv()
-    
-    # Robust API key loading
+
+    # Validate environment variables (fail-fast on missing/invalid config)
+    try:
+        from core.utils.env_validator import validate_environment
+        env_vars = validate_environment(strict=True)  # Exit if validation fails
+        logger.info("Environment validation passed", extra={'event_type': 'ENV_VALIDATION_SUCCESS'})
+    except SystemExit:
+        # Validation failed and already logged - re-raise to exit
+        raise
+    except Exception as e:
+        logger.error(f"Environment validation error: {e}", extra={'event_type': 'ENV_VALIDATION_ERROR'})
+        raise
+
+    # Robust API key loading (already validated by env_validator)
     api_key = os.environ.get('API_KEY')
     api_secret = os.environ.get('API_SECRET')
-    
+
     if not api_key or not api_secret:
         log_event("API_KEYS_MISSING", message="API_KEY oder API_SECRET nicht in Umgebungsvariablen gefunden. Bot startet im Observe-Modus.", level="ERROR")
         return None, False
@@ -230,17 +242,24 @@ def backup_state_files():
 
 def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
     """Wartet auf ausreichendes Budget wenn konfiguriert"""
+    from services.shutdown_coordinator import get_shutdown_coordinator
+
     if on_insufficient_budget == "wait" and exchange:
+        shutdown_coordinator = get_shutdown_coordinator()
         while portfolio.my_budget < safe_min_budget:
             logger.info(f"Warte auf Budget... Aktuell: {portfolio.my_budget:.2f} USDT, "
                        f"Benötigt: {safe_min_budget:.2f} USDT",
                        extra={'event_type': 'WAITING_FOR_BUDGET',
                              'current': portfolio.my_budget,
                              'required': safe_min_budget})
-            
-            tmod.sleep(60)
+
+            # Use shutdown-aware wait instead of blocking sleep
+            if shutdown_coordinator.wait_for_shutdown(timeout=60.0):
+                logger.info("Shutdown requested during budget wait")
+                return False
+
             portfolio.refresh_budget()
-            
+
             # Check for Ctrl+C während des Wartens
             if 'engine' in globals() and not engine.running:
                 return False
@@ -284,7 +303,8 @@ def main():
     def global_exception_handler(exc_type, exc_value, exc_traceback):
         try:
             logger.exception("UNHANDLED_EXCEPTION", exc_info=(exc_type, exc_value, exc_traceback))
-        except:
+        except Exception:
+            # Ultra-defensive: If logging itself crashes, fall back to original hook
             pass
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
@@ -419,9 +439,9 @@ def main():
 
                     # Check for shutdown während sleep (responsive)
                     for _ in range(sleep_seconds):
-                        if get_shutdown_coordinator().is_shutdown_requested():
+                        if get_shutdown_coordinator().wait_for_shutdown(timeout=1.0):
+                            logger.info("Shutdown requested during dust sweep wait")
                             return
-                        tmod.sleep(1)
 
                     # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
@@ -438,8 +458,10 @@ def main():
                                 ticker = fetch_ticker_cached(exchange, symbol)
                                 if ticker and ticker.get('last'):
                                     prices[symbol] = float(ticker.get('last'))
-                                # Drosseln: 200ms zwischen Calls
-                                tmod.sleep(0.2)
+                                # Drosseln: 200ms zwischen Calls (shutdown-aware)
+                                if get_shutdown_coordinator().wait_for_shutdown(timeout=0.2):
+                                    logger.debug("Shutdown requested during dust sweep price fetch")
+                                    return
                             except Exception as e:
                                 logger.debug(f"Dust-Sweep: Ticker für {symbol} fehlgeschlagen: {e}")
                                 continue
@@ -782,7 +804,8 @@ def main():
             handler.flush()
         sys.stdout.flush()
         sys.stderr.flush()
-    except:
+    except (OSError, AttributeError, ValueError) as e:
+        # Ignore flush errors (file closed, invalid state, etc.)
         pass
 
     # Brief stabilization pause (resolves timing-sensitive engine startup issues)
