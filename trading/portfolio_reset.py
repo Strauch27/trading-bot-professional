@@ -253,7 +253,6 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
             min_sell_qty_by_cost = (min_cost / price) if price else 0.0
 
             # Quantize up - sicherstellen dass wir über Minimum sind
-            from utils import floor_to_step
             def quantize_up(value, step):
                 """Rundet nach oben auf nächste gültige Stufe"""
                 if step <= 0:
