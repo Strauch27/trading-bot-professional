@@ -74,7 +74,7 @@ ATR_MIN_SAMPLES = 15
 # 3. ENTRY STRATEGIE
 # =============================================================================
 
-DROP_TRIGGER_VALUE = 0.997  # -0.3% Drop → Kaufsignal
+DROP_TRIGGER_VALUE = 0.96  # -4.0% Drop → Kaufsignal
 LOOKBACK_S = 120  # 2min Lookback-Fenster
 MODE = 4  # Mode 4: Drop-Trigger ohne Impuls
 CONFIRM_TICKS = 0  # Sofort scharf
