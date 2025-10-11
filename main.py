@@ -49,7 +49,7 @@ from core.utils import (
 )
 from core.portfolio import PortfolioManager
 from engine import TradingEngine
-from engine.hybrid_engine import HybridEngine
+# HybridEngine wird nur bei Bedarf importiert (wenn FSM_ENABLED=True)
 from integrations.telegram import init_telegram_from_config, tg
 from integrations.telegram import start_telegram_command_server
 
@@ -596,6 +596,9 @@ def main():
 
         # Engine initialization: FSM-aware or legacy
         if FSM_ENABLED:
+            # Import HybridEngine only when FSM is enabled
+            from engine.hybrid_engine import HybridEngine
+
             logger.info(f"Initializing HybridEngine in mode: {FSM_MODE}",
                        extra={'event_type': 'HYBRID_ENGINE_INIT', 'mode': FSM_MODE})
 
