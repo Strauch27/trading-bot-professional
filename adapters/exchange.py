@@ -968,8 +968,23 @@ class ExchangeAdapter(ExchangeInterface):
             "filters":f.__dict__,"audit":audit
         }
         _emit_order_sent(logger, evt)
-        # >>> hier tatsächlichen Börsen-Submit ausführen <<<
-        return {"ok": True, "order": evt}
+
+        # Place actual order on exchange
+        try:
+            client_order_id = meta.get("client_order_id") if meta else None
+            order = self.create_limit_order(
+                symbol=symbol,
+                side="buy",
+                amount=qty,
+                price=price,
+                time_in_force=order_cfg.get("tif", "GTC"),
+                client_order_id=client_order_id,
+                post_only=order_cfg.get("post_only", False)
+            )
+            return {"ok": True, "order": order, "audit": audit}
+        except Exception as e:
+            logger.error(f"place_limit_buy failed: {e}", extra={'event_type': 'ORDER_FAILED', 'error': str(e)})
+            return {"ok": False, "error": str(e), "audit": audit}
 
     @with_backoff(max_attempts=4, base_delay=0.25, max_delay=1.0, total_time_cap_s=5.0)
     def place_limit_sell(self, symbol, base_qty, order_cfg, market, meta=None):
@@ -994,8 +1009,23 @@ class ExchangeAdapter(ExchangeInterface):
             "filters":f.__dict__,"audit":{"sizing":"base_qty","tickSize":f.tickSize,"stepSize":f.stepSize}
         }
         _emit_order_sent(logger, evt)
-        # >>> hier tatsächlichen Börsen-Submit ausführen <<<
-        return {"ok": True, "order": evt}
+
+        # Place actual order on exchange
+        try:
+            client_order_id = meta.get("client_order_id") if meta else None
+            order = self.create_limit_order(
+                symbol=symbol,
+                side="sell",
+                amount=base_qty,
+                price=price,
+                time_in_force=order_cfg.get("tif", "GTC"),
+                client_order_id=client_order_id,
+                post_only=order_cfg.get("post_only", False)
+            )
+            return {"ok": True, "order": order, "audit": evt["audit"]}
+        except Exception as e:
+            logger.error(f"place_limit_sell failed: {e}", extra={'event_type': 'ORDER_FAILED', 'error': str(e)})
+            return {"ok": False, "error": str(e), "audit": evt["audit"]}
 
 
 class MockExchange(ExchangeInterface):
