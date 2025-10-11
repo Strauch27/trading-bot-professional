@@ -417,6 +417,22 @@ class TradingEngine:
                             logger.warning(f"Heartbeat emission failed: {e}")
                         co.beat("after_heartbeat_emit")
 
+                    # 5b. Portfolio Display (every 60s if enabled)
+                    if cycle_start % 60 < 1.0 and self.config.enable_pnl_monitor:
+                        co.beat("before_portfolio_display")
+                        try:
+                            from services.portfolio_display import display_portfolio
+                            display_portfolio(
+                                positions=self.positions,
+                                portfolio_manager=self.portfolio,
+                                market_data_provider=self.market_data,
+                                pnl_tracker=self.pnl_tracker,
+                                max_positions=self.config.max_positions
+                            )
+                        except Exception as e:
+                            logger.warning(f"Portfolio display failed: {e}")
+                        co.beat("after_portfolio_display")
+
                     # 6. Periodic Maintenance (every 30s)
                     if cycle_start % 30 < 1.0:
                         co.beat("before_maintenance")

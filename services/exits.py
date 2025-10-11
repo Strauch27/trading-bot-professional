@@ -165,17 +165,34 @@ class ExitOrderManager:
                 )
 
     def _try_limit_ioc_exit(self, context: ExitContext, reason: str) -> ExitResult:
-        """Try limit IOC exit order"""
+        """Try limit IOC exit order with aggressive BID-based pricing"""
         try:
-            # Calculate limit price with slippage buffer
-            slippage_factor = 1 - (self.max_slippage_bps / 10000)
-            limit_price = context.current_price * slippage_factor
+            # Get BID price from ticker for aggressive SELL pricing
+            # (consistent with BUY using ASK + premium)
+            bid = context.current_price  # Default fallback
+
+            try:
+                # Fetch ticker to get real BID price
+                ticker = self.exchange_adapter.fetch_ticker(context.symbol)
+                if ticker and 'bid' in ticker and ticker['bid']:
+                    bid = ticker['bid']
+                    logger.debug(f"Using BID price for exit: {bid} (current: {context.current_price})")
+            except Exception as ticker_error:
+                logger.warning(f"Failed to fetch ticker for exit pricing, using current price: {ticker_error}")
+
+            # Calculate aggressive SELL price: BID - premium (taker side, immediate fill)
+            # This mirrors the BUY logic: ASK + premium
+            premium_bps = self.max_slippage_bps
+            aggressive_price = bid * (1 - premium_bps / 10000.0)
+
+            logger.info(f"SELL IOC pricing for {context.symbol}: BID={bid:.6f}, premium={premium_bps}bp, "
+                       f"aggressive_price={aggressive_price:.6f} (vs current={context.current_price:.6f})")
 
             order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
-                price=limit_price,
+                price=aggressive_price,
                 client_order_id=f"exit_{reason}_{int(time.time())}"
             )
 
@@ -218,14 +235,25 @@ class ExitOrderManager:
             return ExitResult(success=False, reason=reason, error=str(e))
 
     def _try_ioc_fallback(self, context: ExitContext, reason: str) -> ExitResult:
-        """Try IOC fallback when market sells are disabled"""
+        """Try IOC fallback when market sells are disabled (with BID-based pricing)"""
         try:
-            # Use current price as limit for immediate execution
+            # Get BID price for aggressive pricing (fallback to current price)
+            bid = context.current_price
+
+            try:
+                ticker = self.exchange_adapter.fetch_ticker(context.symbol)
+                if ticker and 'bid' in ticker and ticker['bid']:
+                    bid = ticker['bid']
+            except Exception:
+                pass  # Use fallback
+
+            # Use BID directly for maximum aggression in fallback scenario
+            # (no premium deduction since this is already a retry)
             order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
-                price=context.current_price,
+                price=bid,
                 client_order_id=f"ioc_fallback_{reason}_{int(time.time())}"
             )
 
