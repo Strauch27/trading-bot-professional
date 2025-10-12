@@ -147,6 +147,85 @@ class ExitOrderManager:
             try:
                 self._statistics['exits_placed'] += 1
 
+                # Phase 2: Generate order_req_id for idempotency tracking
+                from core.id_generator import new_order_req_id
+                order_req_id = new_order_req_id()
+
+                # Phase 2: Idempotency Check - Prevent duplicate sell orders
+                from core.idempotency import get_idempotency_store
+
+                try:
+                    idempotency_store = get_idempotency_store()
+                    existing_order_id = idempotency_store.register_order(
+                        order_req_id=order_req_id,
+                        symbol=context.symbol,
+                        side="sell",
+                        amount=context.amount,
+                        price=context.current_price,
+                        client_order_id=f"exit_{reason}_{int(time.time())}"
+                    )
+
+                    if existing_order_id:
+                        # Duplicate detected - fetch and return existing order
+                        logger.warning(
+                            f"Duplicate sell order detected for {context.symbol} ({reason}), "
+                            f"returning existing order {existing_order_id}"
+                        )
+
+                        try:
+                            from core.trace_context import trace_step
+                            existing_order = self.exchange_adapter.fetch_order(existing_order_id, context.symbol)
+
+                            trace_step("duplicate_sell_order_returned", symbol=context.symbol,
+                                     order_id=existing_order_id, status=existing_order.get('status'))
+
+                            # Convert to ExitResult
+                            return ExitResult(
+                                success=existing_order.get('status') == 'closed',
+                                order_id=existing_order_id,
+                                filled_amount=existing_order.get('filled', 0),
+                                avg_price=existing_order.get('average', 0),
+                                reason=reason
+                            )
+                        except Exception as fetch_error:
+                            logger.error(f"Failed to fetch duplicate sell order {existing_order_id}: {fetch_error}")
+                            # Continue with new order placement if fetch fails
+
+                except Exception as idempotency_error:
+                    # Don't fail order placement if idempotency check fails
+                    logger.error(f"Idempotency check failed for sell order {context.symbol}: {idempotency_error}")
+
+                # Phase 2: Client Order ID Deduplication - Check exchange for existing order
+                try:
+                    from trading.orders import verify_order_not_duplicate
+
+                    client_order_id = f"exit_{reason}_{int(time.time())}"
+                    existing_exchange_order = verify_order_not_duplicate(
+                        exchange=self.exchange_adapter._exchange,
+                        client_order_id=client_order_id,
+                        symbol=context.symbol
+                    )
+
+                    if existing_exchange_order:
+                        # Duplicate found on exchange
+                        logger.warning(
+                            f"Duplicate sell order detected on exchange for {context.symbol} ({reason}) "
+                            f"(client_order_id: {client_order_id}, exchange_order_id: {existing_exchange_order.get('id')})"
+                        )
+
+                        # Convert to ExitResult
+                        return ExitResult(
+                            success=existing_exchange_order.get('status') == 'closed',
+                            order_id=existing_exchange_order.get('id'),
+                            filled_amount=existing_exchange_order.get('filled', 0),
+                            avg_price=existing_exchange_order.get('average', 0),
+                            reason=reason
+                        )
+
+                except Exception as dedup_error:
+                    # Don't fail order placement if deduplication check fails
+                    logger.debug(f"Client Order ID deduplication check failed for sell order {context.symbol}: {dedup_error}")
+
                 # Phase 3: Log sell sizing calculation
                 try:
                     from core.event_schemas import SellSizingCalc
@@ -198,6 +277,18 @@ class ExitOrderManager:
                 result = self._try_limit_ioc_exit(context, reason)
                 if result.success:
                     self._statistics['exits_filled'] += 1
+
+                    # Phase 2: Update idempotency store with exchange order ID
+                    if result.order_id:
+                        try:
+                            idempotency_store.update_order_status(
+                                order_req_id=order_req_id,
+                                exchange_order_id=result.order_id,
+                                status='closed'
+                            )
+                        except Exception as update_error:
+                            logger.debug(f"Failed to update idempotency store for sell order: {update_error}")
+
                     return result
 
                 # Escalation strategy if limit IOC fails
@@ -206,6 +297,18 @@ class ExitOrderManager:
                     if result.success:
                         self._statistics['market_fallbacks'] += 1
                         self._statistics['exits_filled'] += 1
+
+                        # Phase 2: Update idempotency store with exchange order ID
+                        if result.order_id:
+                            try:
+                                idempotency_store.update_order_status(
+                                    order_req_id=order_req_id,
+                                    exchange_order_id=result.order_id,
+                                    status='closed'
+                                )
+                            except Exception as update_error:
+                                logger.debug(f"Failed to update idempotency store for sell order: {update_error}")
+
                         return result
                 else:
                     # Use IOC fallback instead of market
@@ -213,9 +316,32 @@ class ExitOrderManager:
                     if result.success:
                         self._statistics['ioc_fallbacks'] += 1
                         self._statistics['exits_filled'] += 1
+
+                        # Phase 2: Update idempotency store with exchange order ID
+                        if result.order_id:
+                            try:
+                                idempotency_store.update_order_status(
+                                    order_req_id=order_req_id,
+                                    exchange_order_id=result.order_id,
+                                    status='closed'
+                                )
+                            except Exception as update_error:
+                                logger.debug(f"Failed to update idempotency store for sell order: {update_error}")
+
                         return result
 
                 self._statistics['exits_failed'] += 1
+
+                # Phase 2: Update idempotency store with failure status
+                try:
+                    idempotency_store.update_order_status(
+                        order_req_id=order_req_id,
+                        exchange_order_id="failed",
+                        status='failed'
+                    )
+                except Exception as update_error:
+                    logger.debug(f"Failed to update idempotency store for failed sell order: {update_error}")
+
                 return ExitResult(
                     success=False,
                     reason=reason,
@@ -288,6 +414,14 @@ class ExitOrderManager:
                 client_order_id=f"exit_{reason}_{int(time.time())}"
             )
 
+            # Phase 0: Check and log order fills
+            if order:
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, context.symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed for exit order: {fill_log_error}")
+
             if order and order.get('status') == 'closed':
                 return ExitResult(
                     success=True,
@@ -311,6 +445,14 @@ class ExitOrderManager:
                 amount=context.amount,
                 client_order_id=f"market_exit_{reason}_{int(time.time())}"
             )
+
+            # Phase 0: Check and log order fills
+            if order:
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, context.symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed for market exit: {fill_log_error}")
 
             if order and order.get('status') == 'closed':
                 return ExitResult(
@@ -349,6 +491,14 @@ class ExitOrderManager:
                 client_order_id=f"ioc_fallback_{reason}_{int(time.time())}"
             )
 
+            # Phase 0: Check and log order fills
+            if order:
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, context.symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed for IOC fallback: {fill_log_error}")
+
             if order and order.get('status') == 'closed':
                 return ExitResult(
                     success=True,
@@ -379,9 +529,62 @@ class ExitOrderManager:
         """Place or replace exit protection order (TP/SL)"""
         with self._lock:
             try:
+                # Phase 2: Generate order_req_id for idempotency tracking
+                from core.id_generator import new_order_req_id
+                order_req_id = new_order_req_id()
+
+                # Phase 2: Idempotency Check - Prevent duplicate TP/SL orders
+                from core.idempotency import get_idempotency_store
+
+                try:
+                    idempotency_store = get_idempotency_store()
+                    existing_order_id = idempotency_store.register_order(
+                        order_req_id=order_req_id,
+                        symbol=symbol,
+                        side="sell",
+                        amount=amount,
+                        price=target_price,
+                        client_order_id=f"{exit_type.lower()}_{int(time.time())}"
+                    )
+
+                    if existing_order_id:
+                        # Duplicate detected - return existing order ID
+                        logger.warning(
+                            f"Duplicate {exit_type} order detected for {symbol}, "
+                            f"returning existing order {existing_order_id}"
+                        )
+                        return existing_order_id
+
+                except Exception as idempotency_error:
+                    # Don't fail order placement if idempotency check fails
+                    logger.error(f"Idempotency check failed for {exit_type} order {symbol}: {idempotency_error}")
+
+                # Phase 2: Client Order ID Deduplication - Check exchange for existing order
+                try:
+                    from trading.orders import verify_order_not_duplicate
+
+                    client_order_id = f"{exit_type.lower()}_{int(time.time())}"
+                    existing_exchange_order = verify_order_not_duplicate(
+                        exchange=self.exchange_adapter._exchange,
+                        client_order_id=client_order_id,
+                        symbol=symbol
+                    )
+
+                    if existing_exchange_order:
+                        # Duplicate found on exchange
+                        logger.warning(
+                            f"Duplicate {exit_type} order detected on exchange for {symbol} "
+                            f"(client_order_id: {client_order_id}, exchange_order_id: {existing_exchange_order.get('id')})"
+                        )
+                        return existing_exchange_order.get('id')
+
+                except Exception as dedup_error:
+                    # Don't fail order placement if deduplication check fails
+                    logger.debug(f"Client Order ID deduplication check failed for {exit_type} order {symbol}: {dedup_error}")
+
                 # Cancel existing order if present
                 if active_order_id:
-                    self.order_service.cancel_order(active_order_id, symbol)
+                    self.order_service.cancel_order(active_order_id, symbol, reason="replaced")
 
                 # Place new protection order
                 if exit_type == "TAKE_PROFIT":
@@ -405,6 +608,25 @@ class ExitOrderManager:
                     )
                 else:
                     return None
+
+                # Phase 2: Update idempotency store with exchange order ID
+                if order and order.get('id'):
+                    try:
+                        idempotency_store.update_order_status(
+                            order_req_id=order_req_id,
+                            exchange_order_id=order['id'],
+                            status=order.get('status', 'open')
+                        )
+                    except Exception as update_error:
+                        logger.debug(f"Failed to update idempotency store for {exit_type} order: {update_error}")
+
+                # Phase 0: Check and log order fills (for immediate fills)
+                if order:
+                    try:
+                        from trading.orders import check_and_log_order_fills
+                        check_and_log_order_fills(order, symbol)
+                    except Exception as fill_log_error:
+                        logger.debug(f"Fill logging failed for {exit_type} order: {fill_log_error}")
 
                 return order['id'] if order else None
 

@@ -75,6 +75,16 @@ class PnLService:
         self._session_start = datetime.now(timezone.utc)
         self._unrealized_positions: Dict[str, PositionState] = {}
 
+        # Phase 4 (TODO 12): Initialize double-entry ledger
+        try:
+            from core.ledger import get_ledger
+            self.ledger = get_ledger()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to initialize ledger: {e}")
+            self.ledger = None
+
     def record_fill(
         self,
         symbol: str,
@@ -121,6 +131,22 @@ class PnLService:
             self._trades.append(trade)
             self._total_fees += fee_quote
             self._total_volume += quantity * avg_price
+
+            # Phase 4 (TODO 12): Record trade in double-entry ledger
+            if self.ledger:
+                try:
+                    self.ledger.record_trade(
+                        symbol=symbol,
+                        side=side,
+                        qty=quantity,
+                        price=avg_price,
+                        fee=fee_quote,
+                        timestamp=trade.timestamp.timestamp()
+                    )
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to record trade in ledger: {e}")
 
             # Bei SELL: Realized PnL berechnen
             if side.upper() == "SELL" and entry_price is not None:

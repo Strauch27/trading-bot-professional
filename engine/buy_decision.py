@@ -392,6 +392,53 @@ class BuyDecisionHandler:
             if not quote_budget:
                 return
 
+            # Phase 1 (TODO 6): Risk Limits Check - BEFORE order placement
+            try:
+                from core.risk_limits import RiskLimitChecker
+                from core.event_schemas import RiskLimitsEval
+
+                risk_checker = RiskLimitChecker(self.engine.portfolio, config)
+                all_passed, limit_checks = risk_checker.check_limits(symbol, quote_budget)
+
+                risk_eval = RiskLimitsEval(
+                    symbol=symbol,
+                    limit_checks=limit_checks,
+                    all_passed=all_passed,
+                    blocking_limit=[c['limit'] for c in limit_checks if c['hit']][0] if not all_passed else None
+                )
+
+                with Trace(decision_id=decision_id):
+                    log_event(DECISION_LOG(), "risk_limits_eval", **risk_eval.model_dump())
+
+                if not all_passed:
+                    blocking_limit = risk_eval.blocking_limit
+                    logger.info(f"BUY BLOCKED {symbol} - Risk limit exceeded: {blocking_limit}")
+
+                    self.engine.jsonl_logger.decision_end(
+                        decision_id=decision_id,
+                        symbol=symbol,
+                        decision="blocked",
+                        reason=f"risk_limit:{blocking_limit}",
+                        limit_checks=limit_checks
+                    )
+
+                    # Log structured decision_outcome event
+                    with Trace(decision_id=decision_id):
+                        log_event(
+                            DECISION_LOG(),
+                            "decision_outcome",
+                            symbol=symbol,
+                            action="blocked",
+                            reason=f"risk_limit:{blocking_limit}",
+                            blocking_limit=blocking_limit
+                        )
+
+                    return
+
+            except Exception as risk_check_error:
+                # Don't fail order placement if risk check fails - log and continue
+                logger.warning(f"Risk limits check failed for {symbol}, continuing with order: {risk_check_error}")
+
             # Generate client order ID for tracking
             client_order_id = new_client_order_id(decision_id, "buy")
 
@@ -652,6 +699,68 @@ class BuyDecisionHandler:
 
         # Phase 1: Log structured order events
         order_req_id = new_order_req_id()
+
+        # Phase 2: Idempotency Check - Prevent duplicate orders
+        from core.idempotency import get_idempotency_store
+
+        try:
+            idempotency_store = get_idempotency_store()
+            existing_order_id = idempotency_store.register_order(
+                order_req_id=order_req_id,
+                symbol=symbol,
+                side="buy",
+                amount=amount,
+                price=aggressive_price,
+                client_order_id=client_order_id
+            )
+
+            if existing_order_id:
+                # Duplicate detected - fetch and return existing order
+                logger.warning(
+                    f"Duplicate buy order detected for {symbol}, "
+                    f"returning existing order {existing_order_id}"
+                )
+
+                try:
+                    # Fetch existing order from exchange
+                    existing_order = self.engine.exchange_adapter.fetch_order(existing_order_id, symbol)
+                    trace_step("duplicate_order_returned", symbol=symbol, order_id=existing_order_id,
+                              status=existing_order.get('status'))
+                    return existing_order
+                except Exception as fetch_error:
+                    logger.error(f"Failed to fetch duplicate order {existing_order_id}: {fetch_error}")
+                    # Continue with new order placement if fetch fails
+                    pass
+
+        except Exception as idempotency_error:
+            # Don't fail order placement if idempotency check fails
+            logger.error(f"Idempotency check failed for {symbol}: {idempotency_error}")
+
+        # Phase 2: Client Order ID Deduplication - Check exchange for existing order
+        try:
+            from trading.orders import verify_order_not_duplicate
+
+            existing_exchange_order = verify_order_not_duplicate(
+                exchange=self.engine.exchange_adapter._exchange,
+                client_order_id=client_order_id,
+                symbol=symbol
+            )
+
+            if existing_exchange_order:
+                # Duplicate found on exchange
+                logger.warning(
+                    f"Duplicate order detected on exchange for {symbol} "
+                    f"(client_order_id: {client_order_id}, exchange_order_id: {existing_exchange_order.get('id')})"
+                )
+                trace_step("duplicate_on_exchange", symbol=symbol,
+                          client_order_id=client_order_id,
+                          exchange_order_id=existing_exchange_order.get('id'))
+                return existing_exchange_order
+
+        except Exception as dedup_error:
+            # Don't fail order placement if deduplication check fails
+            logger.debug(f"Client Order ID deduplication check failed for {symbol}: {dedup_error}")
+
         with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
             # Log price snapshot before order
             if coin_data and 'bid' in coin_data and 'ask' in coin_data:
@@ -690,6 +799,25 @@ class BuyDecisionHandler:
                 price=aggressive_price,
                 client_order_id=client_order_id
             )
+
+            # Phase 0: Check and log order fills (already done in order_service, but double-check for safety)
+            if order:
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed for buy order: {fill_log_error}")
+
+            # Phase 2: Update idempotency store with exchange order ID
+            if order and order.get('id'):
+                try:
+                    idempotency_store.update_order_status(
+                        order_req_id=order_req_id,
+                        exchange_order_id=order['id'],
+                        status=order.get('status', 'open')
+                    )
+                except Exception as update_error:
+                    logger.debug(f"Failed to update idempotency store: {update_error}")
 
             trace_step("order_placed", symbol=symbol, order_id=order.get('id') if order else None,
                       status=order.get('status') if order else None)

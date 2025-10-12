@@ -106,12 +106,114 @@ class PositionManager:
     def evaluate_position_exits(self, symbol: str, data: Dict, current_price: float):
         """Evaluate exit conditions with deterministic guards and queue signals"""
         try:
-            # 1. Enhanced Exit Guards with clear reasons
+            entry_price = data.get('buying_price', 0)
+            if entry_price <= 0:
+                return
+
+            # Phase 1 (TODO 4): Percentage-based TP/SL Evaluation (HIGHEST PRIORITY)
+            # Check these BEFORE ATR/Trailing stops as they are hard limits
+
+            # Get TP/SL thresholds from config
+            tp_threshold = getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)  # Default: +0.5%
+            sl_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', 0.990)     # Default: -1.0%
+
+            price_ratio = current_price / entry_price
+            unrealized_pct = (price_ratio - 1.0) * 100
+
+            # Check Take Profit
+            if price_ratio >= tp_threshold:
+                try:
+                    from core.event_schemas import SellTriggerEval
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    tp_eval = SellTriggerEval(
+                        symbol=symbol,
+                        trigger="tp",
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        unrealized_pct=unrealized_pct,
+                        threshold=tp_threshold,
+                        hit=True,
+                        reason="take_profit_hit"
+                    )
+
+                    decision_id = data.get('decision_id')
+                    with Trace(decision_id=decision_id) if decision_id else Trace():
+                        log_event(DECISION_LOG(), "sell_trigger_eval", **tp_eval.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log sell_trigger_eval (TP) for {symbol}: {e}")
+
+                # Queue exit
+                logger.info(f"[DECISION_END] {symbol} SELL | Take Profit Hit (+{unrealized_pct:.2f}%)")
+                self.engine.jsonl_logger.decision_end(
+                    decision_id=new_decision_id(),
+                    symbol=symbol,
+                    decision="sell",
+                    reason="take_profit_hit",
+                    unrealized_pct=unrealized_pct
+                )
+                success = self.engine.exit_manager.queue_exit_signal(
+                    symbol=symbol,
+                    reason="take_profit_hit",
+                    position_data=data,
+                    current_price=current_price
+                )
+                if success:
+                    logger.info(f"Exit signal queued for {symbol}: take_profit_hit")
+                return
+
+            # Check Stop Loss
+            if price_ratio <= sl_threshold:
+                try:
+                    from core.event_schemas import SellTriggerEval
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    sl_eval = SellTriggerEval(
+                        symbol=symbol,
+                        trigger="sl",
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        unrealized_pct=unrealized_pct,
+                        threshold=sl_threshold,
+                        hit=True,
+                        reason="stop_loss_hit"
+                    )
+
+                    decision_id = data.get('decision_id')
+                    with Trace(decision_id=decision_id) if decision_id else Trace():
+                        log_event(DECISION_LOG(), "sell_trigger_eval", **sl_eval.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log sell_trigger_eval (SL) for {symbol}: {e}")
+
+                # Queue exit
+                logger.info(f"[DECISION_END] {symbol} SELL | Stop Loss Hit ({unrealized_pct:.2f}%)")
+                self.engine.jsonl_logger.decision_end(
+                    decision_id=new_decision_id(),
+                    symbol=symbol,
+                    decision="sell",
+                    reason="stop_loss_hit",
+                    unrealized_pct=unrealized_pct
+                )
+                success = self.engine.exit_manager.queue_exit_signal(
+                    symbol=symbol,
+                    reason="stop_loss_hit",
+                    position_data=data,
+                    current_price=current_price
+                )
+                if success:
+                    logger.info(f"Exit signal queued for {symbol}: stop_loss_hit")
+                return
+
+            # 1. Enhanced Exit Guards with clear reasons (ATR/Trailing come after TP/SL)
             position_mock = type('Position', (), {
-                'entry_price': data.get('buying_price', 0),
+                'entry_price': entry_price,
                 'last_price': current_price,
                 'entry_time': data.get('entry_time', time.time()),
-                'avg_entry': data.get('buying_price', 0)
+                'avg_entry': entry_price
             })()
 
             # ATR Stop Check
@@ -259,6 +361,33 @@ class PositionManager:
             )
 
             data['unrealized_pnl'] = unrealized_pnl
+
+            # Phase 1 (TODO 5): Log position_updated event
+            try:
+                from core.event_schemas import PositionUpdated
+                from core.logger_factory import DECISION_LOG, log_event
+                from core.trace_context import Trace
+
+                entry_price = data['buying_price']
+                unrealized_pct = ((current_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+                age_minutes = (time.time() - data.get('time', 0)) / 60 if data.get('time') else None
+
+                position_updated = PositionUpdated(
+                    symbol=symbol,
+                    qty=data['amount'],
+                    unrealized_pnl=unrealized_pnl,
+                    unrealized_pct=unrealized_pct,
+                    peak_price=data.get('peak_price'),
+                    trailing_stop=data.get('trailing_stop'),
+                    age_minutes=age_minutes
+                )
+
+                decision_id = data.get('decision_id')
+                with Trace(decision_id=decision_id) if decision_id else Trace():
+                    log_event(DECISION_LOG(), "position_updated", **position_updated.model_dump())
+
+            except Exception as e:
+                logger.debug(f"Failed to log position_updated for {symbol}: {e}")
 
         except Exception as e:
             logger.error(f"PnL update error for {symbol}: {e}")

@@ -85,6 +85,13 @@ class OrderService:
 
                 self._stats['orders_placed'] += 1
 
+                # Phase 0: Check and log order fills
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed: {fill_log_error}")
+
                 # In Cache speichern
                 if self.cache:
                     self.cache.store_order(order)
@@ -158,6 +165,13 @@ class OrderService:
                 )
 
                 self._stats['orders_placed'] += 1
+
+                # Phase 0: Check and log order fills
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed: {fill_log_error}")
 
                 # In Cache speichern
                 if self.cache:
@@ -238,6 +252,13 @@ class OrderService:
 
                 self._stats['orders_placed'] += 1
 
+                # Phase 0: Check and log order fills
+                try:
+                    from trading.orders import check_and_log_order_fills
+                    check_and_log_order_fills(order, symbol)
+                except Exception as fill_log_error:
+                    logger.debug(f"Fill logging failed: {fill_log_error}")
+
                 # In Cache speichern
                 if self.cache:
                     self.cache.store_order(order)
@@ -275,19 +296,39 @@ class OrderService:
                 )
                 return None
 
-    def cancel_order(self, order_id: str, symbol: str) -> bool:
+    def cancel_order(self, order_id: str, symbol: str, reason: str = "manual_cancel") -> bool:
         """
-        Storniert Order.
+        Storniert Order mit strukturiertem Event-Tracking.
 
         Args:
             order_id: Order ID
             symbol: Trading pair
+            reason: Cancellation reason (default: "manual_cancel")
 
         Returns:
             True wenn erfolgreich storniert
         """
         with self._lock:
             try:
+                # Phase 0: Fetch order before cancel for tracking
+                order = None
+                filled_before_cancel = 0.0
+                remaining_qty = 0.0
+                age_seconds = None
+
+                try:
+                    order = self.exchange.fetch_order(order_id, symbol)
+                    filled_before_cancel = float(order.get('filled', 0))
+                    remaining_qty = float(order.get('remaining', 0))
+
+                    # Calculate order age
+                    if order.get('timestamp'):
+                        import time
+                        age_seconds = time.time() - (order['timestamp'] / 1000)
+                except Exception as fetch_error:
+                    logger.debug(f"Failed to fetch order before cancel: {fetch_error}")
+
+                # Cancel order
                 result = self.exchange.cancel_order(order_id, symbol)
 
                 self._stats['orders_canceled'] += 1
@@ -296,12 +337,27 @@ class OrderService:
                 if self.cache:
                     self.cache.update_order_status(order_id, "canceled")
 
+                # Phase 0: Log structured order_cancel event
+                try:
+                    from trading.orders import log_order_cancel
+                    log_order_cancel(
+                        exchange_order_id=order_id,
+                        symbol=symbol,
+                        reason=reason,
+                        filled_before_cancel=filled_before_cancel,
+                        remaining_qty=remaining_qty,
+                        age_seconds=age_seconds
+                    )
+                except Exception as log_error:
+                    logger.debug(f"Failed to log order_cancel: {log_error}")
+
                 logger.info(
-                    f"Order canceled: {order_id} for {symbol}",
+                    f"Order canceled: {order_id} for {symbol} (reason: {reason})",
                     extra={
                         'event_type': 'ORDER_CANCELED',
                         'order_id': order_id,
-                        'symbol': symbol
+                        'symbol': symbol,
+                        'reason': reason
                     }
                 )
 
@@ -309,6 +365,21 @@ class OrderService:
 
             except Exception as e:
                 self._stats['errors_total'] += 1
+
+                # Phase 0: Log failed cancellation
+                try:
+                    from trading.orders import log_order_cancel
+                    log_order_cancel(
+                        exchange_order_id=order_id,
+                        symbol=symbol,
+                        reason=f"{reason}_failed",
+                        filled_before_cancel=0.0,
+                        remaining_qty=0.0,
+                        age_seconds=None
+                    )
+                except Exception:
+                    pass
+
                 logger.error(
                     f"Failed to cancel order {order_id}: {e}",
                     extra={
@@ -346,8 +417,8 @@ class OrderService:
         with self._lock:
             for attempt in range(self.max_retries):
                 try:
-                    # Alte Order stornieren
-                    cancel_success = self.cancel_order(old_order_id, symbol)
+                    # Alte Order stornieren (mit "replaced" reason für tracking)
+                    cancel_success = self.cancel_order(old_order_id, symbol, reason="replaced")
 
                     if cancel_success:
                         # Neue Order platzieren
@@ -381,6 +452,27 @@ class OrderService:
 
                     if attempt < self.max_retries - 1:
                         delay = 0.5 * (2 ** attempt)  # Exponential backoff
+
+                        # Phase 2: Structured retry event logging
+                        try:
+                            from core.event_schemas import RetryAttempt
+                            from core.logger_factory import ORDER_LOG, log_event
+
+                            retry_event = RetryAttempt(
+                                symbol=symbol,
+                                operation="replace_order",
+                                attempt=attempt + 1,
+                                max_retries=self.max_retries,
+                                error_class=type(e).__name__,
+                                error_message=str(e),
+                                backoff_ms=int(delay * 1000),
+                                will_retry=True
+                            )
+
+                            log_event(ORDER_LOG(), "retry_attempt", **retry_event.model_dump())
+                        except Exception as log_error:
+                            logger.debug(f"Failed to log retry_attempt event: {log_error}")
+
                         logger.warning(
                             f"Order replace attempt {attempt + 1} failed, retrying in {delay}s: {e}",
                             extra={
@@ -396,6 +488,27 @@ class OrderService:
 
             # Nach allen Versuchen fehlgeschlagen
             self._stats['errors_total'] += 1
+
+            # Phase 2: Log final retry failure
+            try:
+                from core.event_schemas import RetryAttempt
+                from core.logger_factory import ORDER_LOG, log_event
+
+                final_retry_event = RetryAttempt(
+                    symbol=symbol,
+                    operation="replace_order",
+                    attempt=self.max_retries,
+                    max_retries=self.max_retries,
+                    error_class="MaxRetriesExceeded",
+                    error_message=f"Failed after {self.max_retries} attempts",
+                    backoff_ms=0,
+                    will_retry=False
+                )
+
+                log_event(ORDER_LOG(), "retry_attempt", **final_retry_event.model_dump())
+            except Exception as log_error:
+                logger.debug(f"Failed to log final retry_attempt event: {log_error}")
+
             logger.error(
                 f"Failed to replace order {old_order_id} after {self.max_retries} attempts",
                 extra={

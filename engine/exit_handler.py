@@ -120,7 +120,7 @@ class ExitHandler:
             # Phase 3: Log position_closed event
             try:
                 from core.event_schemas import PositionClosed
-                from core.logger_factory import DECISION_LOG, log_event
+                from core.logger_factory import DECISION_LOG, ORDER_LOG, log_event
                 from core.trace_context import Trace
 
                 entry_price = position_data.get('buying_price', 0)
@@ -151,6 +151,41 @@ class ExitHandler:
 
             except Exception as e:
                 logger.debug(f"Failed to log position_closed for {symbol}: {e}")
+
+            # Phase 0: Log order_done event for sell order
+            try:
+                from core.logger_factory import ORDER_LOG, log_event
+                from core.trace_context import Trace
+
+                # Calculate order latency if order timestamp available
+                order_timestamp = None
+                exchange_order_id = None
+                if hasattr(result, 'order') and result.order:
+                    order_timestamp = result.order.get('timestamp', 0) / 1000 if result.order.get('timestamp') else None
+                    exchange_order_id = result.order.get('id')
+                elif result.order_id:
+                    exchange_order_id = result.order_id
+
+                latency_ms_total = int((time.time() - order_timestamp) * 1000) if order_timestamp else None
+
+                decision_id = position_data.get('decision_id')
+                with Trace(decision_id=decision_id, exchange_order_id=exchange_order_id) if decision_id or exchange_order_id else Trace():
+                    log_event(
+                        ORDER_LOG(),
+                        "order_done",
+                        symbol=symbol,
+                        side="sell",
+                        final_status="filled",
+                        filled_qty=result.filled_amount,
+                        avg_price=result.avg_price,
+                        total_proceeds=result.filled_amount * result.avg_price if result.avg_price else 0,
+                        fee_quote=exit_fee,
+                        latency_ms_total=latency_ms_total,
+                        reason=reason
+                    )
+
+            except Exception as e:
+                logger.debug(f"Failed to log order_done for sell order {symbol}: {e}")
 
             # Remove position
             del self.engine.positions[symbol]

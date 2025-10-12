@@ -699,6 +699,27 @@ def main():
         # Register shutdown callback for trade cache
         shutdown_coordinator.add_cleanup_callback(shutdown_trade_cache)
 
+        # Phase 2: Initialize idempotency store for duplicate order prevention
+        try:
+            from core.idempotency import initialize_idempotency_store
+            idempotency_store = initialize_idempotency_store(db_path="state/idempotency.db")
+            logger.info("Idempotency store initialized for duplicate order prevention",
+                       extra={'event_type': 'IDEMPOTENCY_STORE_INIT'})
+
+            # Register cleanup callback for periodic maintenance
+            def idempotency_cleanup():
+                try:
+                    deleted = idempotency_store.cleanup_old_orders(max_age_days=7)
+                    if deleted > 0:
+                        logger.debug(f"Idempotency cleanup: removed {deleted} old records")
+                except Exception as e:
+                    logger.warning(f"Idempotency cleanup failed: {e}")
+
+            shutdown_coordinator.add_cleanup_callback(idempotency_cleanup)
+        except Exception as idempotency_error:
+            logger.warning(f"Idempotency store initialization failed: {idempotency_error}",
+                          extra={'event_type': 'IDEMPOTENCY_STORE_INIT_ERROR', 'error': str(idempotency_error)})
+
         # Register memory manager for cleanup and monitoring (optional)
         if getattr(config_module, 'ENABLE_MEMORY_MONITORING', True):
             from services.memory_manager import get_memory_manager, shutdown_memory_manager

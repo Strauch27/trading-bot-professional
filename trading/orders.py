@@ -7,16 +7,427 @@ Contains order placement functions:
 - Precise limit buy logic
 - Order ladder implementations
 - Depth sweep order placement
+- Retry logic with exponential backoff (Phase 2)
 
 NOTE: Diese Datei enthält Platzhalter-Implementierungen.
 Die vollständigen Implementierungen können aus trading_legacy.py (Zeilen 30-1420) kopiert werden.
 """
 
 import logging
-from typing import Optional, Dict
+import time
+from typing import Optional, Dict, Callable, Any, Tuple
+from functools import wraps
 from .helpers import sanitize_coid, price_to_precision, amount_to_precision
 
 logger = logging.getLogger(__name__)
+
+
+# =================================================================================
+# PHASE 2: RETRY LOGIC WITH EXPONENTIAL BACKOFF
+# =================================================================================
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_backoff_ms: int = 1000,
+    exponential: bool = True,
+    retry_on: Tuple = (Exception,)
+):
+    """
+    Decorator for retrying operations with exponential backoff and structured logging.
+
+    Features:
+    - Exponential backoff (2^attempt * base_backoff_ms)
+    - Structured event logging for each retry attempt
+    - Symbol extraction from args/kwargs for logging
+    - Configurable retry conditions
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        base_backoff_ms: Base backoff time in milliseconds (default: 1000)
+        exponential: Use exponential backoff (2^n) vs linear (default: True)
+        retry_on: Tuple of exception types to retry on (default: all exceptions)
+
+    Returns:
+        Decorated function with retry logic
+
+    Example:
+        @retry_with_backoff(max_retries=3, base_backoff_ms=500, retry_on=(ccxt.NetworkError,))
+        def place_order(exchange, symbol, type, side, amount, price=None):
+            return exchange.create_order(symbol, type, side, amount, price)
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            last_exception = None
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # Execute function
+                    result = func(*args, **kwargs)
+
+                    # Success - log if this was a retry (attempt > 1)
+                    if attempt > 1:
+                        logger.info(
+                            f"{func.__name__} succeeded on attempt {attempt}/{max_retries}"
+                        )
+
+                    return result
+
+                except retry_on as e:
+                    last_exception = e
+
+                    # Calculate backoff
+                    if exponential:
+                        backoff_ms = base_backoff_ms * (2 ** (attempt - 1))
+                    else:
+                        backoff_ms = base_backoff_ms
+
+                    will_retry = (attempt < max_retries)
+
+                    # Extract symbol from args/kwargs for better logging
+                    symbol = "unknown"
+                    try:
+                        # Try to find symbol in kwargs
+                        symbol = kwargs.get('symbol')
+                        if not symbol and len(args) >= 1:
+                            # Try first argument (common for order functions)
+                            if isinstance(args[0], str) and '/' in args[0]:
+                                symbol = args[0]
+                            # Try second argument (exchange is often first)
+                            elif len(args) >= 2 and isinstance(args[1], str) and '/' in args[1]:
+                                symbol = args[1]
+                    except Exception:
+                        pass
+
+                    # Log retry attempt with structured event
+                    try:
+                        from core.event_schemas import RetryAttempt
+                        from core.logger_factory import ORDER_LOG, log_event
+                        from core.trace_context import Trace
+
+                        retry_event = RetryAttempt(
+                            symbol=symbol,
+                            operation=func.__name__,
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            error_class=type(e).__name__,
+                            error_message=str(e),
+                            backoff_ms=backoff_ms,
+                            will_retry=will_retry
+                        )
+
+                        with Trace():
+                            log_event(
+                                ORDER_LOG(),
+                                "retry_attempt",
+                                **retry_event.model_dump(),
+                                level=logging.WARNING
+                            )
+
+                    except Exception as log_error:
+                        # Don't fail the operation if logging fails
+                        logger.debug(f"Failed to log retry_attempt: {log_error}")
+
+                    if will_retry:
+                        logger.warning(
+                            f"{func.__name__} failed (attempt {attempt}/{max_retries}): "
+                            f"{type(e).__name__}: {e}. Retrying in {backoff_ms}ms..."
+                        )
+                        time.sleep(backoff_ms / 1000.0)
+                    else:
+                        logger.error(
+                            f"{func.__name__} failed after {max_retries} attempts: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        raise
+
+            # Should never reach here, but just in case
+            if last_exception:
+                raise last_exception
+
+        return wrapper
+    return decorator
+
+
+# =================================================================================
+# PHASE 0: ORDER LIFECYCLE TRACKING
+# =================================================================================
+
+def log_order_cancel(exchange_order_id: str, symbol: str, reason: str,
+                     filled_before_cancel: float = 0.0, remaining_qty: float = 0.0,
+                     age_seconds: float = None) -> None:
+    """
+    Log order cancellation with structured event.
+
+    Args:
+        exchange_order_id: Exchange-assigned order ID
+        symbol: Trading symbol
+        reason: Cancellation reason ("timeout", "manual_cancel", "replaced", "insufficient_margin")
+        filled_before_cancel: Quantity filled before cancellation
+        remaining_qty: Quantity remaining (not filled)
+        age_seconds: Age of the order when cancelled
+
+    Usage:
+        # Before canceling
+        order = exchange.fetch_order(order_id, symbol)
+        filled = order.get('filled', 0)
+        remaining = order.get('remaining', 0)
+        age = (time.time() - order.get('timestamp', 0) / 1000) if order.get('timestamp') else None
+
+        # Cancel order
+        exchange.cancel_order(order_id, symbol)
+
+        # Log cancellation
+        log_order_cancel(order_id, symbol, "manual_cancel", filled, remaining, age)
+    """
+    try:
+        from core.event_schemas import OrderCancel
+        from core.logger_factory import ORDER_LOG, log_event
+        from core.trace_context import Trace
+
+        order_cancel = OrderCancel(
+            symbol=symbol,
+            exchange_order_id=str(exchange_order_id),
+            reason=reason,
+            filled_before_cancel=filled_before_cancel,
+            remaining_qty=remaining_qty,
+            age_seconds=age_seconds
+        )
+
+        with Trace(exchange_order_id=str(exchange_order_id)):
+            log_event(
+                ORDER_LOG(),
+                "order_cancel",
+                **order_cancel.model_dump(),
+                level=logging.INFO
+            )
+
+    except Exception as e:
+        # Don't fail order cancellation if logging fails
+        logger.debug(f"Failed to log order_cancel event: {e}")
+
+
+def cancel_order_with_tracking(exchange, order_id: str, symbol: str, reason: str = "manual_cancel") -> bool:
+    """
+    Cancel order with automatic tracking and structured logging.
+
+    Args:
+        exchange: Exchange adapter instance
+        order_id: Exchange order ID to cancel
+        symbol: Trading symbol
+        reason: Cancellation reason
+
+    Returns:
+        bool: True if cancellation succeeded
+
+    Usage:
+        success = cancel_order_with_tracking(exchange, order_id, symbol, "timeout")
+    """
+    if not order_id:
+        return False
+
+    try:
+        # Fetch order before cancel to get filled amount and timing
+        order = None
+        filled_before_cancel = 0.0
+        remaining_qty = 0.0
+        age_seconds = None
+
+        try:
+            order = exchange.fetch_order(order_id, symbol)
+            filled_before_cancel = float(order.get('filled', 0))
+            remaining_qty = float(order.get('remaining', 0))
+
+            # Calculate order age
+            if order.get('timestamp'):
+                age_seconds = time.time() - (order['timestamp'] / 1000)
+        except Exception as fetch_error:
+            logger.debug(f"Failed to fetch order before cancel: {fetch_error}")
+
+        # Cancel order
+        cancel_result = exchange.cancel_order(order_id, symbol)
+
+        # Log cancellation with structured event
+        log_order_cancel(
+            exchange_order_id=order_id,
+            symbol=symbol,
+            reason=reason,
+            filled_before_cancel=filled_before_cancel,
+            remaining_qty=remaining_qty,
+            age_seconds=age_seconds
+        )
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"Failed to cancel order {order_id} for {symbol}: {e}")
+
+        # Still log the cancellation attempt
+        log_order_cancel(
+            exchange_order_id=order_id,
+            symbol=symbol,
+            reason=f"{reason}_failed",
+            filled_before_cancel=0.0,
+            remaining_qty=0.0,
+            age_seconds=None
+        )
+
+        return False
+
+
+def check_and_log_order_fills(order: Dict, symbol: str = None) -> bool:
+    """
+    Check for order fills and log them with structured events.
+
+    Args:
+        order: Order dict from exchange
+        symbol: Trading symbol (optional, extracted from order if not provided)
+
+    Returns:
+        bool: True if order has any fills (partial or full)
+
+    Usage:
+        order = exchange.create_order(...)
+        check_and_log_order_fills(order)
+    """
+    if not order:
+        return False
+
+    try:
+        from core.event_schemas import OrderFill
+        from core.logger_factory import ORDER_LOG, log_event
+        from core.trace_context import Trace
+
+        # Extract order details
+        symbol = symbol or order.get('symbol', 'unknown')
+        exchange_order_id = order.get('id')
+        filled_qty = float(order.get('filled', 0))
+        total_qty = float(order.get('amount', 0))
+        avg_price = float(order.get('average', 0)) if order.get('average') else 0
+
+        # Check if there are any fills
+        if filled_qty <= 0:
+            return False
+
+        # Calculate fill details
+        fill_cost = filled_qty * avg_price if avg_price > 0 else 0
+
+        # Extract fee information
+        fee_quote = 0.0
+        if order.get('fee') and order['fee'].get('cost'):
+            fee_quote = float(order['fee']['cost'])
+
+        # Determine if this is a full fill
+        is_full_fill = (filled_qty >= total_qty) if total_qty > 0 else False
+        remaining_qty = max(0, total_qty - filled_qty)
+
+        # Create and log OrderFill event
+        order_fill = OrderFill(
+            symbol=symbol,
+            exchange_order_id=str(exchange_order_id) if exchange_order_id else "unknown",
+            fill_qty=filled_qty,
+            fill_price=avg_price,
+            fill_cost=fill_cost,
+            fee_quote=fee_quote,
+            is_full_fill=is_full_fill,
+            cumulative_filled=filled_qty,
+            remaining_qty=remaining_qty
+        )
+
+        with Trace(exchange_order_id=str(exchange_order_id) if exchange_order_id else None):
+            log_event(
+                ORDER_LOG(),
+                "order_fill",
+                **order_fill.model_dump(),
+                level=logging.INFO
+            )
+
+        return True
+
+    except Exception as e:
+        # Don't fail order placement if fill logging fails
+        logger.debug(f"Failed to log order_fill event: {e}")
+        return False
+
+
+# =================================================================================
+# PHASE 2: ORDER DEDUPLICATION VIA CLIENT ORDER ID
+# =================================================================================
+
+def verify_order_not_duplicate(exchange, client_order_id: str, symbol: str, max_orders: int = 50) -> Optional[Dict]:
+    """
+    Check if order with client_order_id already exists on exchange.
+
+    Phase 2: TODO 9 - Order Deduplication via Client Order ID
+    This function queries the exchange for recent orders and checks if any
+    match the provided client_order_id, preventing duplicate submissions.
+
+    Args:
+        exchange: Exchange adapter instance (CCXT exchange object)
+        client_order_id: Client-generated order ID to check
+        symbol: Trading symbol (e.g., "BTC/USDT")
+        max_orders: Maximum number of recent orders to fetch (default: 50)
+
+    Returns:
+        None if no duplicate found (safe to place order)
+        Order dict if duplicate found (existing order on exchange)
+
+    Usage:
+        # Before placing order
+        existing_order = verify_order_not_duplicate(exchange, client_order_id, symbol)
+        if existing_order:
+            logger.info(f"Duplicate detected, using existing order: {existing_order['id']}")
+            return existing_order
+
+        # Safe to place new order
+        order = exchange.create_order(...)
+    """
+    if not client_order_id or not symbol:
+        return None
+
+    try:
+        # Fetch recent orders for symbol
+        orders = exchange.fetch_orders(symbol, limit=max_orders)
+
+        # Check for matching client order ID
+        for order in orders:
+            order_coid = order.get('clientOrderId')
+
+            # Match found
+            if order_coid and order_coid == client_order_id:
+                logger.warning(
+                    f"Duplicate order detected via clientOrderId: {client_order_id} "
+                    f"(exchange_order_id: {order.get('id')}, status: {order.get('status')})"
+                )
+
+                # Phase 2: Log duplicate detection event
+                try:
+                    from core.logger_factory import AUDIT_LOG, log_event
+                    from core.trace_context import Trace
+
+                    with Trace(client_order_id=client_order_id, exchange_order_id=order.get('id')):
+                        log_event(
+                            AUDIT_LOG(),
+                            "duplicate_order_detected_exchange",
+                            symbol=symbol,
+                            client_order_id=client_order_id,
+                            exchange_order_id=order.get('id'),
+                            status=order.get('status'),
+                            order_age_seconds=(time.time() - (order.get('timestamp', 0) / 1000)) if order.get('timestamp') else None,
+                            level=logging.WARNING
+                        )
+                except Exception as log_error:
+                    logger.debug(f"Failed to log duplicate_order_detected_exchange: {log_error}")
+
+                return order  # Return existing order
+
+        # No duplicate found
+        return None
+
+    except Exception as e:
+        # Don't fail order placement if deduplication check fails
+        logger.debug(f"Failed to check for duplicate orders on exchange: {e}")
+        return None
 
 
 # =================================================================================
@@ -343,9 +754,15 @@ def safe_create_limit_sell_order(exchange, symbol, desired_amount, price, held_a
 
     if active_order_id:
         try:
-            exchange.cancel_order(active_order_id, symbol)
-        except Exception:
-            pass
+            # Phase 0: Cancel with tracking
+            from trading.orders import cancel_order_with_tracking
+            cancel_order_with_tracking(exchange, active_order_id, symbol, reason="replaced")
+        except Exception as cancel_error:
+            logger.debug(f"Cancel with tracking failed, using fallback: {cancel_error}")
+            try:
+                exchange.cancel_order(active_order_id, symbol)
+            except Exception:
+                pass
         poll_order_canceled(exchange, symbol, active_order_id, 6.0)
 
     # Sync to capture potential partial fills before placing the new order
@@ -398,9 +815,14 @@ def place_ioc_ladder_no_market(exchange, symbol, amount, reference_price,
 
     if active_order_id:
         try:
-            exchange.cancel_order(active_order_id, symbol)
+            # Phase 0: Cancel with tracking
+            from trading.orders import cancel_order_with_tracking
+            cancel_order_with_tracking(exchange, active_order_id, symbol, reason="replaced")
         except Exception:
-            pass
+            try:
+                exchange.cancel_order(active_order_id, symbol)
+            except Exception:
+                pass
         poll_order_canceled(exchange, symbol, active_order_id, 6.0)
 
     remaining = amount
