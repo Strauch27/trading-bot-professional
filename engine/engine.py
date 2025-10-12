@@ -439,8 +439,8 @@ class TradingEngine:
                         self._periodic_maintenance()
                         co.beat("after_maintenance")
 
-                    # 7. TopDrops Ticker (if enabled)
-                    if self.config.enable_top_drops_ticker:
+                    # 7. TopDrops Ticker (if enabled, at configured interval)
+                    if cycle_start % self.config.top_drops_interval_s < 1.0 and self.config.enable_top_drops_ticker:
                         co.beat("before_topdrops_ticker")
                         self._emit_topdrops_ticker()
                         co.beat("after_topdrops_ticker")
