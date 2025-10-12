@@ -745,7 +745,33 @@ class PortfolioManager:
     @synchronized()
     def set_drop_anchor(self, symbol: str, price: float, ts_iso: str):
         """Setzt Drop-Anchor für Symbol"""
-        self.drop_anchors[symbol] = {"price": float(price), "ts": ts_iso}
+        # Phase 1: Log anchor updates
+        old_anchor = self.drop_anchors.get(symbol, {}).get("price")
+        new_anchor = float(price)
+
+        # Only log if anchor actually changed (not initial set)
+        if old_anchor is not None and abs(new_anchor - old_anchor) > 1e-8:
+            try:
+                from core.trace_context import Trace, get_context_var
+                from core.logger_factory import DECISION_LOG, log_event
+
+                # Use current decision_id if available in context
+                decision_id = get_context_var('decision_id')
+
+                with Trace(decision_id=decision_id) if decision_id else Trace():
+                    log_event(
+                        DECISION_LOG(),
+                        "anchor_update",
+                        symbol=symbol,
+                        anchor_old=old_anchor,
+                        anchor_new=new_anchor,
+                        source="drop_anchor"
+                    )
+            except Exception as e:
+                # Don't fail anchor update if logging fails
+                logger.debug(f"Failed to log anchor_update for {symbol}: {e}")
+
+        self.drop_anchors[symbol] = {"price": new_anchor, "ts": ts_iso}
         self.save_state()
     
     @synchronized()

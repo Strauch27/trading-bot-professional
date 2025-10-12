@@ -39,6 +39,19 @@ def get_correlation_ids() -> Dict[str, Optional[str]]:
     }
 
 
+def get_context_var(name: str) -> Optional[str]:
+    """Get specific context variable value by name."""
+    context_vars = {
+        'session_id': session_id_var,
+        'decision_id': decision_id_var,
+        'order_req_id': order_req_id_var,
+        'client_order_id': client_order_id_var,
+        'exchange_order_id': exchange_order_id_var,
+    }
+    var = context_vars.get(name)
+    return var.get() if var else None
+
+
 def set_session_id(session_id: str) -> None:
     """Set global session ID (call once at bot startup)."""
     session_id_var.set(session_id)

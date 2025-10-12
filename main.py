@@ -949,6 +949,22 @@ def main():
                                       'positions_count': positions_count,
                                       'memory_status': memory_status})
 
+                    # Phase 3: Log structured heartbeat event
+                    try:
+                        from core.logger_factory import HEALTH_LOG, log_event
+                        log_event(
+                            HEALTH_LOG(),
+                            "heartbeat",
+                            engine_running=engine_running,
+                            mode=mode,
+                            budget=budget,
+                            positions_count=positions_count,
+                            memory_status=memory_status
+                        )
+                    except Exception as health_log_error:
+                        # Don't fail heartbeat if logging fails
+                        logger.debug(f"Failed to log heartbeat event: {health_log_error}")
+
                     # If engine stopped unexpectedly, request shutdown
                     if not engine_running:
                         logger.warning("Engine stopped unexpectedly - requesting shutdown",

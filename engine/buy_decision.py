@@ -144,6 +144,17 @@ class BuyDecisionHandler:
                     failed_guards=failed_guards
                 )
 
+                # Phase 3: Log structured decision_outcome event
+                with Trace(decision_id=decision_id):
+                    log_event(
+                        DECISION_LOG(),
+                        "decision_outcome",
+                        symbol=symbol,
+                        action="blocked",
+                        reason="market_guards_failed",
+                        failed_guards=failed_guards
+                    )
+
                 # Verbose logging if enabled
                 if getattr(config, "VERBOSE_GUARD_LOGS", False):
                     logger.info(details.get("summary", f"Guard block {symbol}: {failed_guards}"),
@@ -178,6 +189,16 @@ class BuyDecisionHandler:
                         reason=f"sizing:{why}",
                         market_health=market_health
                     )
+
+                    # Phase 3: Log structured decision_outcome event
+                    with Trace(decision_id=decision_id):
+                        log_event(
+                            DECISION_LOG(),
+                            "decision_outcome",
+                            symbol=symbol,
+                            action="blocked",
+                            reason=f"sizing_check:{why}"
+                        )
                     return None
                 else:
                     trace_step("sizing_passed", symbol=symbol)
@@ -218,6 +239,16 @@ class BuyDecisionHandler:
                     reason="awaiting_stabilization",
                     decision_time_ms=decision_time * 1000
                 )
+
+                # Phase 3: Log structured decision_outcome event
+                with Trace(decision_id=decision_id):
+                    log_event(
+                        DECISION_LOG(),
+                        "decision_outcome",
+                        symbol=symbol,
+                        action="skip",
+                        reason="awaiting_stabilization"
+                    )
                 return None
 
             # 5c. Evaluate buy signal with DROP_TRIGGER logic
@@ -264,6 +295,18 @@ class BuyDecisionHandler:
                     decision_time_ms=decision_time * 1000
                 )
 
+                # Phase 3: Log structured decision_outcome event
+                with Trace(decision_id=decision_id):
+                    log_event(
+                        DECISION_LOG(),
+                        "decision_outcome",
+                        symbol=symbol,
+                        action="buy",
+                        reason=signal_reason,
+                        drop_pct=context.get('drop_pct', 0),
+                        mode=context.get('mode')
+                    )
+
                 logger.info(f"Buy signal triggered for {symbol}: {signal_reason} "
                            f"(drop: {context['drop_pct']:.2f}%)")
                 return signal_reason
@@ -285,6 +328,17 @@ class BuyDecisionHandler:
                     decision_time_ms=decision_time * 1000
                 )
 
+                # Phase 3: Log structured decision_outcome event
+                with Trace(decision_id=decision_id):
+                    log_event(
+                        DECISION_LOG(),
+                        "decision_outcome",
+                        symbol=symbol,
+                        action="skip",
+                        reason="no_trigger",
+                        drop_pct=context.get('drop_pct', 0)
+                    )
+
             return None
 
         except Exception as e:
@@ -305,6 +359,19 @@ class BuyDecisionHandler:
                 error=str(e),
                 decision_time_ms=decision_time * 1000
             )
+
+            # Phase 3: Log structured decision_outcome event
+            with Trace(decision_id=decision_id):
+                log_event(
+                    DECISION_LOG(),
+                    "decision_outcome",
+                    symbol=symbol,
+                    action="error",
+                    reason="evaluation_exception",
+                    error_type=type(e).__name__,
+                    error_message=str(e)
+                )
+
             logger.error(f"Error evaluating buy signal for {symbol}: {e}")
             return None
 
@@ -365,6 +432,13 @@ class BuyDecisionHandler:
         """Calculate position size with budget checks"""
         trace_step("calculating_position_size", symbol=symbol)
 
+        # Get config values for sizing_calc event
+        position_size_cfg = getattr(config, 'POSITION_SIZE_USDT', 25.0)
+        min_slot = getattr(config, 'MIN_SLOT_USDT', 10.0)
+        fees_bps = getattr(config, 'TRADING_FEE_BPS', 10)
+        slippage_bps = getattr(config, 'SLIPPAGE_BPS_ALLOWED', 5)
+
+        # Calculate position size
         if self.engine.sizing_service:
             quote_budget = self.engine.sizing_service.calculate_position_size(
                 symbol, current_price, usdt_balance
@@ -375,7 +449,38 @@ class BuyDecisionHandler:
             quote_budget = min(usdt_balance * 0.1, 100.0)  # 10% or $100 max
             trace_step("position_size_calculated", symbol=symbol, quote_budget=quote_budget, method="simplified")
 
-        min_slot = getattr(config, 'MIN_SLOT_USDT', 10.0)
+        # Calculate qty details for sizing_calc event
+        qty_raw = quote_budget / current_price if current_price > 0 else 0
+
+        # Get min notional from exchange limits if available
+        min_notional = min_slot
+        if hasattr(self.engine.exchange_adapter, 'get_min_notional'):
+            try:
+                min_notional = self.engine.exchange_adapter.get_min_notional(symbol) or min_slot
+            except Exception:
+                pass
+
+        # Phase 1: Log sizing_calc event
+        with Trace(decision_id=self.engine.current_decision_id):
+            passed = quote_budget >= min_slot
+            fail_reason = None if passed else "insufficient_budget_after_sizing"
+
+            log_event(
+                DECISION_LOG(),
+                "sizing_calc",
+                symbol=symbol,
+                position_size_usdt_cfg=position_size_cfg,
+                quote_budget=quote_budget,
+                min_notional=min_notional,
+                fees_bps=fees_bps,
+                slippage_bps=slippage_bps,
+                qty_raw=qty_raw,
+                qty_rounded=qty_raw,  # Rounding happens later in order placement
+                quote_after_round=quote_budget,
+                passed=passed,
+                fail_reason=fail_reason
+            )
+
         trace_step("budget_check", symbol=symbol, quote_budget=quote_budget, min_slot=min_slot)
 
         if quote_budget < min_slot:

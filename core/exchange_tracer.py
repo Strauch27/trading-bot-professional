@@ -137,6 +137,25 @@ class TracedExchange:
             if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
                 http_status = e.response.status_code
 
+            # Phase 3: Log rate_limit_hit event if this is a rate limit error
+            error_class_name = type(e).__name__
+            if 'RateLimit' in error_class_name or http_status == 429:
+                try:
+                    from core.logger_factory import HEALTH_LOG, log_event
+                    log_event(
+                        HEALTH_LOG(),
+                        "rate_limit_hit",
+                        api=api,
+                        method=method,
+                        http_status=http_status,
+                        error_message=str(e),
+                        rate_limit_remaining=rate_limit_remaining,
+                        level=logging.WARNING
+                    )
+                except Exception as health_log_error:
+                    # Don't fail the call if health logging fails
+                    logger.debug(f"Failed to log rate_limit_hit event: {health_log_error}")
+
             raise
 
         finally:
