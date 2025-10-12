@@ -475,17 +475,61 @@ class PortfolioManager:
         """Prüft ob Symbol auf Cooldown ist"""
         if symbol not in self.last_buy_time:
             return False
-        
+
         minutes_since_buy = (time.time() - self.last_buy_time[symbol]) / 60
         if minutes_since_buy < symbol_cooldown_minutes:
             logger.debug(f"Cooldown aktiv für {symbol}: {minutes_since_buy:.1f} < {symbol_cooldown_minutes} min",
                         extra={'event_type': 'COOLDOWN_ACTIVE', 'symbol': symbol})
             return True
+
+        # Phase 3: Cooldown expired - log cooldown_release event and clear tracking
+        try:
+            from core.trace_context import Trace, get_context_var
+            from core.logger_factory import HEALTH_LOG, log_event
+
+            decision_id = get_context_var('decision_id')
+
+            with Trace(decision_id=decision_id) if decision_id else Trace():
+                log_event(
+                    HEALTH_LOG(),
+                    "cooldown_release",
+                    symbol=symbol,
+                    cooldown_duration_minutes=symbol_cooldown_minutes,
+                    reason="cooldown_expired"
+                )
+        except Exception as e:
+            # Don't fail cooldown check if logging fails
+            logger.debug(f"Failed to log cooldown_release for {symbol}: {e}")
+
+        # Remove from tracking to mark cooldown as released
+        del self.last_buy_time[symbol]
         return False
     
     def set_cooldown(self, symbol: str):
         """Setzt Cooldown-Timer für Symbol"""
+        cooldown_until = time.time() + (symbol_cooldown_minutes * 60)
         self.last_buy_time[symbol] = time.time()
+
+        # Phase 3: Log cooldown_set event
+        try:
+            from core.trace_context import Trace, get_context_var
+            from core.logger_factory import HEALTH_LOG, log_event
+            from datetime import datetime, timezone
+
+            decision_id = get_context_var('decision_id')
+
+            with Trace(decision_id=decision_id) if decision_id else Trace():
+                log_event(
+                    HEALTH_LOG(),
+                    "cooldown_set",
+                    symbol=symbol,
+                    cooldown_duration_minutes=symbol_cooldown_minutes,
+                    cooldown_until=datetime.fromtimestamp(cooldown_until, tz=timezone.utc).isoformat(),
+                    reason="post_trade"
+                )
+        except Exception as e:
+            # Don't fail cooldown if logging fails
+            logger.debug(f"Failed to log cooldown_set for {symbol}: {e}")
     
     def add_buy_order(self, symbol: str, order_data: Dict):
         """Fügt neue Buy-Order hinzu"""

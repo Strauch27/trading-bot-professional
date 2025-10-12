@@ -415,6 +415,22 @@ class BuyDecisionHandler:
 
             if order and order.get('status') == 'closed':
                 self._handle_buy_fill(symbol, order, signal, decision_id)
+            elif order and order.get('status') in ['canceled', 'cancelled', 'expired']:
+                # Phase 3: Log order_done for cancelled/expired orders
+                order_timestamp = order.get('timestamp', 0) / 1000 if order.get('timestamp') else None
+                latency_ms_total = int((time.time() - order_timestamp) * 1000) if order_timestamp else None
+
+                with Trace(decision_id=decision_id, client_order_id=client_order_id, exchange_order_id=order.get('id')):
+                    log_event(
+                        ORDER_LOG(),
+                        "order_done",
+                        symbol=symbol,
+                        side="buy",
+                        final_status=order.get('status'),
+                        filled_qty=order.get('filled', 0),
+                        latency_ms_total=latency_ms_total,
+                        reason="ioc_not_filled" if order.get('status') == 'canceled' else "expired"
+                    )
 
         except Exception as e:
             # Track error for adaptive logging
@@ -452,15 +468,44 @@ class BuyDecisionHandler:
         # Calculate qty details for sizing_calc event
         qty_raw = quote_budget / current_price if current_price > 0 else 0
 
-        # Get min notional from exchange limits if available
+        # Get market limits and hash for change detection
+        market_limits = {}
+        market_limits_hash = None
         min_notional = min_slot
-        if hasattr(self.engine.exchange_adapter, 'get_min_notional'):
-            try:
-                min_notional = self.engine.exchange_adapter.get_min_notional(symbol) or min_slot
-            except Exception:
-                pass
 
-        # Phase 1: Log sizing_calc event
+        if hasattr(self.engine.exchange_adapter, 'get_market_info'):
+            try:
+                market_info = self.engine.exchange_adapter.get_market_info(symbol)
+                limits = market_info.get('limits', {})
+                precision = market_info.get('precision', {})
+
+                # Extract all relevant limits
+                market_limits = {
+                    'min_notional': float(limits.get('cost', {}).get('min', min_slot)),
+                    'max_notional': float(limits.get('cost', {}).get('max', 0)),
+                    'min_qty': float(limits.get('amount', {}).get('min', 0)),
+                    'max_qty': float(limits.get('amount', {}).get('max', 0)),
+                    'qty_step': 10 ** -precision.get('amount', 8),  # Step size from precision
+                    'price_tick': 10 ** -precision.get('price', 8),  # Tick size from precision
+                }
+                min_notional = market_limits['min_notional']
+
+                # Calculate hash for change detection
+                import hashlib
+                import json
+                limits_str = json.dumps(market_limits, sort_keys=True)
+                market_limits_hash = hashlib.sha256(limits_str.encode()).hexdigest()[:16]
+
+            except Exception as e:
+                logger.debug(f"Failed to get market limits for {symbol}: {e}")
+                # Fallback to basic min_notional
+                if hasattr(self.engine.exchange_adapter, 'get_min_notional'):
+                    try:
+                        min_notional = self.engine.exchange_adapter.get_min_notional(symbol) or min_slot
+                    except Exception:
+                        pass
+
+        # Phase 3: Log sizing_calc event with market_limits_snapshot
         with Trace(decision_id=self.engine.current_decision_id):
             passed = quote_budget >= min_slot
             fail_reason = None if passed else "insufficient_budget_after_sizing"
@@ -478,7 +523,9 @@ class BuyDecisionHandler:
                 qty_rounded=qty_raw,  # Rounding happens later in order placement
                 quote_after_round=quote_budget,
                 passed=passed,
-                fail_reason=fail_reason
+                fail_reason=fail_reason,
+                market_limits=market_limits if market_limits else None,
+                market_limits_hash=market_limits_hash
             )
 
         trace_step("budget_check", symbol=symbol, quote_budget=quote_budget, min_slot=min_slot)
@@ -813,6 +860,24 @@ class BuyDecisionHandler:
                 order_id=order['id'],
                 timestamp=time.time()
             )
+
+            # Phase 3: Log order_done event for completed order
+            order_timestamp = order.get('timestamp', 0) / 1000 if order.get('timestamp') else None
+            latency_ms_total = int((time.time() - order_timestamp) * 1000) if order_timestamp else None
+
+            with Trace(decision_id=decision_id, client_order_id=order.get('clientOrderId'), exchange_order_id=order.get('id')):
+                log_event(
+                    ORDER_LOG(),
+                    "order_done",
+                    symbol=symbol,
+                    side="buy",
+                    final_status="filled",
+                    filled_qty=filled_amount,
+                    avg_price=avg_price,
+                    total_cost=filled_amount * avg_price,
+                    fee_quote=fee_quote,
+                    latency_ms_total=latency_ms_total
+                )
 
             # Notify adaptive logger of trade completion
             notify_trade_completed(symbol, "buy")
