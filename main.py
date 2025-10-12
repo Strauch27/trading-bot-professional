@@ -299,8 +299,12 @@ def main():
     except Exception as e:
         print(f"Warning: Could not setup stackdump: {e}")
 
-    # Global exception handler
-    def global_exception_handler(exc_type, exc_value, exc_traceback):
+    # Phase 1: Install global exception hook (structured logging)
+    from core.logger_factory import install_global_excepthook
+    install_global_excepthook()
+
+    # Legacy exception handler as fallback
+    def legacy_exception_handler(exc_type, exc_value, exc_traceback):
         try:
             logger.exception("UNHANDLED_EXCEPTION", exc_info=(exc_type, exc_value, exc_traceback))
         except Exception:
@@ -308,7 +312,8 @@ def main():
             pass
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
-    sys.excepthook = global_exception_handler
+    # Keep legacy handler as secondary backup (Phase 1 hook is primary)
+    # sys.excepthook = legacy_exception_handler  # Commented out - Phase 1 hook takes precedence
 
     # ---- Runtime Directories (no side-effects during import) ----
     _ensure_runtime_dirs()
@@ -336,10 +341,34 @@ def main():
 
     logger.info("🚀 Trading Bot wird gestartet...", extra={'event_type': 'BOT_INITIALIZING'})
     logger.debug(f"Session-Ordner: {SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': SESSION_DIR})
-    
+
     # Extract session ID from session directory
     SESSION_ID = Path(SESSION_DIR).name  # e.g. 'session_20250907_190217'
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
+
+    # Phase 1: Set session ID for correlation tracking
+    from core.trace_context import set_session_id
+    from core.logger_factory import AUDIT_LOG, log_event
+    import hashlib
+
+    set_session_id(SESSION_ID)
+
+    # Compute config hash for change detection
+    config_dict = {k: getattr(config_module, k) for k in dir(config_module) if k.isupper()}
+    config_str = json.dumps(config_dict, sort_keys=True, default=str)
+    config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+    # Log session start with config snapshot
+    log_event(
+        AUDIT_LOG(),
+        "session_start",
+        message=f"Trading bot session started: {SESSION_ID}",
+        session_id=SESSION_ID,
+        config_hash=config_hash,
+        bot_version=getattr(config_module, 'BOT_VERSION', 'unknown'),
+        exchange="MEXC",
+        python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
     
     # Config bereits oben validiert
     
@@ -381,11 +410,11 @@ def main():
     # Exchange Setup
     exchange, has_api_keys = setup_exchange()
 
-    # Exchange Tracing Wrapper
+    # Phase 1: Exchange Tracing Wrapper (structured logging)
     if getattr(config_module, "EXCHANGE_TRACE_ENABLED", False) and exchange:
-        from adapters.exchange_tracer import TracedExchange
-        exchange = TracedExchange(exchange, config_module, logger)
-        logger.debug("Exchange tracing wrapper activated")
+        from core.exchange_tracer import TracedExchange
+        exchange = TracedExchange(exchange)
+        logger.debug("Exchange tracing wrapper activated (Phase 1 structured logging)")
 
     if not has_api_keys:
         global global_trading

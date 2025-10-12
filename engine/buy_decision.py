@@ -18,6 +18,10 @@ from core.logging.debug_tracer import trace_function, trace_step, trace_error
 from core.logging.adaptive_logger import track_error, track_guard_block, notify_trade_completed
 from core.logging.adaptive_logger import guard_stats_record
 
+# Phase 1 Structured Logging
+from core.trace_context import Trace, new_order_req_id
+from core.logger_factory import DECISION_LOG, ORDER_LOG, log_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +98,26 @@ class BuyDecisionHandler:
             # Extract details for stats
             details = self.engine.market_guards.get_detailed_guard_status(symbol, current_price)
             guard_stats_record(details)
+
+            # Phase 1: Log structured guards_eval event
+            with Trace(decision_id=decision_id):
+                # Build guard results for structured logging
+                guard_results = []
+                for guard_name, guard_info in details.get('guards', {}).items():
+                    guard_results.append({
+                        "name": guard_name,
+                        "passed": guard_info.get('passed', False),
+                        "value": guard_info.get('value'),
+                        "threshold": guard_info.get('threshold')
+                    })
+
+                log_event(
+                    DECISION_LOG(),
+                    "guards_eval",
+                    symbol=symbol,
+                    guards=guard_results,
+                    all_passed=passes_guards
+                )
 
             if not passes_guards:
                 trace_step("guards_failed", symbol=symbol, failed_guards=failed_guards, details=details.get("summary", ""))
@@ -200,6 +224,25 @@ class BuyDecisionHandler:
             trace_step("evaluate_buy_signal_start", symbol=symbol)
             buy_triggered, context = self.engine.buy_signal_service.evaluate_buy_signal(symbol, current_price)
             trace_step("evaluate_buy_signal_result", symbol=symbol, triggered=buy_triggered, context=context)
+
+            # Phase 1: Log structured drop_trigger_eval event
+            with Trace(decision_id=decision_id):
+                # Get anchor price from rolling window
+                anchor_price = None
+                if symbol in self.engine.rolling_windows:
+                    anchor_price = self.engine.rolling_windows[symbol].get_window_start_price()
+
+                log_event(
+                    DECISION_LOG(),
+                    "drop_trigger_eval",
+                    symbol=symbol,
+                    anchor=anchor_price or context.get('anchor'),
+                    current_price=current_price,
+                    drop_pct=context.get('drop_pct', 0),
+                    threshold=getattr(config, 'DROP_TRIGGER_VALUE', 0.96) * 100 - 100,  # Convert to pct
+                    threshold_hit=buy_triggered,
+                    mode=context.get('mode')
+                )
 
             if buy_triggered:
                 signal_reason = f"DROP_TRIGGER_MODE_{context['mode']}"
@@ -455,17 +498,79 @@ class BuyDecisionHandler:
                   client_order_id=client_order_id, premium_bps=premium_bps,
                   original_price=current_price, bid=bid, ask=ask)
 
-        # Use IOC for guaranteed fills
-        order = self.engine.order_service.place_limit_ioc(
-            symbol=symbol,
-            side="buy",
-            amount=amount,
-            price=aggressive_price,
-            client_order_id=client_order_id
-        )
+        # Phase 1: Log structured order events
+        order_req_id = new_order_req_id()
+        with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
+            # Log price snapshot before order
+            if coin_data and 'bid' in coin_data and 'ask' in coin_data:
+                spread = coin_data['ask'] - coin_data['bid']
+                spread_bp = (spread / coin_data['ask']) * 10000 if coin_data['ask'] > 0 else 0
+                log_event(
+                    ORDER_LOG(),
+                    "price_snapshot",
+                    symbol=symbol,
+                    bid=coin_data['bid'],
+                    ask=coin_data['ask'],
+                    spread=spread,
+                    spread_bp=spread_bp,
+                    mid_price=(coin_data['bid'] + coin_data['ask']) / 2
+                )
 
-        trace_step("order_placed", symbol=symbol, order_id=order.get('id') if order else None,
-                  status=order.get('status') if order else None)
+            # Log order attempt
+            log_event(
+                ORDER_LOG(),
+                "order_attempt",
+                symbol=symbol,
+                side="buy",
+                type="limit",
+                tif="IOC",
+                price=aggressive_price,
+                qty=amount,
+                notional=amount * aggressive_price
+            )
+
+        # Use IOC for guaranteed fills
+        try:
+            order = self.engine.order_service.place_limit_ioc(
+                symbol=symbol,
+                side="buy",
+                amount=amount,
+                price=aggressive_price,
+                client_order_id=client_order_id
+            )
+
+            trace_step("order_placed", symbol=symbol, order_id=order.get('id') if order else None,
+                      status=order.get('status') if order else None)
+
+            # Phase 1: Log order acknowledgment
+            with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
+                if order:
+                    exchange_order_id = order.get('id')
+                    with Trace(exchange_order_id=exchange_order_id):
+                        log_event(
+                            ORDER_LOG(),
+                            "order_ack",
+                            symbol=symbol,
+                            exchange_order_id=exchange_order_id,
+                            status=order.get('status'),
+                            latency_ms=int((time.time() - order_start_time) * 1000),
+                            exchange_raw=order
+                        )
+
+        except Exception as e:
+            # Phase 1: Log order error
+            with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
+                log_event(
+                    ORDER_LOG(),
+                    "order_error",
+                    message=f"Order placement failed: {type(e).__name__}: {str(e)}",
+                    symbol=symbol,
+                    error_class=type(e).__name__,
+                    error_message=str(e),
+                    latency_ms=int((time.time() - order_start_time) * 1000),
+                    level=logging.ERROR
+                )
+            raise
 
         # Track order latency
         order_latency = time.time() - order_start_time
