@@ -68,9 +68,37 @@ class ExitEvaluator:
         with self._lock:
             reasons = []
 
-            # Emergency Sell (TTL Timeout)
-            if context.elapsed_minutes >= self.trade_ttl_min:
-                reasons.append("TTL_EMERGENCY")
+            # Phase 3: Log sell trigger evaluations
+            try:
+                from core.event_schemas import SellTriggerEval
+                from core.logger_factory import DECISION_LOG, log_event
+                from core.trace_context import Trace
+
+                unrealized_pct = ((context.current_price / context.buying_price) - 1.0) * 100 if context.buying_price > 0 else 0
+
+                # Emergency Sell (TTL Timeout)
+                ttl_hit = context.elapsed_minutes >= self.trade_ttl_min
+                if ttl_hit:
+                    reasons.append("TTL_EMERGENCY")
+
+                # Log TTL trigger evaluation
+                ttl_eval = SellTriggerEval(
+                    symbol=context.symbol,
+                    trigger="ttl",
+                    entry_price=context.buying_price,
+                    current_price=context.current_price,
+                    unrealized_pct=unrealized_pct,
+                    threshold=self.trade_ttl_min,
+                    hit=ttl_hit,
+                    reason=f"elapsed={context.elapsed_minutes:.1f}min >= ttl={self.trade_ttl_min}min" if ttl_hit else None
+                )
+
+                with Trace(decision_id=context.decision_id) if context.decision_id else Trace():
+                    log_event(DECISION_LOG(), "sell_trigger_eval", **ttl_eval.model_dump())
+
+            except Exception as e:
+                # Don't fail evaluation if logging fails
+                logger.debug(f"Failed to log sell_trigger_eval for {context.symbol}: {e}")
 
             # Price-based exits would be evaluated here
             # This is a simplified version - full implementation would include
@@ -118,6 +146,45 @@ class ExitOrderManager:
         with self._lock:
             try:
                 self._statistics['exits_placed'] += 1
+
+                # Phase 3: Log sell sizing calculation
+                try:
+                    from core.event_schemas import SellSizingCalc
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    # Get exchange limits
+                    min_qty = self._get_min_amount(context.symbol)
+                    min_notional = self._get_min_notional(context.symbol)
+                    qty_rounded = context.amount
+                    notional = qty_rounded * context.current_price
+
+                    # Validate sizing
+                    passed = qty_rounded >= min_qty and notional >= min_notional
+                    fail_reason = None
+                    if not passed:
+                        if qty_rounded < min_qty:
+                            fail_reason = f"qty {qty_rounded} < min_qty {min_qty}"
+                        elif notional < min_notional:
+                            fail_reason = f"notional {notional} < min_notional {min_notional}"
+
+                    sizing_calc = SellSizingCalc(
+                        symbol=context.symbol,
+                        pos_qty_avail=context.amount,
+                        qty_raw=context.amount,
+                        qty_rounded=qty_rounded,
+                        min_qty=min_qty,
+                        min_notional=min_notional,
+                        notional=notional,
+                        passed=passed,
+                        fail_reason=fail_reason
+                    )
+
+                    with Trace(decision_id=context.decision_id) if context.decision_id else Trace():
+                        log_event(DECISION_LOG(), "sell_sizing_calc", **sizing_calc.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log sell_sizing_calc for {context.symbol}: {e}")
 
                 # Validate minimum amounts
                 if self.skip_under_min and context.amount < self._get_min_amount(context.symbol):
@@ -275,6 +342,11 @@ class ExitOrderManager:
         """Get minimum amount for symbol"""
         # This would integrate with exchange info
         return 0.001  # Simplified
+
+    def _get_min_notional(self, symbol: str) -> float:
+        """Get minimum notional for symbol"""
+        # This would integrate with exchange info
+        return 5.0  # Simplified (common USDT minimum)
 
     def place_or_replace_exit_protection(self, symbol: str, exit_type: str,
                                        amount: float, target_price: float,

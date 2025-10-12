@@ -840,6 +840,26 @@ class BuyDecisionHandler:
 
             self.engine.positions[symbol] = position_data
 
+            # Phase 3: Log position_opened event
+            try:
+                from core.event_schemas import PositionOpened
+                from datetime import datetime
+
+                position_opened = PositionOpened(
+                    symbol=symbol,
+                    qty=filled_amount,
+                    avg_entry=avg_price,
+                    notional=filled_amount * avg_price,
+                    fee_accum=buy_fee,
+                    opened_at=datetime.now().isoformat()
+                )
+
+                with Trace(decision_id=decision_id, exchange_order_id=order.get('id')):
+                    log_event(DECISION_LOG(), "position_opened", **position_opened.model_dump())
+
+            except Exception as e:
+                logger.debug(f"Failed to log position_opened for {symbol}: {e}")
+
             # Add to portfolio with fee information for later net PnL calculation
             fee_per_unit = (buy_fee / filled_amount) if filled_amount > 0 else 0.0
             self.engine.portfolio.add_held_asset(symbol, {

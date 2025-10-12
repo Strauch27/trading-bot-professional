@@ -117,6 +117,41 @@ class ExitHandler:
                 entry_price=position_data.get('buying_price')
             )
 
+            # Phase 3: Log position_closed event
+            try:
+                from core.event_schemas import PositionClosed
+                from core.logger_factory import DECISION_LOG, log_event
+                from core.trace_context import Trace
+
+                entry_price = position_data.get('buying_price', 0)
+                entry_time = position_data.get('time', 0)
+                duration_minutes = (time.time() - entry_time) / 60 if entry_time > 0 else None
+
+                realized_pnl_pct = ((result.avg_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+
+                # Get buy fee from position if available
+                buy_fee = position_data.get('buy_fee', 0) if position_data else 0
+                total_fees = buy_fee + exit_fee
+
+                position_closed = PositionClosed(
+                    symbol=symbol,
+                    qty_closed=result.filled_amount,
+                    avg_entry=entry_price,
+                    exit_price=result.avg_price,
+                    realized_pnl_usdt=realized_pnl,
+                    realized_pnl_pct=realized_pnl_pct,
+                    fee_total=total_fees,
+                    duration_minutes=duration_minutes,
+                    reason=reason
+                )
+
+                decision_id = position_data.get('decision_id')
+                with Trace(decision_id=decision_id) if decision_id else Trace():
+                    log_event(DECISION_LOG(), "position_closed", **position_closed.model_dump())
+
+            except Exception as e:
+                logger.debug(f"Failed to log position_closed for {symbol}: {e}")
+
             # Remove position
             del self.engine.positions[symbol]
 

@@ -61,15 +61,33 @@ class TrailingStopController:
             # Check activation
             if not self.is_activated and current_price >= self.activation_price:
                 self.is_activated = True
-                logger.info(
-                    f"Trailing stop activated for {self.symbol} at {current_price:.6f}",
-                    extra={
-                        'event_type': 'TRAILING_STOP_ACTIVATED',
-                        'symbol': self.symbol,
-                        'price': current_price,
-                        'activation_price': self.activation_price
-                    }
-                )
+
+                # Phase 3: Log trailing stop activation
+                try:
+                    from core.event_schemas import TrailingUpdate
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    distance_bps = int((1.0 - self.distance_pct) * 10000)
+
+                    trailing_update = TrailingUpdate(
+                        symbol=self.symbol,
+                        mode="percent_bps",
+                        anchor_old=self.initial_price,
+                        anchor_new=self.highest_price,
+                        distance_bps=distance_bps,
+                        armed=True,
+                        hit=False,
+                        stop_price=self.current_stop
+                    )
+
+                    with Trace():
+                        log_event(DECISION_LOG(), "trailing_update", **trailing_update.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log trailing_update activation for {self.symbol}: {e}")
+
+                logger.info(f"Trailing stop activated for {self.symbol} at {current_price:.6f}")
 
             # Calculate new stop if activated
             if self.is_activated:
@@ -79,16 +97,32 @@ class TrailingStopController:
                     old_stop = self.current_stop
                     self.current_stop = new_stop
 
-                    logger.debug(
-                        f"Trailing stop updated for {self.symbol}: {old_stop:.6f} -> {new_stop:.6f}",
-                        extra={
-                            'event_type': 'TRAILING_STOP_UPDATED',
-                            'symbol': self.symbol,
-                            'old_stop': old_stop,
-                            'new_stop': new_stop,
-                            'highest_price': self.highest_price
-                        }
-                    )
+                    # Phase 3: Log trailing stop update
+                    try:
+                        from core.event_schemas import TrailingUpdate
+                        from core.logger_factory import DECISION_LOG, log_event
+                        from core.trace_context import Trace
+
+                        distance_bps = int((1.0 - self.distance_pct) * 10000)
+
+                        trailing_update = TrailingUpdate(
+                            symbol=self.symbol,
+                            mode="percent_bps",
+                            anchor_old=old_stop,
+                            anchor_new=new_stop,
+                            distance_bps=distance_bps,
+                            armed=True,
+                            hit=False,
+                            stop_price=new_stop
+                        )
+
+                        with Trace():
+                            log_event(DECISION_LOG(), "trailing_update", **trailing_update.model_dump())
+
+                    except Exception as e:
+                        logger.debug(f"Failed to log trailing_update for {self.symbol}: {e}")
+
+                    logger.debug(f"Trailing stop updated for {self.symbol}: {old_stop:.6f} -> {new_stop:.6f}")
                     return new_stop
 
             return None

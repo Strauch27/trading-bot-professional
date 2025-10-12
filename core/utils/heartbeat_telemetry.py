@@ -482,6 +482,35 @@ class HeartbeatManager:
             # Generate comprehensive heartbeat
             heartbeat = self.aggregator.generate_heartbeat(pnl_snapshot, market_prices)
 
+            # Phase 3: Log portfolio_snapshot event
+            try:
+                from core.event_schemas import PortfolioSnapshot
+                from core.logger_factory import DECISION_LOG, log_event
+                from core.trace_context import Trace
+
+                # Build exposure dict from current positions
+                exposure = {}
+                for symbol, pos in self.aggregator.current_positions.items():
+                    exposure[symbol] = pos.get('notional', 0)
+
+                portfolio_snapshot = PortfolioSnapshot(
+                    equity_total=pnl_snapshot.get('budget_available', 0) + pnl_snapshot.get('pnl_unrealized', 0),
+                    cash_free=pnl_snapshot.get('budget_available', 0),
+                    positions_count=len(self.aggregator.current_positions),
+                    exposure=exposure,
+                    realized_pnl=pnl_snapshot.get('pnl_realized', 0),
+                    unrealized_pnl=pnl_snapshot.get('pnl_unrealized', 0)
+                )
+
+                with Trace():
+                    log_event(DECISION_LOG(), "portfolio_snapshot", **portfolio_snapshot.model_dump())
+
+            except Exception as e:
+                # Don't fail heartbeat if logging fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Failed to log portfolio_snapshot: {e}")
+
             # Check for alerts
             alerts = self._check_alerts(heartbeat)
 
