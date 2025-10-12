@@ -23,7 +23,6 @@ from core.fsm.partial_fills import PartialFillHandler
 from core.fsm.snapshot import SnapshotManager
 from core.fsm.recovery import recover_fsm_states_on_startup
 from core.fsm.portfolio_transaction import init_portfolio_transaction, get_portfolio_transaction
-from core.fsm.retry import with_order_retry
 
 # Logging & Metrics
 from core.logging.phase_events import PhaseEventLogger
@@ -36,7 +35,7 @@ from telemetry.phase_metrics import (
 # Services (from existing architecture)
 from services import (
     BuySignalService, MarketGuards, OrderService, OrderCache,
-    ExitManager, PnLService, MarketDataProvider, ExchangeAdapter
+    ExitManager, PnLService, MarketDataProvider
 )
 from adapters.exchange import ExchangeAdapter as ExchangeAdapterClass
 
