@@ -301,7 +301,7 @@ class BuyDecisionHandler:
                 return
 
             # Place buy order
-            order = self._place_buy_order(symbol, amount, current_price, quote_budget, signal, decision_id, client_order_id)
+            order = self._place_buy_order(symbol, amount, current_price, quote_budget, signal, decision_id, client_order_id, coin_data)
 
             if order and order.get('status') == 'closed':
                 self._handle_buy_fill(symbol, order, signal, decision_id)
@@ -424,7 +424,7 @@ class BuyDecisionHandler:
         return True
 
     def _place_buy_order(self, symbol: str, amount: float, current_price: float, quote_budget: float,
-                        signal: str, decision_id: str, client_order_id: str):
+                        signal: str, decision_id: str, client_order_id: str, coin_data: Dict = None):
         """Place buy order with appropriate strategy"""
         # Log order placement attempt
         order_start_time = time.time()
