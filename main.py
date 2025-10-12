@@ -828,6 +828,46 @@ def main():
                 logger.warning(f"Failed to start Rich status table: {e}",
                               extra={'event_type': 'RICH_TABLE_START_FAILED', 'error': str(e)})
 
+    # --- Live Drop Monitor (Terminal UI) ---
+    ENABLE_LIVE_DROP_MONITOR = getattr(config_module, 'ENABLE_LIVE_DROP_MONITOR', False)
+
+    if ENABLE_LIVE_DROP_MONITOR:
+        try:
+            from interfaces.drop_monitor import run_live_drop_monitor
+            import threading
+
+            LIVE_DROP_MONITOR_REFRESH_S = getattr(config_module, 'LIVE_DROP_MONITOR_REFRESH_S', 5.0)
+            LIVE_DROP_MONITOR_TOP_N = getattr(config_module, 'LIVE_DROP_MONITOR_TOP_N', 10)
+
+            def drop_monitor_thread():
+                """Background thread for Live Drop Monitor"""
+                try:
+                    logger.info("Starting Live Drop Monitor...",
+                               extra={'event_type': 'DROP_MONITOR_STARTING'})
+                    run_live_drop_monitor(
+                        engine=engine,
+                        config=config_module,
+                        top_n=LIVE_DROP_MONITOR_TOP_N,
+                        refresh_seconds=LIVE_DROP_MONITOR_REFRESH_S
+                    )
+                except Exception as e:
+                    logger.warning(f"Live drop monitor error: {e}",
+                                  extra={'event_type': 'DROP_MONITOR_ERROR', 'error': str(e)})
+
+            drop_monitor_thread_obj = threading.Thread(
+                target=drop_monitor_thread,
+                daemon=True,
+                name="LiveDropMonitor"
+            )
+            drop_monitor_thread_obj.start()
+            logger.info("Live drop monitor thread started",
+                       extra={'event_type': 'DROP_MONITOR_STARTED',
+                              'refresh_s': LIVE_DROP_MONITOR_REFRESH_S,
+                              'top_n': LIVE_DROP_MONITOR_TOP_N})
+        except Exception as e:
+            logger.warning(f"Failed to start live drop monitor: {e}",
+                          extra={'event_type': 'DROP_MONITOR_START_FAILED', 'error': str(e)})
+
     # Print clean startup summary to terminal
     from core.utils.startup_summary import print_startup_summary
 

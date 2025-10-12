@@ -515,10 +515,18 @@ TERMINAL_PRESETS = {
 for _k, _v in TERMINAL_PRESETS.get(TERMINAL_PRESET, {}).items():
     globals()[_k] = _v
 STATUS_LINE_TICK_S = 30
+
+# Live Drop Monitor (Terminal UI)
+ENABLE_LIVE_DROP_MONITOR = True  # Live-updating Terminal-Table mit Top Drops
+LIVE_DROP_MONITOR_REFRESH_S = 5  # Update-Intervall in Sekunden
+LIVE_DROP_MONITOR_TOP_N = 10  # Anzahl der Top Drops (max 20)
+
+# Drop Ticker (Legacy)
 ENABLE_TOP_DROPS_TICKER = True
 TOP_DROPS_INTERVAL_S = 60
 TOP_DROPS_LIMIT = 10
 TOP_DROPS_WITHIN_BPS_OF_TRIGGER = 200
+
 ENABLE_PRETTY_TRADE_LOGS = True
 USE_ANSI_COLORS = True
 SHOW_EVENT_TYPE_IN_CONSOLE = True
@@ -746,6 +754,9 @@ enable_pretty_trade_logs = ENABLE_PRETTY_TRADE_LOGS
 show_event_type_in_console = SHOW_EVENT_TYPE_IN_CONSOLE
 enable_pnl_monitor = ENABLE_PNL_MONITOR
 verbose_guard_logs = VERBOSE_GUARD_LOGS
+enable_live_drop_monitor = ENABLE_LIVE_DROP_MONITOR
+live_drop_monitor_refresh_s = LIVE_DROP_MONITOR_REFRESH_S
+live_drop_monitor_top_n = LIVE_DROP_MONITOR_TOP_N
 enable_top_drops_ticker = ENABLE_TOP_DROPS_TICKER
 top_drops_interval_s = TOP_DROPS_INTERVAL_S
 top_drops_limit = TOP_DROPS_LIMIT
