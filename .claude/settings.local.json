@@ -67,7 +67,8 @@
       "Bash(top:*)",
       "Bash(./venv/bin/python -m pip list:*)",
       "Bash(sort:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(associated with a value\" führt.\n\nLösung: Redundantes lokales Import in Zeile 144 entfernt. Das globale\nImport auf Modul-Ebene reicht aus.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

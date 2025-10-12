@@ -141,7 +141,7 @@ class TracedExchange:
             error_class_name = type(e).__name__
             if 'RateLimit' in error_class_name or http_status == 429:
                 try:
-                    from core.logger_factory import HEALTH_LOG, log_event
+                    from core.logger_factory import HEALTH_LOG
                     log_event(
                         HEALTH_LOG(),
                         "rate_limit_hit",
