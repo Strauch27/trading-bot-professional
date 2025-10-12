@@ -41,7 +41,7 @@ from scripts import config_lint
 from core.logging.logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
 
 # --- direkt nach dem Import von config.py ---
-logger.info("CFG_SNAPSHOT: GLOBAL_TRADING=%s, ON_INSUFFICIENT_BUDGET=%s",
+logger.debug("CFG_SNAPSHOT: GLOBAL_TRADING=%s, ON_INSUFFICIENT_BUDGET=%s",
             config_module.GLOBAL_TRADING, getattr(config_module, "ON_INSUFFICIENT_BUDGET", None))
 from core.logging.loggingx import log_event, get_run_summary, setup_rotating_logger
 from core.utils import (
@@ -168,7 +168,7 @@ def setup_exchange():
             os.makedirs(os.path.dirname(markets_dump_path), exist_ok=True)
             with open(markets_dump_path, "w", encoding="utf-8") as fh:
                 json.dump(exchange.markets, fh, ensure_ascii=False, indent=2)
-            logger.info(f"Saved load_markets → {markets_dump_path}")
+            logger.debug(f"Saved load_markets → {markets_dump_path}")
         except Exception as e:
             logger.warning(f"Could not dump markets: {e}")
 
@@ -231,13 +231,13 @@ def backup_state_files():
     if os.path.exists(STATE_FILE_HELD):
         backup_path = os.path.join(backup_dir, f"held_assets_backup_{run_timestamp}.json")
         shutil.copy2(STATE_FILE_HELD, backup_path)
-        logger.info(f"State-Backup: held_assets -> {backup_path}")
+        logger.debug(f"State-Backup: held_assets -> {backup_path}")
     if os.path.exists(STATE_FILE_OPEN_BUYS):
         backup_path = os.path.join(backup_dir, f"open_buy_orders_backup_{run_timestamp}.json")
         shutil.copy2(STATE_FILE_OPEN_BUYS, backup_path)
-        logger.info(f"State-Backup: open_buys -> {backup_path}")
-    
-    logger.info("State-Backups im Session-Ordner erstellt", extra={'event_type': 'STATE_BACKUP_CREATED', 'backup_dir': backup_dir})
+        logger.debug(f"State-Backup: open_buys -> {backup_path}")
+
+    logger.debug("State-Backups im Session-Ordner erstellt", extra={'event_type': 'STATE_BACKUP_CREATED', 'backup_dir': backup_dir})
 
 
 def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
@@ -334,9 +334,8 @@ def main():
     signal.signal(signal.SIGINT, legacy_signal_handler)
     signal.signal(signal.SIGTERM, legacy_signal_handler)
 
-    logger.info("=" * 80, extra={'event_type': 'BOT_STARTUP'})
     logger.info("🚀 Trading Bot wird gestartet...", extra={'event_type': 'BOT_INITIALIZING'})
-    logger.info(f"Session-Ordner: {SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': SESSION_DIR})
+    logger.debug(f"Session-Ordner: {SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': SESSION_DIR})
     
     # Extract session ID from session directory
     SESSION_ID = Path(SESSION_DIR).name  # e.g. 'session_20250907_190217'
@@ -386,6 +385,7 @@ def main():
     if getattr(config_module, "EXCHANGE_TRACE_ENABLED", False) and exchange:
         from adapters.exchange_tracer import TracedExchange
         exchange = TracedExchange(exchange, config_module, logger)
+        logger.debug("Exchange tracing wrapper activated")
 
     if not has_api_keys:
         global global_trading
@@ -428,7 +428,7 @@ def main():
 
         def _dust_loop():
             """Background-Thread für periodische Dust-Sweeps"""
-            logger.info("Dust-Sweeper Thread gestartet",
+            logger.debug("Dust-Sweeper Thread gestartet",
                        extra={'event_type': 'DUST_SWEEP_THREAD_START',
                               'interval_min': DUST_SWEEP_INTERVAL_MIN})
 
@@ -484,7 +484,7 @@ def main():
         # Starte Dust-Sweep Thread
         dust_sweep_thread = threading.Thread(target=_dust_loop, daemon=True, name="DustSweeper")
         dust_sweep_thread.start()
-        logger.info("Periodischer Dust-Sweeper aktiviert",
+        logger.debug("Periodischer Dust-Sweeper aktiviert",
                    extra={'event_type': 'DUST_SWEEP_ACTIVATED',
                           'interval_min': DUST_SWEEP_INTERVAL_MIN})
     
@@ -498,10 +498,10 @@ def main():
         # V9_3-Style: Robuste Orderbuch-Nutzung aktivieren
         USE_ROBUST_MARKET_FETCH = config_module.USE_ROBUST_MARKET_FETCH
         if not USE_ROBUST_MARKET_FETCH:
-            logger.info("GENERAL - Using basic market data fetch (robust system bypassed)")
+            logger.debug("Using basic market data fetch (robust system bypassed)")
             preise = {}
         else:
-            logger.info("GENERAL - Using robust orderbook fetch")
+            logger.debug("Using robust orderbook fetch")
             # Hier würde der robuste OB-Streamer / Snapshot+Depth Pfad starten
             preise = {}
         try:
@@ -519,7 +519,7 @@ def main():
                         for _ in range(5):
                             topcoins[symbol].append(last_price)
 
-            logger.info(f"Basic market data fetch: {len(preise)} prices loaded")
+            logger.debug(f"Basic market data fetch: {len(preise)} prices loaded")
         except Exception as basic_error:
             logger.error(f"Basic market data fetch failed: {basic_error}")
             preise = {}
@@ -543,8 +543,8 @@ def main():
                     initialized_anchors += 1
         
         if initialized_anchors > 0:
-            logger.info(f"Initiale Drop-Anchors für {initialized_anchors} Coins gesetzt (BACKFILL_MINUTES=0)",
-                       extra={'event_type': 'DROP_ANCHORS_INITIALIZED', 
+            logger.debug(f"Initiale Drop-Anchors für {initialized_anchors} Coins gesetzt (BACKFILL_MINUTES=0)",
+                       extra={'event_type': 'DROP_ANCHORS_INITIALIZED',
                               'count': initialized_anchors,
                               'mode': DROP_TRIGGER_MODE})
     
@@ -611,7 +611,7 @@ def main():
     try:
         # Prepare watchlist for engine (keys only, values not needed)
         engine_watchlist = {symbol: {} for symbol in topcoins.keys()} if topcoins else {}
-        logger.info(f"Watchlist prepared for engine: {len(engine_watchlist)} symbols",
+        logger.debug(f"Watchlist prepared for engine: {len(engine_watchlist)} symbols",
                    extra={'event_type': 'ENGINE_WATCHLIST_PREPARED',
                           'symbol_count': len(engine_watchlist),
                           'symbols_preview': list(engine_watchlist.keys())[:10]})
@@ -658,7 +658,7 @@ def main():
             # BTC/USDT sicherstellen – Guards/BTC-Filter brauchen BTC-Daten
             engine.topcoins.setdefault("BTC/USDT", {})
 
-            logger.info(f"Engine topcoins configured: {len(engine.topcoins)} symbols",
+            logger.debug(f"Engine topcoins configured: {len(engine.topcoins)} symbols",
                        extra={'event_type': 'ENGINE_TOPCOINS_CONFIGURED', 'count': len(engine.topcoins)})
 
         logger.info("TradingEngine created successfully", extra={'event_type': 'ENGINE_INIT_COMPLETE'})
@@ -690,9 +690,9 @@ def main():
                     return 0
 
             memory_manager.add_cleanup_callback(memory_cleanup_callback)
-            logger.info("Memory monitoring enabled", extra={'event_type': 'MEMORY_MANAGER_ENABLED'})
+            logger.debug("Memory monitoring enabled", extra={'event_type': 'MEMORY_MANAGER_ENABLED'})
         else:
-            logger.info("Memory monitoring disabled (ENABLE_MEMORY_MONITORING=False)",
+            logger.debug("Memory monitoring disabled (ENABLE_MEMORY_MONITORING=False)",
                        extra={'event_type': 'MEMORY_MANAGER_DISABLED'})
 
     except Exception as engine_init_error:
@@ -716,14 +716,14 @@ def main():
     # requires: telegram_commands.py im Projektordner
     if getattr(config_module, 'ENABLE_TELEGRAM_COMMANDS', True):
         try:
-            logger.info("Starting Telegram command server...", extra={'event_type': 'TELEGRAM_COMMANDS_STARTING'})
+            logger.debug("Starting Telegram command server...", extra={'event_type': 'TELEGRAM_COMMANDS_STARTING'})
             start_telegram_command_server(engine)
-            logger.info("Telegram command server gestartet.", extra={'event_type': 'TELEGRAM_COMMANDS_STARTED'})
+            logger.debug("Telegram command server gestartet.", extra={'event_type': 'TELEGRAM_COMMANDS_STARTED'})
         except Exception as e:
             logger.warning(f"Telegram command server konnte nicht starten: {e}",
                            extra={'event_type': 'TELEGRAM_COMMANDS_ERROR', 'error': str(e)})
     else:
-        logger.info("Telegram command server disabled (ENABLE_TELEGRAM_COMMANDS=False)",
+        logger.debug("Telegram command server disabled (ENABLE_TELEGRAM_COMMANDS=False)",
                    extra={'event_type': 'TELEGRAM_COMMANDS_DISABLED'})
 
     # --- FSM Optional Features ---
@@ -781,22 +781,29 @@ def main():
                 logger.warning(f"Failed to start Rich status table: {e}",
                               extra={'event_type': 'RICH_TABLE_START_FAILED', 'error': str(e)})
 
-    # Modus-Anzeige
-    mode_str = "LIVE-MODUS" if global_trading and exchange else "OBSERVE-MODUS"
-    mode_reason = ""
-    if not exchange:
-        mode_reason = " (keine API-Keys)"
-    elif not global_trading:
-        mode_reason = " (Trading deaktiviert)"
-    
-    # Start-Info mit Budget
+    # Print clean startup summary to terminal
+    from core.utils.startup_summary import print_startup_summary
+
     start_budget = portfolio.my_budget if portfolio else 0.0
-    logger.info("Bot erfolgreich initialisiert. Starte Trading-Engine...",
-               extra={'event_type': 'BOT_READY'})
-    logger.info(f"BOT LAEUFT IM: {mode_str}{mode_reason} | Budget: {start_budget:.2f} USDT",
-               extra={'event_type': 'BOT_MODE', 'mode': 'LIVE' if global_trading and exchange else 'OBSERVE', 
-                      'budget': start_budget})
-    logger.info("=" * 80, extra={'event_type': 'ENGINE_STARTING'})
+    start_equity = start_budget  # Could calculate with unrealized PnL if needed
+    mode_str = "LIVE" if global_trading and exchange else "OBSERVE"
+
+    # Portfolio reset info
+    portfolio_was_reset = reset_portfolio_on_start and exchange
+    reset_from_budget = getattr(portfolio, '_reset_from_budget', start_budget)
+
+    print_startup_summary(
+        exchange_name="MEXC",
+        coin_count=len(topcoins),
+        budget=start_budget,
+        equity=start_equity,
+        mode=mode_str,
+        portfolio_reset=portfolio_was_reset,
+        reset_from=reset_from_budget,
+        reset_to=start_budget
+    )
+
+    logger.info("Bot erfolgreich initialisiert", extra={'event_type': 'BOT_READY'})
 
     # Ensure system stability (critical for avoiding race conditions)
     try:
@@ -809,8 +816,6 @@ def main():
         pass
 
     # Brief stabilization pause (resolves timing-sensitive engine startup issues)
-    # Note: These print statements are critical for preventing race conditions
-    print("Starting Trading Engine...", flush=True)
     tmod.sleep(0.2)
 
     # Hauptloop starten
@@ -819,7 +824,6 @@ def main():
         start_time = tmod.time()
         engine.start()
         start_duration = tmod.time() - start_time
-        print("Trading Engine initialized successfully", flush=True)
 
         if start_duration > 10:
             logger.warning(f"Engine start took {start_duration:.1f}s (>10s)",
@@ -827,8 +831,8 @@ def main():
 
         logger.info("Trading-Engine gestartet", extra={'event_type': 'ENGINE_START'})
 
-        # Guards-Status für TEST-Patch anzeigen
-        logger.info(
+        # Guards-Status für TEST-Patch anzeigen (DEBUG)
+        logger.debug(
             "GUARDS_OFF_TEST: sma=%s spread=%s volume=%s sigma=%s falling=%s btc_flag=%s btc_thr=%s",
             config_module.USE_SMA_GUARD,
             config_module.USE_SPREAD_GUARD,
@@ -839,8 +843,8 @@ def main():
             getattr(config_module, 'BTC_CHANGE_THRESHOLD', None)
         )
 
-        # Explizite Mode-Unterscheidung für Klarheit
-        logger.info(
+        # Explizite Mode-Unterscheidung für Klarheit (DEBUG)
+        logger.debug(
             "ENTRY_MODES: impulse_MODE=%s, DROP_TRIGGER_MODE=%s, LOOKBACK_S=%s, DROP_TRIGGER_LOOKBACK_MIN=%s",
             config_module.MODE,
             config_module.DROP_TRIGGER_MODE,
@@ -853,12 +857,12 @@ def main():
             try:
                 from core.utils.heartbeat_telemetry import start_auto_heartbeat
                 start_auto_heartbeat(getattr(config_module, 'HEARTBEAT_INTERVAL_S', 60.0))
-                logger.info("Heartbeat telemetry enabled", extra={'event_type': 'HEARTBEAT_TELEMETRY_ENABLED'})
+                logger.debug("Heartbeat telemetry enabled", extra={'event_type': 'HEARTBEAT_TELEMETRY_ENABLED'})
             except Exception as e:
                 logger.warning(f"Failed to start heartbeat telemetry: {e}",
                               extra={'event_type': 'HEARTBEAT_TELEMETRY_ERROR', 'error': str(e)})
         else:
-            logger.info("Heartbeat telemetry disabled (ENABLE_HEARTBEAT_TELEMETRY=False)",
+            logger.debug("Heartbeat telemetry disabled (ENABLE_HEARTBEAT_TELEMETRY=False)",
                        extra={'event_type': 'HEARTBEAT_TELEMETRY_DISABLED'})
 
         # Register additional cleanup callbacks
@@ -872,7 +876,7 @@ def main():
         heartbeat_monitor.start()
 
         # Thread-safe main loop using shutdown coordinator
-        logger.info("Thread-safe hauptschleife gestartet", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_STARTED'})
+        logger.debug("Thread-safe hauptschleife gestartet", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_STARTED'})
 
         next_heartbeat = tmod.time() + 60  # Minütliche Updates statt alle 30s
         heartbeat_failures = 0
