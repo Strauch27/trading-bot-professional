@@ -11,18 +11,16 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
-# Core FSM (legacy handler-based)
-from core.fsm.machine import StateMachine
-from core.fsm.state import CoinState, set_phase
+# Core FSM - Table-Driven Architecture
+from core.fsm.state import CoinState
 from core.fsm.phases import Phase
-
-# New table-driven FSM components
-from core.fsm.fsm_machine import get_fsm as get_table_driven_fsm
+from core.fsm.fsm_machine import FSMMachine
+from core.fsm.transitions import get_transition_table
 from core.fsm.fsm_events import FSMEvent, EventContext
 from core.fsm.state_data import StateData, OrderContext
-from core.fsm.timeouts import get_timeout_manager
-from core.fsm.partial_fills import get_partial_fill_handler
-from core.fsm.snapshot import get_snapshot_manager
+from core.fsm.timeouts import TimeoutManager
+from core.fsm.partial_fills import PartialFillHandler
+from core.fsm.snapshot import SnapshotManager
 from core.fsm.recovery import recover_fsm_states_on_startup
 from core.fsm.portfolio_transaction import init_portfolio_transaction, get_portfolio_transaction
 from core.fsm.retry import with_order_retry
@@ -79,24 +77,21 @@ class FSMTradingEngine:
             'PHASE_MAP': PHASE_MAP
         })()
 
-        # State Machine (legacy handler-based)
-        self.fsm = StateMachine(log=self.phase_logger, metrics=self.metrics)
-
-        # New table-driven FSM components
-        self.table_driven_fsm = get_table_driven_fsm()
-        self.timeout_manager = get_timeout_manager()
-        self.partial_fill_handler = get_partial_fill_handler()
-        self.snapshot_manager = get_snapshot_manager()
-
-        # Initialize Services
+        # Initialize Services (needed before FSM)
         self._initialize_services()
+
+        # Table-Driven FSM Components
+        self.fsm = FSMMachine(get_transition_table())
+        self.timeout_manager = TimeoutManager()
+        self.partial_fill_handler = PartialFillHandler()
+        self.snapshot_manager = SnapshotManager()
 
         # Initialize portfolio transaction (needs portfolio and pnl_service)
         init_portfolio_transaction(self.portfolio, self.pnl_service, self.snapshot_manager)
         self.portfolio_tx = get_portfolio_transaction()
 
-        # Register Phase Handlers
-        self._register_transitions()
+        # FSM state dictionary (symbol → CoinState)
+        self.states: Dict[str, CoinState] = {}
 
         # Engine State
         self.running = False
@@ -122,12 +117,12 @@ class FSMTradingEngine:
             try:
                 recovered_states = recover_fsm_states_on_startup()
                 for symbol, coin_state in recovered_states.items():
-                    # Add to legacy FSM
-                    self.fsm.states[symbol] = coin_state
-                    logger.info(f"Recovered state for {symbol}: {coin_state.phase.name}")
+                    # Add to FSM state dict
+                    self.states[symbol] = coin_state
+                    logger.info(f"Recovered {symbol}: {coin_state.phase.name}")
 
                 if recovered_states:
-                    logger.info(f"Crash recovery: {len(recovered_states)} states restored")
+                    logger.info(f"✅ Crash recovery: {len(recovered_states)} states restored")
             except Exception as e:
                 logger.error(f"Crash recovery failed: {e}", exc_info=True)
 
@@ -192,229 +187,201 @@ class FSMTradingEngine:
 
         logger.info("All trading services initialized")
 
-    def _register_transitions(self):
-        """Register all phase handlers."""
-        self.fsm.register_transition(Phase.WARMUP, self._handle_warmup)
-        self.fsm.register_transition(Phase.IDLE, self._handle_idle)
-        self.fsm.register_transition(Phase.ENTRY_EVAL, self._handle_entry_eval)
-        self.fsm.register_transition(Phase.PLACE_BUY, self._handle_place_buy)
-        self.fsm.register_transition(Phase.WAIT_FILL, self._handle_wait_fill)
-        self.fsm.register_transition(Phase.POSITION, self._handle_position)
-        self.fsm.register_transition(Phase.EXIT_EVAL, self._handle_exit_eval)
-        self.fsm.register_transition(Phase.PLACE_SELL, self._handle_place_sell)
-        self.fsm.register_transition(Phase.WAIT_SELL_FILL, self._handle_wait_sell_fill)
-        self.fsm.register_transition(Phase.POST_TRADE, self._handle_post_trade)
-        self.fsm.register_transition(Phase.COOLDOWN, self._handle_cooldown)
-        self.fsm.register_transition(Phase.ERROR, self._handle_error)
+    # ========== EVENT-BASED SYMBOL PROCESSING ==========
 
-    # ========== PHASE HANDLERS - COMPLETE IMPLEMENTATION ==========
-
-    def _handle_warmup(self, st: CoinState, ctx: Dict):
+    def _process_symbol(self, symbol: str, md: Dict):
         """
-        WARMUP → IDLE
+        Process symbol with event-based FSM dispatch.
 
-        Initialize symbol: backfill market data, set drop anchor.
+        Args:
+            symbol: Trading symbol
+            md: Market data dict with price, bid, ask, volume
         """
-        symbol = st.symbol
-
-        # Initialize StateData for table-driven FSM
-        if not hasattr(st, 'fsm_data') or st.fsm_data is None:
+        # Get or create state
+        if symbol not in self.states:
+            st = CoinState(symbol=symbol)
             st.fsm_data = StateData()
-            logger.debug(f"Initialized StateData for {symbol}")
+            st.phase = Phase.WARMUP
+            self.states[symbol] = st
+        else:
+            st = self.states[symbol]
 
+        price = md.get("price", 0.0)
+        if price <= 0:
+            return  # Skip invalid price data
+
+        # Build event context
+        ctx = EventContext(
+            symbol=symbol,
+            price=price,
+            timestamp=time.time(),
+            decision_id=st.decision_id or "",
+            order_id=st.order_id or "",
+            data={
+                "bid": md.get("bid", 0.0),
+                "ask": md.get("ask", 0.0),
+                "volume": md.get("volume", 0.0)
+            }
+        )
+
+        # Phase-specific event dispatch
+        if st.phase == Phase.WARMUP:
+            self._process_warmup(st, ctx)
+
+        elif st.phase == Phase.IDLE:
+            self._process_idle(st, ctx)
+
+        elif st.phase == Phase.ENTRY_EVAL:
+            self._process_entry_eval(st, ctx)
+
+        elif st.phase == Phase.PLACE_BUY:
+            self._process_place_buy(st, ctx)
+
+        elif st.phase == Phase.WAIT_FILL:
+            self._process_wait_fill(st, ctx)
+
+        elif st.phase == Phase.POSITION:
+            self._process_position(st, ctx)
+
+        elif st.phase == Phase.EXIT_EVAL:
+            self._process_exit_eval(st, ctx)
+
+        elif st.phase == Phase.PLACE_SELL:
+            self._process_place_sell(st, ctx)
+
+        elif st.phase == Phase.WAIT_SELL_FILL:
+            self._process_wait_sell_fill(st, ctx)
+
+        elif st.phase == Phase.POST_TRADE:
+            self._process_post_trade(st, ctx)
+
+        elif st.phase == Phase.COOLDOWN:
+            pass  # Handled by _tick_timeouts
+
+        elif st.phase == Phase.ERROR:
+            self._process_error(st, ctx)
+
+    def _tick_timeouts(self):
+        """Check timeouts for all symbols and emit timeout events."""
+        for symbol, st in list(self.states.items()):
+            timeout_events = self.timeout_manager.check_all_timeouts(symbol, st)
+            for event in timeout_events:
+                if self.fsm.process_event(st, event):
+                    self.snapshot_manager.save_snapshot(symbol, st)
+                    self._log_phase_transition(st, event)
+
+    def _emit_event(self, st: CoinState, event: FSMEvent, ctx: EventContext) -> bool:
+        """
+        Emit FSM event and handle snapshot + logging.
+
+        Returns:
+            True if transition succeeded
+        """
+        event_ctx = EventContext(
+            event=event,
+            symbol=st.symbol,
+            timestamp=ctx.timestamp,
+            price=ctx.price,
+            decision_id=ctx.decision_id,
+            order_id=ctx.order_id,
+            data=ctx.data
+        )
+
+        if self.fsm.process_event(st, event_ctx):
+            # Save snapshot synchronously after state change
+            self.snapshot_manager.save_snapshot(st.symbol, st)
+            # Log phase transition asynchronously
+            self._log_phase_transition(st, event_ctx)
+            return True
+        return False
+
+    def _log_phase_transition(self, st: CoinState, ctx: EventContext):
+        """Log phase transition to JSONL (async)."""
         try:
-            # Backfill market history if configured
+            self.phase_logger.log_phase_change({
+                "symbol": st.symbol,
+                "to": st.phase.value,
+                "ts_ms": int(ctx.timestamp * 1000),
+                "decision_id": st.decision_id or "",
+                "order_id": st.order_id or "",
+                "event": ctx.event.name if ctx.event else ""
+            })
+        except Exception as e:
+            logger.debug(f"Phase logging failed: {e}")
+
+    # ========== PHASE-SPECIFIC PROCESSORS ==========
+
+    def _process_warmup(self, st: CoinState, ctx: EventContext):
+        """WARMUP: Initialize symbol and transition to IDLE."""
+        try:
+            # Backfill history if configured
             if getattr(config, 'BACKFILL_MINUTES', 0) > 0:
                 self.market_data.backfill_history(
-                    [symbol],
+                    [st.symbol],
                     timeframe='1m',
                     minutes=config.BACKFILL_MINUTES
                 )
 
-            # Initialize drop anchor if using drop anchor system
-            if getattr(config, 'USE_DROP_ANCHOR', False):
-                price = ctx.get("price", 0.0)
-                if price > 0:
-                    st.anchor_price = price
-                    st.anchor_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    self.portfolio.set_drop_anchor(symbol, price, st.anchor_ts)
+            # Initialize drop anchor if configured
+            if getattr(config, 'USE_DROP_ANCHOR', False) and ctx.price > 0:
+                st.anchor_price = ctx.price
+                st.anchor_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                self.portfolio.set_drop_anchor(st.symbol, ctx.price, st.anchor_ts)
 
-            # Event-based transition to IDLE
-            event = EventContext(
-                event=FSMEvent.WARMUP_COMPLETED,
-                symbol=symbol,
-                timestamp=ctx.get("timestamp", time.time()),
-                data={'note': 'warmup complete'}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                # Save snapshot after transition
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.IDLE, note="warmup complete",
-                         log=self.phase_logger, metrics=self.metrics)
+            # Emit WARMUP_COMPLETED event
+            self._emit_event(st, FSMEvent.WARMUP_COMPLETED, ctx)
 
         except Exception as e:
-            logger.error(f"Warmup error for {symbol}: {e}")
-            # Event-based error transition
-            event = EventContext(
-                event=FSMEvent.ERROR_OCCURRED,
-                symbol=symbol,
-                timestamp=time.time(),
-                error=e,
-                data={'context': 'warmup_error', 'note': str(e)[:50]}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.ERROR, note=f"warmup_error: {str(e)[:50]}",
-                         log=self.phase_logger, metrics=self.metrics)
+            logger.error(f"Warmup error {st.symbol}: {e}")
+            self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
 
-    def _handle_idle(self, st: CoinState, ctx: Dict):
-        """
-        IDLE → ENTRY_EVAL (if slots available)
-
-        Wait for free trading slot, then evaluate entry.
-        """
-        # Check if in cooldown
+    def _process_idle(self, st: CoinState, ctx: EventContext):
+        """IDLE: Check for free slots and transition to ENTRY_EVAL."""
         if st.in_cooldown():
-            return  # Stay in IDLE until cooldown expires
+            return  # Still in cooldown
 
         # Check available slots
         max_trades = getattr(config, 'MAX_TRADES', 10)
-        active_positions = len(self.fsm.get_active_positions())
+        active_positions = sum(1 for s in self.states.values() if s.phase == Phase.POSITION)
 
         if active_positions >= max_trades:
-            # No slots available - stay in IDLE
-            return
+            return  # No slots available
 
-        # Check if already have position for this symbol
-        if st.has_position():
-            # Shouldn't happen, but safety check
-            logger.warning(f"{st.symbol} in IDLE but has position - resetting")
-            st.amount = 0.0
-            st.entry_price = 0.0
-            return
+        # Assign decision_id for idempotency
+        st.decision_id = new_decision_id()
 
-        # Slots available - move to entry evaluation
-        decision_id = new_decision_id()
-        st.decision_id = decision_id
+        # Emit SLOT_AVAILABLE event
+        self._emit_event(st, FSMEvent.SLOT_AVAILABLE, ctx)
 
-        # Event-based transition to ENTRY_EVAL
-        event = EventContext(
-            event=FSMEvent.SLOT_AVAILABLE,
-            symbol=st.symbol,
-            timestamp=ctx.get("timestamp", time.time()),
-            data={'decision_id': decision_id, 'note': 'checking entry'}
-        )
-        if self.table_driven_fsm.process_event(st, event):
-            self.snapshot_manager.save_snapshot(st.symbol, st)
-        else:
-            # Fallback to legacy transition
-            set_phase(st, Phase.ENTRY_EVAL, note="checking entry",
-                     decision_id=decision_id,
-                     log=self.phase_logger, metrics=self.metrics)
+    def _process_entry_eval(self, st: CoinState, ctx: EventContext):
+        """ENTRY_EVAL: Evaluate guards and signals."""
+        # Update services
+        self.buy_signal_service.update_price(st.symbol, ctx.price)
+        self.market_guards.update_price_data(st.symbol, ctx.price, ctx.data.get("volume", 0.0))
 
-    def _handle_entry_eval(self, st: CoinState, ctx: Dict):
-        """
-        ENTRY_EVAL → PLACE_BUY (if signal) or IDLE (if no signal/guards fail)
+        if ctx.data.get("bid") and ctx.data.get("ask"):
+            self.market_guards.update_orderbook(st.symbol, ctx.data["bid"], ctx.data["ask"])
 
-        Evaluate market guards and buy signals.
-        """
-        symbol = st.symbol
-        price = ctx.get("price", 0.0)
-
-        if price <= 0:
-            set_phase(st, Phase.IDLE, note="no price data",
-                     log=self.phase_logger, metrics=self.metrics)
-            return
-
-        # Update services with current price
-        self.buy_signal_service.update_price(symbol, price)
-        volume = ctx.get("volume", 0.0)
-        self.market_guards.update_price_data(symbol, price, volume)
-
-        # Update orderbook if available
-        if "bid" in ctx and "ask" in ctx:
-            self.market_guards.update_orderbook(symbol, ctx["bid"], ctx["ask"])
-
-        # Check guards (fail fast)
-        passes_guards, failed_guards = self.market_guards.passes_all_guards(symbol, price)
-
+        # Check guards
+        passes_guards, failed_guards = self.market_guards.passes_all_guards(st.symbol, ctx.price)
         if not passes_guards:
-            note = f"guards_failed: {','.join(failed_guards[:3])}"
-            # Event-based transition to IDLE
-            event = EventContext(
-                event=FSMEvent.GUARDS_FAILED,
-                symbol=symbol,
-                timestamp=ctx.get("timestamp", time.time()),
-                data={'note': note, 'failed_guards': failed_guards}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.IDLE, note=note,
-                         log=self.phase_logger, metrics=self.metrics)
+            self._emit_event(st, FSMEvent.GUARDS_FAILED, ctx)
             return
 
-        # Check minimum sizing
-        if hasattr(self.exchange_adapter, 'meets_minimums'):
-            position_size = getattr(config, 'POSITION_SIZE_USDT', 10.0)
-            sizing_ok, why = self.exchange_adapter.meets_minimums(symbol, price, position_size)
-            if not sizing_ok:
-                set_phase(st, Phase.IDLE, note=f"sizing_fail: {why}",
-                         log=self.phase_logger, metrics=self.metrics)
-                return
-
-        # Evaluate buy signal
-        buy_triggered, signal_context = self.buy_signal_service.evaluate_buy_signal(symbol, price)
+        # Check signal
+        buy_triggered, signal_context = self.buy_signal_service.evaluate_buy_signal(st.symbol, ctx.price)
 
         if buy_triggered:
             st.signal = f"DROP_MODE_{signal_context.get('mode', '?')}"
-            # Store signal in fsm_data
-            if hasattr(st, 'fsm_data') and st.fsm_data:
+            if st.fsm_data:
                 st.fsm_data.signal_detected_at = time.time()
                 st.fsm_data.signal_type = st.signal
-
-            # Event-based transition to PLACE_BUY
-            event = EventContext(
-                event=FSMEvent.SIGNAL_DETECTED,
-                symbol=symbol,
-                timestamp=ctx.get("timestamp", time.time()),
-                data={'signal_type': st.signal, 'signal_context': signal_context}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.PLACE_BUY, note=f"signal={st.signal}",
-                         log=self.phase_logger, metrics=self.metrics)
+            self._emit_event(st, FSMEvent.SIGNAL_DETECTED, ctx)
         else:
-            # Event-based transition to IDLE
-            event = EventContext(
-                event=FSMEvent.NO_SIGNAL,
-                symbol=symbol,
-                timestamp=ctx.get("timestamp", time.time()),
-                data={'note': 'no_signal'}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.IDLE, note="no_signal",
-                         log=self.phase_logger, metrics=self.metrics)
+            self._emit_event(st, FSMEvent.NO_SIGNAL, ctx)
 
-    def _handle_place_buy(self, st: CoinState, ctx: Dict):
-        """
-        PLACE_BUY → WAIT_FILL (if order placed) or IDLE (if placement fails)
-
-        Calculate position size and place buy order.
-        """
-        symbol = st.symbol
-        price = ctx.get("price", 0.0)
-
+    def _process_place_buy(self, st: CoinState, ctx: EventContext):
+        """PLACE_BUY: Calculate size and place buy order."""
         try:
             # Calculate position size
             available_budget = self.portfolio.get_free_usdt()
@@ -422,443 +389,19 @@ class FSMTradingEngine:
             per_trade = available_budget / max(1, max_trades)
             quote_budget = min(per_trade, getattr(config, 'POSITION_SIZE_USDT', 10.0))
 
-            # Check minimum
-            min_slot = getattr(config, 'MIN_SLOT_USDT', 5.0)
-            if quote_budget < min_slot:
-                set_phase(st, Phase.IDLE, note=f"insufficient_budget: {quote_budget:.2f}",
-                         log=self.phase_logger, metrics=self.metrics)
+            if quote_budget < getattr(config, 'MIN_SLOT_USDT', 5.0):
+                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
                 return
 
-            # Calculate amount
-            amount = quote_budget / price
-
-            # Generate client order ID
+            amount = quote_budget / ctx.price
             client_order_id = new_client_order_id(st.decision_id, "buy")
 
-            # Place order (IOC or GTC based on config)
-            use_ioc = getattr(config, 'USE_IOC_FOR_MODE2', False) and config.MODE == 2
-
-            if use_ioc:
-                order = self.order_service.place_limit_ioc(
-                    symbol=symbol,
-                    side="buy",
-                    amount=amount,
-                    price=price,
-                    client_order_id=client_order_id
-                )
-            else:
-                # GTC limit order
-                order = self.exchange_adapter.exchange.create_limit_buy_order(
-                    symbol, amount, price,
-                    params={"clientOrderId": client_order_id}
-                )
-
-            if order and order.get("id"):
-                st.order_id = order["id"]
-                st.client_order_id = client_order_id
-                st.order_placed_ts = time.time()
-                st.current_price = price
-
-                # Store order context in fsm_data
-                if hasattr(st, 'fsm_data') and st.fsm_data:
-                    st.fsm_data.buy_order = OrderContext(
-                        order_id=order["id"],
-                        client_order_id=client_order_id,
-                        placed_at=time.time(),
-                        target_qty=amount,
-                        status="pending"
-                    )
-
-                # Event-based transition to WAIT_FILL
-                event = EventContext(
-                    event=FSMEvent.BUY_ORDER_PLACED,
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    order_id=st.order_id,
-                    data={'amount': amount, 'price': price, 'note': f"order_placed: {st.order_id[:12]}"}
-                )
-                if self.table_driven_fsm.process_event(st, event):
-                    self.snapshot_manager.save_snapshot(symbol, st)
-                else:
-                    # Fallback to legacy transition
-                    set_phase(st, Phase.WAIT_FILL, note=f"order_placed: {st.order_id[:12]}",
-                             order_id=st.order_id,
-                             log=self.phase_logger, metrics=self.metrics)
-
-                self.stats["total_buys"] += 1
-            else:
-                # Event-based transition to IDLE (placement failed)
-                event = EventContext(
-                    event=FSMEvent.ORDER_PLACEMENT_FAILED,
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    data={'note': 'order_placement_failed'}
-                )
-                if self.table_driven_fsm.process_event(st, event):
-                    self.snapshot_manager.save_snapshot(symbol, st)
-                else:
-                    # Fallback to legacy transition
-                    set_phase(st, Phase.IDLE, note="order_placement_failed",
-                             log=self.phase_logger, metrics=self.metrics)
-
-        except Exception as e:
-            logger.error(f"Place buy error for {symbol}: {e}")
-            # Event-based error transition
-            event = EventContext(
-                event=FSMEvent.ERROR_OCCURRED,
-                symbol=symbol,
-                timestamp=time.time(),
-                error=e,
-                data={'context': 'place_buy_error', 'note': str(e)[:50]}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                # Fallback to legacy transition
-                set_phase(st, Phase.ERROR, note=f"place_buy_error: {str(e)[:50]}",
-                         log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_wait_fill(self, st: CoinState, ctx: Dict):
-        """
-        WAIT_FILL → POSITION (if filled) or IDLE (if timeout/canceled)
-
-        Poll order status and handle fill using TimeoutManager and PartialFillHandler.
-        """
-        symbol = st.symbol
-
-        try:
-            # Check timeout using TimeoutManager
-            timeout_events = self.timeout_manager.check_all_timeouts(symbol, st)
-            for timeout_event in timeout_events:
-                if timeout_event.event == FSMEvent.BUY_ORDER_TIMEOUT:
-                    # Cancel order
-                    try:
-                        self.exchange.cancel_order(st.order_id, symbol)
-                    except Exception:
-                        pass  # Order may already be filled/canceled
-
-                    # Event-based transition to IDLE
-                    if self.table_driven_fsm.process_event(st, timeout_event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        # Fallback to legacy transition
-                        set_phase(st, Phase.IDLE, note="buy_timeout",
-                                 log=self.phase_logger, metrics=self.metrics)
-                    return
-
-            # Fetch order status
-            order = self.exchange.fetch_order(st.order_id, symbol)
-
-            if order.get("status") == "closed":
-                # Order filled - use PartialFillHandler to accumulate
-                filled = order.get("filled", 0)
-                avg_price = order.get("average", 0)
-                fee_quote = order.get('fee', {}).get('cost', 0) or 0
-
-                if filled > 0 and avg_price > 0:
-                    # Update order context with fill data
-                    if hasattr(st, 'fsm_data') and st.fsm_data and st.fsm_data.buy_order:
-                        order_ctx = st.fsm_data.buy_order
-                        # Accumulate fill using PartialFillHandler
-                        self.partial_fill_handler.accumulate_fill(
-                            order_ctx=order_ctx,
-                            fill_qty=filled,
-                            fill_price=avg_price,
-                            fill_fee=fee_quote,
-                            trade_id=st.order_id
-                        )
-                        order_ctx.status = "filled"
-
-                        # Use weighted average from PartialFillHandler
-                        final_qty = order_ctx.cumulative_qty
-                        final_avg_price = order_ctx.avg_price
-                        final_fee = order_ctx.total_fees
-                    else:
-                        # Fallback to direct values
-                        final_qty = filled
-                        final_avg_price = avg_price
-                        final_fee = fee_quote
-
-                    # Update state
-                    st.amount = final_qty
-                    st.entry_price = final_avg_price
-                    st.entry_ts = time.time()
-                    st.current_price = final_avg_price
-                    st.peak_price = final_avg_price  # Initialize trailing
-
-                    # Calculate TP/SL
-                    st.tp_px = final_avg_price * getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)
-                    st.sl_px = final_avg_price * getattr(config, 'STOP_LOSS_THRESHOLD', 0.990)
-
-                    # Calculate fee per unit
-                    st.entry_fee_per_unit = (final_fee / final_qty) if final_qty > 0 else 0
-
-                    # Use PortfolioTransaction for atomic update
-                    with self.portfolio_tx.begin(symbol, st):
-                        # Add to portfolio
-                        self.portfolio.add_held_asset(symbol, {
-                            "amount": final_qty,
-                            "entry_price": final_avg_price,
-                            "buy_fee_quote_per_unit": st.entry_fee_per_unit,
-                            "buy_price": final_avg_price
-                        })
-
-                        # Record in PnL service
-                        self.pnl_service.record_fill(
-                            symbol=symbol,
-                            side="buy",
-                            quantity=final_qty,
-                            avg_price=final_avg_price,
-                            fee_quote=final_fee,
-                            order_id=st.order_id,
-                            client_order_id=st.client_order_id
-                        )
-
-                        # Event-based transition to POSITION
-                        event = EventContext(
-                            event=FSMEvent.BUY_ORDER_FILLED,
-                            symbol=symbol,
-                            timestamp=time.time(),
-                            filled_qty=final_qty,
-                            avg_price=final_avg_price,
-                            data={'note': f"filled: {final_qty:.6f}@{final_avg_price:.6f}"}
-                        )
-                        if not self.table_driven_fsm.process_event(st, event):
-                            # Fallback to legacy transition
-                            set_phase(st, Phase.POSITION,
-                                     note=f"filled: {final_qty:.6f}@{final_avg_price:.6f}",
-                                     log=self.phase_logger, metrics=self.metrics)
-
-                    # Telegram notification
-                    if self.telegram:
-                        try:
-                            self.telegram.send_message(
-                                f"🛒 BUY {symbol} @{final_avg_price:.6f} x{final_qty:.6f} [{st.signal}]"
-                            )
-                        except Exception:
-                            pass
-
-                else:
-                    # Filled but invalid data
-                    event = EventContext(
-                        event=FSMEvent.ORDER_INVALID_DATA,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        data={'note': 'invalid_fill_data'}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.IDLE, note="invalid_fill_data",
-                                 log=self.phase_logger, metrics=self.metrics)
-
-            elif order.get("status") == "canceled":
-                event = EventContext(
-                    event=FSMEvent.BUY_ORDER_CANCELED,
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    data={'note': 'order_canceled'}
-                )
-                if self.table_driven_fsm.process_event(st, event):
-                    self.snapshot_manager.save_snapshot(symbol, st)
-                else:
-                    set_phase(st, Phase.IDLE, note="order_canceled",
-                             log=self.phase_logger, metrics=self.metrics)
-
-            # else: order still open, stay in WAIT_FILL
-
-        except Exception as e:
-            logger.error(f"Wait fill error for {symbol}: {e}")
-            # Event-based error transition
-            event = EventContext(
-                event=FSMEvent.ERROR_OCCURRED,
-                symbol=symbol,
-                timestamp=time.time(),
-                error=e,
-                data={'context': 'wait_fill_error', 'note': str(e)[:50]}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.ERROR, note=f"wait_fill_error: {str(e)[:50]}",
-                         log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_position(self, st: CoinState, ctx: Dict):
-        """
-        POSITION → EXIT_EVAL (periodically check exits)
-
-        Monitor position, update trailing stops, calculate unrealized PnL.
-        """
-        symbol = st.symbol
-        price = ctx.get("price", 0.0)
-
-        if price <= 0:
-            return  # Wait for valid price
-
-        # Update current price
-        st.current_price = price
-
-        # Update trailing stop
-        if getattr(config, 'USE_TRAILING_STOP', False):
-            if price > st.peak_price:
-                st.peak_price = price
-                # Update trailing trigger
-                trailing_pct = getattr(config, 'TRAILING_DISTANCE_PCT', 0.99)
-                st.trailing_trigger = st.peak_price * trailing_pct
-
-        # Update unrealized PnL
-        self.pnl_service.set_unrealized_position(
-            symbol=symbol,
-            quantity=st.amount,
-            avg_entry_price=st.entry_price,
-            current_price=price,
-            entry_fee_per_unit=st.entry_fee_per_unit
-        )
-
-        # Periodically check exit conditions (every 2s)
-        if self.cycle_count % 4 == 0:  # 4 cycles * 0.5s = 2s
-            # Event-based transition to EXIT_EVAL
-            event = EventContext(
-                event=FSMEvent.TICK_RECEIVED,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={'note': 'checking_exits', 'price': price}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.EXIT_EVAL, note="checking_exits",
-                         log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_exit_eval(self, st: CoinState, ctx: Dict):
-        """
-        EXIT_EVAL → PLACE_SELL (if exit condition met) or POSITION (if no exit)
-
-        Check TP, SL, trailing stop, timeout.
-        """
-        symbol = st.symbol
-        price = ctx.get("price", 0.0)
-
-        if price <= 0:
-            set_phase(st, Phase.POSITION, note="no_price",
-                     log=self.phase_logger, metrics=self.metrics)
-            return
-
-        # Take Profit Check
-        if price >= st.tp_px:
-            st.exit_reason = "TAKE_PROFIT"
-            if hasattr(st, 'fsm_data') and st.fsm_data:
-                st.fsm_data.exit_signal = "TAKE_PROFIT"
-                st.fsm_data.exit_detected_at = time.time()
-
-            event = EventContext(
-                event=FSMEvent.TAKE_PROFIT_HIT,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={'note': f"tp_hit: {price:.6f}>={st.tp_px:.6f}", 'price': price}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.PLACE_SELL, note=f"tp_hit: {price:.6f}>={st.tp_px:.6f}",
-                         log=self.phase_logger, metrics=self.metrics)
-            return
-
-        # Stop Loss Check
-        if price <= st.sl_px:
-            st.exit_reason = "STOP_LOSS"
-            if hasattr(st, 'fsm_data') and st.fsm_data:
-                st.fsm_data.exit_signal = "STOP_LOSS"
-                st.fsm_data.exit_detected_at = time.time()
-
-            event = EventContext(
-                event=FSMEvent.STOP_LOSS_HIT,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={'note': f"sl_hit: {price:.6f}<={st.sl_px:.6f}", 'price': price}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.PLACE_SELL, note=f"sl_hit: {price:.6f}<={st.sl_px:.6f}",
-                         log=self.phase_logger, metrics=self.metrics)
-            return
-
-        # Trailing Stop Check
-        if getattr(config, 'USE_TRAILING_STOP', False) and st.trailing_trigger > 0:
-            if price <= st.trailing_trigger:
-                st.exit_reason = "TRAILING_STOP"
-                if hasattr(st, 'fsm_data') and st.fsm_data:
-                    st.fsm_data.exit_signal = "TRAILING_STOP"
-                    st.fsm_data.exit_detected_at = time.time()
-
-                event = EventContext(
-                    event=FSMEvent.TRAILING_STOP_HIT,
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    data={'note': f"trailing: {price:.6f}<={st.trailing_trigger:.6f}", 'price': price}
-                )
-                if self.table_driven_fsm.process_event(st, event):
-                    self.snapshot_manager.save_snapshot(symbol, st)
-                else:
-                    set_phase(st, Phase.PLACE_SELL, note=f"trailing: {price:.6f}<={st.trailing_trigger:.6f}",
-                             log=self.phase_logger, metrics=self.metrics)
-                return
-
-        # Timeout Check
-        max_hold_minutes = getattr(config, 'MAX_POSITION_HOLD_MINUTES', 60)
-        hold_time_minutes = (time.time() - st.entry_ts) / 60.0
-        if hold_time_minutes > max_hold_minutes:
-            st.exit_reason = "TIMEOUT"
-            if hasattr(st, 'fsm_data') and st.fsm_data:
-                st.fsm_data.exit_signal = "TIMEOUT"
-                st.fsm_data.exit_detected_at = time.time()
-
-            event = EventContext(
-                event=FSMEvent.POSITION_TIMEOUT,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={'note': f"timeout: {hold_time_minutes:.1f}min", 'hold_time_minutes': hold_time_minutes}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.PLACE_SELL, note=f"timeout: {hold_time_minutes:.1f}min",
-                         log=self.phase_logger, metrics=self.metrics)
-            return
-
-        # No exit condition - return to POSITION
-        event = EventContext(
-            event=FSMEvent.NO_EXIT_SIGNAL,
-            symbol=symbol,
-            timestamp=time.time(),
-            data={'note': 'no_exit_signal', 'price': price}
-        )
-        if self.table_driven_fsm.process_event(st, event):
-            self.snapshot_manager.save_snapshot(symbol, st)
-        else:
-            set_phase(st, Phase.POSITION, note="no_exit_signal",
-                     log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_place_sell(self, st: CoinState, ctx: Dict):
-        """
-        PLACE_SELL → WAIT_SELL_FILL (if order placed) or EXIT_EVAL (retry)
-
-        Place sell order (IOC ladder or market).
-        """
-        symbol = st.symbol
-        price = ctx.get("price", 0.0)
-
-        try:
-            # Generate client order ID
-            client_order_id = new_client_order_id(st.decision_id, "sell")
-
-            # Place sell order (IOC recommended for exits)
+            # Place order
             order = self.order_service.place_limit_ioc(
-                symbol=symbol,
-                side="sell",
-                amount=st.amount,
-                price=price,
+                symbol=st.symbol,
+                side="buy",
+                amount=amount,
+                price=ctx.price,
                 client_order_id=client_order_id
             )
 
@@ -867,8 +410,179 @@ class FSMTradingEngine:
                 st.client_order_id = client_order_id
                 st.order_placed_ts = time.time()
 
-                # Store sell order context in fsm_data
-                if hasattr(st, 'fsm_data') and st.fsm_data:
+                if st.fsm_data:
+                    st.fsm_data.buy_order = OrderContext(
+                        order_id=order["id"],
+                        client_order_id=client_order_id,
+                        placed_at=time.time(),
+                        target_qty=amount,
+                        status="pending"
+                    )
+
+                self._emit_event(st, FSMEvent.BUY_ORDER_PLACED, ctx)
+                self.stats["total_buys"] += 1
+            else:
+                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+
+        except Exception as e:
+            logger.error(f"Place buy error {st.symbol}: {e}")
+            self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
+
+    def _process_wait_fill(self, st: CoinState, ctx: EventContext):
+        """WAIT_FILL: Poll order status and handle fills with PartialFillHandler."""
+        # Note: Timeouts handled by _tick_timeouts
+        try:
+            order = self.exchange.fetch_order(st.order_id, st.symbol)
+
+            if order.get("status") == "closed":
+                filled = order.get("filled", 0)
+                avg_price = order.get("average", 0)
+                fee_quote = order.get('fee', {}).get('cost', 0) or 0
+
+                if filled > 0 and avg_price > 0:
+                    # Use PartialFillHandler
+                    if st.fsm_data and st.fsm_data.buy_order:
+                        self.partial_fill_handler.accumulate_fill(
+                            order_ctx=st.fsm_data.buy_order,
+                            fill_qty=filled,
+                            fill_price=avg_price,
+                            fill_fee=fee_quote,
+                            trade_id=st.order_id
+                        )
+                        final_qty = st.fsm_data.buy_order.cumulative_qty
+                        final_price = st.fsm_data.buy_order.avg_price
+                        final_fee = st.fsm_data.buy_order.total_fees
+                    else:
+                        final_qty, final_price, final_fee = filled, avg_price, fee_quote
+
+                    # Atomic portfolio update
+                    with self.portfolio_tx.begin(st.symbol, st):
+                        st.amount = final_qty
+                        st.entry_price = final_price
+                        st.entry_ts = time.time()
+                        st.entry_fee_per_unit = (final_fee / final_qty) if final_qty > 0 else 0
+
+                        self.portfolio.add_held_asset(st.symbol, {
+                            "amount": final_qty,
+                            "entry_price": final_price,
+                            "buy_fee_quote_per_unit": st.entry_fee_per_unit,
+                            "buy_price": final_price
+                        })
+
+                        self.pnl_service.record_fill(
+                            symbol=st.symbol,
+                            side="buy",
+                            quantity=final_qty,
+                            avg_price=final_price,
+                            fee_quote=final_fee,
+                            order_id=st.order_id,
+                            client_order_id=st.client_order_id
+                        )
+
+                        self._emit_event(st, FSMEvent.BUY_ORDER_FILLED, ctx)
+
+                    # Telegram notification
+                    if self.telegram:
+                        try:
+                            self.telegram.send_message(
+                                f"🛒 BUY {st.symbol} @{final_price:.6f} x{final_qty:.6f}"
+                            )
+                        except Exception:
+                            pass
+
+            elif order.get("status") == "canceled":
+                self._emit_event(st, FSMEvent.BUY_ORDER_CANCELED, ctx)
+
+        except Exception as e:
+            logger.error(f"Wait fill error {st.symbol}: {e}")
+            self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
+
+    def _process_position(self, st: CoinState, ctx: EventContext):
+        """POSITION: Monitor position, update trailing, check exits periodically."""
+        st.current_price = ctx.price
+
+        # Update trailing stop
+        if getattr(config, 'USE_TRAILING_STOP', False):
+            if ctx.price > st.peak_price:
+                st.peak_price = ctx.price
+                st.trailing_trigger = st.peak_price * getattr(config, 'TRAILING_DISTANCE_PCT', 0.99)
+
+        # Update unrealized PnL
+        self.pnl_service.set_unrealized_position(
+            symbol=st.symbol,
+            quantity=st.amount,
+            avg_entry_price=st.entry_price,
+            current_price=ctx.price,
+            entry_fee_per_unit=st.entry_fee_per_unit
+        )
+
+        # Check exits every 4 cycles (2s)
+        if self.cycle_count % 4 == 0:
+            self._emit_event(st, FSMEvent.TICK_RECEIVED, ctx)
+
+    def _process_exit_eval(self, st: CoinState, ctx: EventContext):
+        """EXIT_EVAL: Check TP, SL, trailing, timeout."""
+        # Take Profit
+        if ctx.price >= st.tp_px:
+            st.exit_reason = "TAKE_PROFIT"
+            if st.fsm_data:
+                st.fsm_data.exit_signal = "TAKE_PROFIT"
+                st.fsm_data.exit_detected_at = time.time()
+            self._emit_event(st, FSMEvent.TAKE_PROFIT_HIT, ctx)
+            return
+
+        # Stop Loss
+        if ctx.price <= st.sl_px:
+            st.exit_reason = "STOP_LOSS"
+            if st.fsm_data:
+                st.fsm_data.exit_signal = "STOP_LOSS"
+                st.fsm_data.exit_detected_at = time.time()
+            self._emit_event(st, FSMEvent.STOP_LOSS_HIT, ctx)
+            return
+
+        # Trailing Stop
+        if getattr(config, 'USE_TRAILING_STOP', False) and st.trailing_trigger > 0:
+            if ctx.price <= st.trailing_trigger:
+                st.exit_reason = "TRAILING_STOP"
+                if st.fsm_data:
+                    st.fsm_data.exit_signal = "TRAILING_STOP"
+                    st.fsm_data.exit_detected_at = time.time()
+                self._emit_event(st, FSMEvent.TRAILING_STOP_HIT, ctx)
+                return
+
+        # Position Timeout
+        max_hold_minutes = getattr(config, 'MAX_POSITION_HOLD_MINUTES', 60)
+        hold_time_minutes = (time.time() - st.entry_ts) / 60.0
+        if hold_time_minutes > max_hold_minutes:
+            st.exit_reason = "TIMEOUT"
+            if st.fsm_data:
+                st.fsm_data.exit_signal = "TIMEOUT"
+                st.fsm_data.exit_detected_at = time.time()
+            self._emit_event(st, FSMEvent.POSITION_TIMEOUT, ctx)
+            return
+
+        # No exit - return to POSITION
+        self._emit_event(st, FSMEvent.NO_EXIT_SIGNAL, ctx)
+
+    def _process_place_sell(self, st: CoinState, ctx: EventContext):
+        """PLACE_SELL: Place sell order (IOC)."""
+        try:
+            client_order_id = new_client_order_id(st.decision_id, "sell")
+
+            order = self.order_service.place_limit_ioc(
+                symbol=st.symbol,
+                side="sell",
+                amount=st.amount,
+                price=ctx.price,
+                client_order_id=client_order_id
+            )
+
+            if order and order.get("id"):
+                st.order_id = order["id"]
+                st.client_order_id = client_order_id
+                st.order_placed_ts = time.time()
+
+                if st.fsm_data:
                     st.fsm_data.sell_order = OrderContext(
                         order_id=order["id"],
                         client_order_id=client_order_id,
@@ -877,204 +591,54 @@ class FSMTradingEngine:
                         status="pending"
                     )
 
-                # Event-based transition to WAIT_SELL_FILL
-                event = EventContext(
-                    event=FSMEvent.SELL_ORDER_PLACED,
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    order_id=st.order_id,
-                    data={'amount': st.amount, 'price': price, 'note': f"sell_order: {st.order_id[:12]}"}
-                )
-                if self.table_driven_fsm.process_event(st, event):
-                    self.snapshot_manager.save_snapshot(symbol, st)
-                else:
-                    set_phase(st, Phase.WAIT_SELL_FILL, note=f"sell_order: {st.order_id[:12]}",
-                             order_id=st.order_id,
-                             log=self.phase_logger, metrics=self.metrics)
-
+                self._emit_event(st, FSMEvent.SELL_ORDER_PLACED, ctx)
                 self.stats["total_sells"] += 1
             else:
-                # Retry
                 st.retry_count += 1
                 if st.retry_count < 3:
-                    event = EventContext(
-                        event=FSMEvent.ORDER_PLACEMENT_FAILED,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        data={'note': f"retry_{st.retry_count}", 'retry_count': st.retry_count}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.PLACE_SELL, note=f"retry_{st.retry_count}",
-                                 log=self.phase_logger, metrics=self.metrics)
+                    self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
                 else:
-                    event = EventContext(
-                        event=FSMEvent.ERROR_OCCURRED,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        data={'context': 'sell_placement_failed_max_retries'}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.ERROR, note="sell_placement_failed_max_retries",
-                                 log=self.phase_logger, metrics=self.metrics)
+                    self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
 
         except Exception as e:
-            logger.error(f"Place sell error for {symbol}: {e}")
-            # Event-based error transition
-            event = EventContext(
-                event=FSMEvent.ERROR_OCCURRED,
-                symbol=symbol,
-                timestamp=time.time(),
-                error=e,
-                data={'context': 'place_sell_error', 'note': str(e)[:50]}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.ERROR, note=f"place_sell_error: {str(e)[:50]}",
-                         log=self.phase_logger, metrics=self.metrics)
+            logger.error(f"Place sell error {st.symbol}: {e}")
+            self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
 
-    def _handle_wait_sell_fill(self, st: CoinState, ctx: Dict):
-        """
-        WAIT_SELL_FILL → POST_TRADE (if filled) or PLACE_SELL (retry with market)
-
-        Poll sell order and handle partial fills.
-        """
-        symbol = st.symbol
-
+    def _process_wait_sell_fill(self, st: CoinState, ctx: EventContext):
+        """WAIT_SELL_FILL: Poll sell order status."""
+        # Note: Timeouts handled by _tick_timeouts
         try:
-            # Check timeout
-            timeout_seconds = getattr(config, 'SELL_ORDER_TIMEOUT_SECONDS', 20)
-            age = time.time() - st.order_placed_ts
-
-            # Fetch order
-            order = self.exchange.fetch_order(st.order_id, symbol)
+            order = self.exchange.fetch_order(st.order_id, st.symbol)
 
             if order.get("status") == "closed":
-                # Order filled
                 filled = order.get("filled", 0)
-                avg_price = order.get("average", 0)
-
-                if filled >= st.amount * 0.95:  # 95% filled threshold
-                    # Event-based transition to POST_TRADE
-                    event = EventContext(
-                        event=FSMEvent.SELL_ORDER_FILLED,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        filled_qty=filled,
-                        avg_price=avg_price,
-                        data={'note': f"filled: {filled:.6f}@{avg_price:.6f}"}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.POST_TRADE,
-                                 note=f"filled: {filled:.6f}@{avg_price:.6f}",
-                                 log=self.phase_logger, metrics=self.metrics)
+                if filled >= st.amount * 0.95:
+                    self._emit_event(st, FSMEvent.SELL_ORDER_FILLED, ctx)
                 else:
-                    # Partial fill - retry with market order
+                    # Partial fill - retry
                     remaining = st.amount - filled
                     if remaining > 0.0001:
                         st.retry_count += 1
-                        st.amount = remaining  # Update remaining amount
-                        event = EventContext(
-                            event=FSMEvent.PARTIAL_FILL_RETRY,
-                            symbol=symbol,
-                            timestamp=time.time(),
-                            data={'note': f"partial_fill_retry: {remaining:.6f}", 'remaining': remaining}
-                        )
-                        if self.table_driven_fsm.process_event(st, event):
-                            self.snapshot_manager.save_snapshot(symbol, st)
-                        else:
-                            set_phase(st, Phase.PLACE_SELL, note=f"partial_fill_retry: {remaining:.6f}",
-                                     log=self.phase_logger, metrics=self.metrics)
+                        st.amount = remaining
+                        self._emit_event(st, FSMEvent.PARTIAL_FILL_RETRY, ctx)
                     else:
-                        # Small remainder, consider filled
-                        event = EventContext(
-                            event=FSMEvent.SELL_ORDER_FILLED,
-                            symbol=symbol,
-                            timestamp=time.time(),
-                            data={'note': 'partial_accepted'}
-                        )
-                        if self.table_driven_fsm.process_event(st, event):
-                            self.snapshot_manager.save_snapshot(symbol, st)
-                        else:
-                            set_phase(st, Phase.POST_TRADE, note="partial_accepted",
-                                     log=self.phase_logger, metrics=self.metrics)
-
-            elif age > timeout_seconds:
-                # Timeout - retry with market order
-                try:
-                    self.exchange.cancel_order(st.order_id, symbol)
-                except Exception:
-                    pass
-
-                st.retry_count += 1
-                if st.retry_count < 3:
-                    event = EventContext(
-                        event=FSMEvent.SELL_ORDER_TIMEOUT,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        data={'note': f"timeout_retry_{st.retry_count}", 'retry_count': st.retry_count}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.PLACE_SELL, note=f"timeout_retry_{st.retry_count}",
-                                 log=self.phase_logger, metrics=self.metrics)
-                else:
-                    # Max retries - force to POST_TRADE
-                    event = EventContext(
-                        event=FSMEvent.MAX_RETRIES_EXCEEDED,
-                        symbol=symbol,
-                        timestamp=time.time(),
-                        data={'note': 'timeout_max_retries'}
-                    )
-                    if self.table_driven_fsm.process_event(st, event):
-                        self.snapshot_manager.save_snapshot(symbol, st)
-                    else:
-                        set_phase(st, Phase.POST_TRADE, note="timeout_max_retries",
-                                 log=self.phase_logger, metrics=self.metrics)
-
-            # else: order still open, stay in WAIT_SELL_FILL
+                        self._emit_event(st, FSMEvent.SELL_ORDER_FILLED, ctx)
 
         except Exception as e:
-            logger.error(f"Wait sell fill error for {symbol}: {e}")
-            # Event-based error transition
-            event = EventContext(
-                event=FSMEvent.ERROR_OCCURRED,
-                symbol=symbol,
-                timestamp=time.time(),
-                error=e,
-                data={'context': 'wait_sell_error', 'note': str(e)[:50]}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.ERROR, note=f"wait_sell_error: {str(e)[:50]}",
-                         log=self.phase_logger, metrics=self.metrics)
+            logger.error(f"Wait sell fill error {st.symbol}: {e}")
+            self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
 
-    def _handle_post_trade(self, st: CoinState, ctx: Dict):
-        """
-        POST_TRADE → COOLDOWN
-
-        Record PnL, cleanup position, notify.
-        """
-        symbol = st.symbol
-
+    def _process_post_trade(self, st: CoinState, ctx: EventContext):
+        """POST_TRADE: Record PnL, cleanup, transition to COOLDOWN."""
         try:
-            # Fetch final order for PnL calculation
-            order = self.exchange.fetch_order(st.order_id, symbol)
+            order = self.exchange.fetch_order(st.order_id, st.symbol)
             filled = order.get("filled", 0)
             avg_exit_price = order.get("average", 0)
             exit_fee = order.get('fee', {}).get('cost', 0) or 0
 
-            # Record in PnL service
+            # Record PnL
             realized_pnl = self.pnl_service.record_fill(
-                symbol=symbol,
+                symbol=st.symbol,
                 side="sell",
                 quantity=filled,
                 avg_price=avg_exit_price,
@@ -1085,19 +649,15 @@ class FSMTradingEngine:
                 reason=st.exit_reason
             )
 
-            # Remove unrealized position
-            self.pnl_service.remove_unrealized_position(symbol)
-
-            # Remove from portfolio
-            self.portfolio.remove_held_asset(symbol)
+            self.pnl_service.remove_unrealized_position(st.symbol)
+            self.portfolio.remove_held_asset(st.symbol)
 
             # Telegram notification
             if self.telegram and realized_pnl is not None:
                 try:
                     pnl_emoji = "✅" if realized_pnl > 0 else "❌"
                     self.telegram.send_message(
-                        f"{pnl_emoji} SELL {symbol} @{avg_exit_price:.6f} x{filled:.6f} "
-                        f"[{st.exit_reason}] PnL: {realized_pnl:+.2f}"
+                        f"{pnl_emoji} SELL {st.symbol} @{avg_exit_price:.6f} PnL: {realized_pnl:+.2f}"
                     )
                 except Exception:
                     pass
@@ -1105,9 +665,7 @@ class FSMTradingEngine:
             # Set cooldown
             cooldown_minutes = getattr(config, 'SYMBOL_COOLDOWN_MINUTES', 15)
             st.cooldown_until = time.time() + (cooldown_minutes * 60)
-
-            # Store cooldown in fsm_data
-            if hasattr(st, 'fsm_data') and st.fsm_data:
+            if st.fsm_data:
                 st.fsm_data.cooldown_started_at = time.time()
 
             # Clear position data
@@ -1116,84 +674,20 @@ class FSMTradingEngine:
             st.order_id = None
             st.retry_count = 0
 
-            # Event-based transition to COOLDOWN
-            event = EventContext(
-                event=FSMEvent.TRADE_COMPLETE,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={
-                    'note': f"pnl={realized_pnl:+.2f} cooldown={cooldown_minutes}min",
-                    'pnl': realized_pnl,
-                    'cooldown_minutes': cooldown_minutes
-                }
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.COOLDOWN, note=f"pnl={realized_pnl:+.2f} cooldown={cooldown_minutes}min",
-                         log=self.phase_logger, metrics=self.metrics)
+            self._emit_event(st, FSMEvent.TRADE_COMPLETE, ctx)
 
         except Exception as e:
-            logger.error(f"Post trade error for {symbol}: {e}")
-            # Still transition to COOLDOWN even on error
+            logger.error(f"Post trade error {st.symbol}: {e}")
             st.amount = 0.0
             st.cooldown_until = time.time() + (15 * 60)
+            self._emit_event(st, FSMEvent.TRADE_COMPLETE, ctx)
 
-            event = EventContext(
-                event=FSMEvent.TRADE_COMPLETE,
-                symbol=symbol,
-                timestamp=time.time(),
-                data={'note': 'error_but_cleanup'}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(symbol, st)
-            else:
-                set_phase(st, Phase.COOLDOWN, note=f"error_but_cleanup",
-                         log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_cooldown(self, st: CoinState, ctx: Dict):
-        """
-        COOLDOWN → IDLE (when cooldown expires)
-
-        Wait for cooldown period using TimeoutManager.
-        """
-        # Check cooldown expiry using TimeoutManager
-        timeout_events = self.timeout_manager.check_all_timeouts(st.symbol, st)
-        for timeout_event in timeout_events:
-            if timeout_event.event == FSMEvent.COOLDOWN_EXPIRED:
-                # Event-based transition to IDLE
-                if self.table_driven_fsm.process_event(st, timeout_event):
-                    self.snapshot_manager.save_snapshot(st.symbol, st)
-                else:
-                    set_phase(st, Phase.IDLE, note="cooldown_expired",
-                             log=self.phase_logger, metrics=self.metrics)
-                return
-
-        # Fallback to legacy check
-        if not st.in_cooldown():
-            event = EventContext(
-                event=FSMEvent.COOLDOWN_EXPIRED,
-                symbol=st.symbol,
-                timestamp=time.time(),
-                data={'note': 'cooldown_expired'}
-            )
-            if self.table_driven_fsm.process_event(st, event):
-                self.snapshot_manager.save_snapshot(st.symbol, st)
-            else:
-                set_phase(st, Phase.IDLE, note="cooldown_expired",
-                         log=self.phase_logger, metrics=self.metrics)
-
-    def _handle_error(self, st: CoinState, ctx: Dict):
-        """
-        ERROR → IDLE (with exponential backoff)
-
-        Recover from errors with backoff.
-        """
-        # Exponential backoff
-        backoff_seconds = min(300, 10 * (2 ** min(st.error_count, 5)))  # Max 5min
+    def _process_error(self, st: CoinState, ctx: EventContext):
+        """ERROR: Exponential backoff recovery."""
+        backoff_seconds = min(300, 10 * (2 ** min(st.error_count, 5)))
 
         if st.ts_ms == 0 or (time.time() - st.ts_ms / 1000.0) > backoff_seconds:
-            # Cleanup any position data
+            # Cleanup
             if st.has_position():
                 try:
                     self.portfolio.remove_held_asset(st.symbol)
@@ -1204,9 +698,7 @@ class FSMTradingEngine:
             st.amount = 0.0
             st.entry_price = 0.0
             st.order_id = None
-
-            set_phase(st, Phase.IDLE, note=f"recovered after {backoff_seconds}s (errors={st.error_count})",
-                     log=self.phase_logger, metrics=self.metrics)
+            st.phase = Phase.IDLE  # Direct assignment for error recovery
 
     # ========== MAIN LOOP ==========
 
@@ -1242,17 +734,20 @@ class FSMTradingEngine:
                 cycle_start = time.time()
                 self.cycle_count += 1
 
+                # Tick timeouts first (cooldowns, order timeouts)
+                self._tick_timeouts()
+
                 # Heartbeat every 10 cycles
                 if self.cycle_count % 10 == 0:
-                    active = len([s for s in self.fsm.states.values() if s.phase not in [Phase.IDLE, Phase.WARMUP]])
-                    positions = len(self.fsm.get_active_positions())
-                    logger.info(f"💓 FSM Cycle #{self.cycle_count} - {len(self.fsm.states)} symbols | Active: {active} | Positions: {positions}")
+                    active = len([s for s in self.states.values() if s.phase not in [Phase.IDLE, Phase.WARMUP]])
+                    positions = len([s for s in self.states.values() if s.phase == Phase.POSITION])
+                    logger.info(f"💓 FSM Cycle #{self.cycle_count} - {len(self.states)} symbols | Active: {active} | Positions: {positions}")
 
-                # Process all symbols
+                # Process all symbols with event-based FSM
                 for symbol in self.watchlist.keys():
                     try:
-                        ctx = self._build_context(symbol)
-                        self.fsm.process_symbol(symbol, ctx)
+                        md = self._build_context(symbol)
+                        self._process_symbol(symbol, md)
                     except Exception as e:
                         logger.error(f"Error processing {symbol}: {e}")
                         self.stats["total_errors"] += 1
@@ -1299,7 +794,7 @@ class FSMTradingEngine:
 
     def _update_stuck_metrics(self):
         """Update Prometheus stuck metrics."""
-        for st in self.fsm.states.values():
+        for st in self.states.values():
             if st.phase not in [Phase.IDLE, Phase.WARMUP, Phase.COOLDOWN]:
                 update_stuck_metric(st)
 
@@ -1307,17 +802,18 @@ class FSMTradingEngine:
 
     def get_states(self) -> Dict[str, CoinState]:
         """Get all states (for status table)."""
-        return self.fsm.get_all_states()
+        return self.states
 
     def get_positions(self) -> Dict[str, CoinState]:
         """Get active positions."""
-        return {st.symbol: st for st in self.fsm.get_active_positions()}
+        return {symbol: st for symbol, st in self.states.items() if st.phase == Phase.POSITION}
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get engine statistics."""
         return {
             **self.stats,
-            "fsm_stats": self.fsm.get_statistics(),
+            "total_symbols": len(self.states),
+            "active_positions": len([s for s in self.states.values() if s.phase == Phase.POSITION]),
             "uptime_seconds": time.time() - self.stats["start_time"],
         }
 
@@ -1327,11 +823,27 @@ class FSMTradingEngine:
 
     def reset_symbol(self, symbol: str):
         """Reset symbol to IDLE."""
-        self.fsm.reset_symbol(symbol)
+        if symbol in self.states:
+            st = self.states[symbol]
+            st.phase = Phase.IDLE
+            st.amount = 0.0
+            st.entry_price = 0.0
+            st.order_id = None
+            st.retry_count = 0
+            st.error_count = 0
+            logger.info(f"Reset {symbol} to IDLE")
 
     def get_stuck_symbols(self, threshold_seconds: float = 60.0) -> list:
-        """Get stuck symbols."""
-        return self.fsm.get_stuck_states(threshold_seconds)
+        """Get stuck symbols (in non-idle phases for too long)."""
+        stuck = []
+        now = time.time()
+        for symbol, st in self.states.items():
+            if st.phase not in [Phase.IDLE, Phase.WARMUP, Phase.COOLDOWN]:
+                if st.ts_ms > 0:
+                    age_seconds = now - (st.ts_ms / 1000.0)
+                    if age_seconds > threshold_seconds:
+                        stuck.append(symbol)
+        return stuck
 
     def get_pnl_summary(self):
         """Get PnL summary from service."""
