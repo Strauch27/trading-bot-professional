@@ -394,6 +394,11 @@ BUY_ORDER_TIMEOUT_SECONDS = 30  # Max time in WAIT_FILL phase
 SELL_ORDER_TIMEOUT_SECONDS = 20  # Max time in WAIT_SELL_FILL phase
 MAX_POSITION_HOLD_MINUTES = 60  # Auto-exit timeout (overrides TRADE_TTL_MIN if lower)
 
+# FSM Timeout Parameters (used by TimeoutManager)
+BUY_FILL_TIMEOUT_SECS = 30  # Buy order timeout in seconds
+SELL_FILL_TIMEOUT_SECS = 30  # Sell order timeout in seconds
+COOLDOWN_SECS = 60  # Cooldown duration in seconds (overrides COOLDOWN_MIN if set)
+
 # FSM Error Recovery
 FSM_MAX_RETRIES = 5  # Max retry attempts before ERROR phase
 FSM_BACKOFF_BASE_SECONDS = 10  # Exponential backoff base (max: 300s)

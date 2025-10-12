@@ -5,11 +5,13 @@ FSM Phase Audit Logging
 Logs every phase transition with full context for debugging and compliance.
 """
 
+import time
+import logging
+from typing import Optional
+
 from core.fsm.fsm_events import EventContext
 from core.fsm.phases import Phase
 from core.fsm.state import CoinState
-import time
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +225,6 @@ def log_position_snapshot(
         )
     except Exception as e:
         logger.debug(f"Failed to log position snapshot: {e}")
-
-
-from typing import Optional
 
 
 def log_error_recovery(

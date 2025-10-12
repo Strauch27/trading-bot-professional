@@ -7,9 +7,13 @@ FSM Transition Table
 The single source of truth for all state transitions.
 """
 
-from typing import Dict, Tuple, Callable, Optional, List
+from typing import Dict, Tuple, Callable, Optional, List, TYPE_CHECKING
+
 from core.fsm.fsm_events import FSMEvent, EventContext
 from core.fsm.phases import Phase
+
+if TYPE_CHECKING:
+    from core.fsm.state import CoinState
 
 # Type aliases
 State = Phase

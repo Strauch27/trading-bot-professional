@@ -9,7 +9,6 @@ Uses 2-phase commit pattern.
 import logging
 from typing import Optional, Dict
 from contextlib import contextmanager
-import copy
 
 logger = logging.getLogger(__name__)
 

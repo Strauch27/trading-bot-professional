@@ -6,7 +6,7 @@ Extends CoinState with order-specific tracking fields.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
 
 @dataclass

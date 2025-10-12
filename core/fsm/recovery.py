@@ -6,8 +6,8 @@ Recovers FSM state from snapshots on startup.
 """
 
 import logging
-from pathlib import Path
-from typing import Dict, List
+from typing import Dict
+
 from core.fsm.snapshot import get_snapshot_manager
 from core.fsm.state import CoinState
 from core.fsm.state_data import StateData

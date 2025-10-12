@@ -161,15 +161,6 @@ class FSMachine:
         coin_state.error_count += 1
         coin_state.last_error = str(error)
 
-        # Create error event
-        error_ctx = EventContext(
-            event=FSMEvent.ERROR_OCCURRED,
-            symbol=ctx.symbol,
-            timestamp=ctx.timestamp,
-            error=error,
-            data={'original_event': ctx.event.name}
-        )
-
         # Log error
         try:
             from core.logger_factory import log_event, DECISION_LOG

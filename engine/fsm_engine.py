@@ -65,9 +65,11 @@ class FSMTradingEngine:
         self.telegram = telegram
         self.watchlist = watchlist or {}
 
-        # Phase Event Logger
-        phase_log_file = config.SESSION_DIR + "/logs/phase_events.jsonl"
-        self.phase_logger = PhaseEventLogger(phase_log_file)
+        # Phase Event Logger (uses config parameters)
+        self.phase_logger = PhaseEventLogger(
+            log_file=config.PHASE_LOG_FILE,
+            buffer_size=config.PHASE_LOG_BUFFER_SIZE
+        )
 
         # Metrics
         self.metrics = type('Metrics', (), {
@@ -265,9 +267,10 @@ class FSMTradingEngine:
         for symbol, st in list(self.states.items()):
             timeout_events = self.timeout_manager.check_all_timeouts(symbol, st)
             for event in timeout_events:
+                prev_phase = st.phase  # Capture previous phase
                 if self.fsm.process_event(st, event):
                     self.snapshot_manager.save_snapshot(symbol, st)
-                    self._log_phase_transition(st, event)
+                    self._log_phase_transition(st, event, prev_phase)
 
     def _emit_event(self, st: CoinState, event: FSMEvent, ctx: EventContext) -> bool:
         """
@@ -286,20 +289,23 @@ class FSMTradingEngine:
             data=ctx.data
         )
 
+        prev_phase = st.phase  # Capture previous phase before transition
+
         if self.fsm.process_event(st, event_ctx):
             # Save snapshot synchronously after state change
             self.snapshot_manager.save_snapshot(st.symbol, st)
-            # Log phase transition asynchronously
-            self._log_phase_transition(st, event_ctx)
+            # Log phase transition asynchronously (with from_state)
+            self._log_phase_transition(st, event_ctx, prev_phase)
             return True
         return False
 
-    def _log_phase_transition(self, st: CoinState, ctx: EventContext):
+    def _log_phase_transition(self, st: CoinState, ctx: EventContext, prev_phase: Phase):
         """Log phase transition to JSONL (async)."""
         try:
             self.phase_logger.log_phase_change({
                 "symbol": st.symbol,
-                "to": st.phase.value,
+                "from": prev_phase.value,  # Previous phase
+                "to": st.phase.value,  # New phase
                 "ts_ms": int(ctx.timestamp * 1000),
                 "decision_id": st.decision_id or "",
                 "order_id": st.order_id or "",

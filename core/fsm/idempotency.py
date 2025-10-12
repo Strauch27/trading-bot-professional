@@ -6,10 +6,11 @@ Uses event fingerprints (symbol + event + order_id + timestamp) to detect duplic
 """
 
 import threading
-from typing import Set, Tuple, Dict, Optional
-from core.fsm.fsm_events import FSMEvent, EventContext
 import time
 import logging
+from typing import Set, Tuple, Dict, Optional
+
+from core.fsm.fsm_events import EventContext
 
 logger = logging.getLogger(__name__)
 
