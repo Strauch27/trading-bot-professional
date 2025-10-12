@@ -237,13 +237,38 @@ class ExitOrderManager:
             # Get BID price from ticker for aggressive SELL pricing
             # (consistent with BUY using ASK + premium)
             bid = context.current_price  # Default fallback
+            ask = None
 
             try:
                 # Fetch ticker to get real BID price
                 ticker = self.exchange_adapter.fetch_ticker(context.symbol)
                 if ticker and 'bid' in ticker and ticker['bid']:
                     bid = ticker['bid']
+                    ask = ticker.get('ask')
                     logger.debug(f"Using BID price for exit: {bid} (current: {context.current_price})")
+
+                    # Phase 3: Log price_snapshot before order
+                    try:
+                        from core.event_schemas import PriceSnapshot
+                        from core.logger_factory import ORDER_LOG, log_event
+                        from core.trace_context import Trace
+
+                        spread = (ask - bid) if (ask and bid) else None
+                        spread_bps = (spread / ask * 10000) if (spread and ask and ask > 0) else None
+
+                        price_snapshot = PriceSnapshot(
+                            symbol=context.symbol,
+                            bid=bid,
+                            ask=ask,
+                            last=context.current_price,
+                            spread_bps=spread_bps
+                        )
+
+                        with Trace(decision_id=context.decision_id) if context.decision_id else Trace():
+                            log_event(ORDER_LOG(), "price_snapshot", **price_snapshot.model_dump())
+
+                    except Exception as e:
+                        logger.debug(f"Failed to log price_snapshot for {context.symbol}: {e}")
             except Exception as ticker_error:
                 logger.warning(f"Failed to fetch ticker for exit pricing, using current price: {ticker_error}")
 

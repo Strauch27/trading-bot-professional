@@ -751,28 +751,48 @@ class PortfolioManager:
         
         return total_released
     
-    @synchronized_budget  
+    @synchronized_budget
     def reconcile_budget_from_exchange(self):
         """Budget-Reconciliation mit Exchange (Drift-Erkennung)"""
         if not self.exchange:
             return
-        
+
         try:
             actual_budget = _get_free(self.exchange, "USDT")
             expected_budget = self.my_budget
             drift = abs(actual_budget - expected_budget)
-            
+
+            # Phase 3: Log reconciliation_result
+            try:
+                from core.event_schemas import ReconciliationResult
+                from core.logger_factory import AUDIT_LOG, log_event
+                from core.trace_context import Trace
+
+                cash_diff = actual_budget - expected_budget
+                drift_detected = drift > 1.0
+
+                reconciliation = ReconciliationResult(
+                    cash_diff=cash_diff,
+                    drift_detected=drift_detected
+                )
+
+                with Trace():
+                    log_event(AUDIT_LOG(), "reconciliation_result", **reconciliation.model_dump())
+
+            except Exception as e:
+                logger.debug(f"Failed to log reconciliation_result: {e}")
+
             if drift > 1.0:  # Mehr als 1 USDT Abweichung
                 logger.warning(f"Budget drift detected: expected {expected_budget:.2f}, actual {actual_budget:.2f} (drift: {drift:.2f})",
                              extra={'event_type': 'BUDGET_DRIFT_DETECTED', 'expected': expected_budget, 'actual': actual_budget, 'drift': drift})
-                
+
                 # Auto-correction für größere Abweichungen
                 if drift > 10.0:
                     logger.info(f"Auto-correcting budget: {expected_budget:.2f} -> {actual_budget:.2f}",
                                extra={'event_type': 'BUDGET_AUTO_CORRECTED', 'old': expected_budget, 'new': actual_budget})
                     self.my_budget = actual_budget
                     self.settlement_manager.update_verified_budget(actual_budget)
-                    
+
         except Exception as e:
             logger.error(f"Budget reconciliation failed: {e}", extra={'event_type': 'BUDGET_RECONCILE_ERROR', 'error': str(e)})
     

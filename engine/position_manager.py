@@ -118,6 +118,34 @@ class PositionManager:
             atr = data.get('atr', 0.0)
             if atr > 0:
                 hit, info = atr_stop_hit(position_mock, atr, getattr(config, 'ATR_SL_MULTIPLIER', 2.0))
+
+                # Phase 3: Log sell_trigger_eval for ATR stop
+                try:
+                    from core.event_schemas import SellTriggerEval
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    entry_price = data.get('buying_price', 0)
+                    unrealized_pct = ((current_price / entry_price) - 1.0) * 100 if entry_price > 0 else 0
+
+                    atr_eval = SellTriggerEval(
+                        symbol=symbol,
+                        trigger="sl",
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        unrealized_pct=unrealized_pct,
+                        threshold=info.get('stop_price') if hit else None,
+                        hit=hit,
+                        reason=info.get('reason') if hit else f"atr_stop_not_hit"
+                    )
+
+                    decision_id = data.get('decision_id')
+                    with Trace(decision_id=decision_id) if decision_id else Trace():
+                        log_event(DECISION_LOG(), "sell_trigger_eval", **atr_eval.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log sell_trigger_eval (ATR) for {symbol}: {e}")
+
                 if hit:
                     logger.info(f"[DECISION_END] {symbol} SELL | {info['reason']}")
                     self.engine.jsonl_logger.decision_end(
@@ -148,6 +176,35 @@ class PositionManager:
                 })()
 
                 hit, info = trailing_stop_hit(trailing_state)
+
+                # Phase 3: Log sell_trigger_eval for trailing stop
+                try:
+                    from core.event_schemas import SellTriggerEval
+                    from core.logger_factory import DECISION_LOG, log_event
+                    from core.trace_context import Trace
+
+                    entry_price = data.get('buying_price', 0)
+                    unrealized_pct = ((current_price / entry_price) - 1.0) * 100 if entry_price > 0 else 0
+
+                    trailing_eval = SellTriggerEval(
+                        symbol=symbol,
+                        trigger="trailing",
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        unrealized_pct=unrealized_pct,
+                        trailing_anchor=data.get('peak_price'),
+                        threshold=info.get('stop_price') if hit else None,
+                        hit=hit,
+                        reason=info.get('reason') if hit else "trailing_not_hit"
+                    )
+
+                    decision_id = data.get('decision_id')
+                    with Trace(decision_id=decision_id) if decision_id else Trace():
+                        log_event(DECISION_LOG(), "sell_trigger_eval", **trailing_eval.model_dump())
+
+                except Exception as e:
+                    logger.debug(f"Failed to log sell_trigger_eval (Trailing) for {symbol}: {e}")
+
                 if hit:
                     logger.info(f"[DECISION_END] {symbol} SELL | {info['reason']}")
                     self.engine.jsonl_logger.decision_end(
