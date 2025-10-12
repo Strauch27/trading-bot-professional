@@ -1,7 +1,7 @@
 # FSM Implementation Status
 
 **Date**: 2025-01-12
-**Status**: ✅ Phase 0-3 COMPLETE (All PFLICHT components)
+**Status**: ✅ **ALL PHASES COMPLETE** (Phase 0-4 including full engine integration)
 
 ---
 
@@ -24,7 +24,7 @@
 | 1.1 | StateData Class | ✅ | `core/fsm/state_data.py` |
 | 1.2 | Centralized Timeout Handling | ✅ | `core/fsm/timeouts.py` |
 | 1.3 | Partial Fill Accumulation | ✅ | `core/fsm/partial_fills.py` |
-| 1.4 | Integration into FSM Engine | ⏸️ | (Pending) |
+| 1.4 | Integration into FSM Engine | ✅ | `engine/fsm_engine.py` |
 
 ### Phase 2: Error Handling & Observability ✅ COMPLETE
 
@@ -355,11 +355,64 @@ This is the final integration step that connects all the new components to the e
 
 ---
 
+## Phase 4: Engine Integration ✅ COMPLETE
+
+### Integration Changes in `engine/fsm_engine.py`
+
+**Completed Integration Tasks**:
+
+1. ✅ **Imports Added**: All table-driven FSM components imported
+2. ✅ **FSM Components Initialized**: FSMachine, TimeoutManager, PartialFillHandler, SnapshotManager, PortfolioTransaction
+3. ✅ **StateData Initialization**: All CoinStates get StateData in _handle_warmup
+4. ✅ **Crash Recovery**: recover_fsm_states_on_startup() called in __init__
+5. ✅ **All 12 Handlers Migrated**:
+   - _handle_warmup: Event-based transitions with WARMUP_COMPLETED
+   - _handle_idle: Event-based transitions with SLOT_AVAILABLE
+   - _handle_entry_eval: Event-based with SIGNAL_DETECTED, GUARDS_FAILED, NO_SIGNAL
+   - _handle_place_buy: Event-based with BUY_ORDER_PLACED, stores OrderContext
+   - _handle_wait_fill: **Full integration** with TimeoutManager, PartialFillHandler, PortfolioTransaction
+   - _handle_position: Event-based periodic EXIT_EVAL transitions
+   - _handle_exit_eval: Event-based with TAKE_PROFIT_HIT, STOP_LOSS_HIT, TRAILING_STOP_HIT, POSITION_TIMEOUT
+   - _handle_place_sell: Event-based with SELL_ORDER_PLACED, stores OrderContext
+   - _handle_wait_sell_fill: Event-based with SELL_ORDER_FILLED, SELL_ORDER_TIMEOUT
+   - _handle_post_trade: Event-based with TRADE_COMPLETE
+   - _handle_cooldown: Event-based with COOLDOWN_EXPIRED using TimeoutManager
+   - _handle_error: Legacy handler retained (no changes needed)
+
+6. ✅ **Snapshot Integration**: All event-based transitions save snapshots
+7. ✅ **PortfolioTransaction Integration**: Atomic updates in _handle_wait_fill
+8. ✅ **Hybrid Approach**: Legacy handlers retained as fallback for gradual rollout
+
+**Architecture Pattern**:
+```python
+# All handlers follow this pattern:
+event = EventContext(event=FSMEvent.XXX, symbol=symbol, timestamp=time.time(), data={...})
+if self.table_driven_fsm.process_event(st, event):
+    self.snapshot_manager.save_snapshot(symbol, st)  # Crash-safe snapshots
+else:
+    set_phase(st, Phase.YYY, ...)  # Fallback to legacy transition
+```
+
+**Key Features**:
+- ⚡ **Zero Downtime**: Hybrid approach allows gradual migration
+- 🔄 **Crash Recovery**: Automatic state restoration on startup
+- 💾 **Snapshot After Every Transition**: Ensures no data loss
+- 🔒 **Atomic Portfolio Updates**: PortfolioTransaction prevents state divergence
+- ⏱️ **Centralized Timeouts**: TimeoutManager for all timeout checks
+- 📊 **Weighted Average Fills**: PartialFillHandler for multi-trade fills
+- 📝 **Complete Audit Trail**: All transitions logged via EventContext
+
+---
+
 ## Status Summary
 
-✅ **14 of 15 TODOs Complete** (93%)
+✅ **ALL 15 TODOs COMPLETE** (100%)
 
-**Remaining**:
-- ⏸️ TODO 1.4: Integration into FSM Engine (careful migration required)
+**Phase 0-4: COMPLETE**
+- ✅ Phase 0: Foundation (5/5)
+- ✅ Phase 1: Order Lifecycle (4/4)
+- ✅ Phase 2: Error Handling (3/3)
+- ✅ Phase 3: Persistence (3/3)
+- ✅ **Phase 4: Engine Integration (COMPLETE)**
 
-**All PFLICHT components are implemented and ready for integration!**
+**All PFLICHT components are implemented and fully integrated into the engine!**
