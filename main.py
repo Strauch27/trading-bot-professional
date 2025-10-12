@@ -346,19 +346,16 @@ def main():
     SESSION_ID = Path(SESSION_DIR).name  # e.g. 'session_20250907_190217'
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
 
-    # Phase 1: Set session ID for correlation tracking
+    # Phase 3: Set session ID and log config snapshot
     from core.trace_context import set_session_id
-    from core.logger_factory import AUDIT_LOG, log_event
-    import hashlib
+    from core.logger_factory import AUDIT_LOG, log_event, log_config_snapshot
 
     set_session_id(SESSION_ID)
 
-    # Compute config hash for change detection
-    config_dict = {k: getattr(config_module, k) for k in dir(config_module) if k.isupper()}
-    config_str = json.dumps(config_dict, sort_keys=True, default=str)
-    config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:16]
+    # Log complete config snapshot with categorization (Phase 3)
+    config_hash = log_config_snapshot(config_module, session_id=SESSION_ID)
 
-    # Log session start with config snapshot
+    # Log session start with config hash reference
     log_event(
         AUDIT_LOG(),
         "session_start",
@@ -908,6 +905,7 @@ def main():
         logger.debug("Thread-safe hauptschleife gestartet", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_STARTED'})
 
         next_heartbeat = tmod.time() + 60  # Minütliche Updates statt alle 30s
+        next_config_check = tmod.time() + 3600  # Config drift check every hour
         heartbeat_failures = 0
         max_heartbeat_failures = 3
 
@@ -1001,6 +999,43 @@ def main():
                         break
 
                 next_heartbeat = tmod.time() + 60  # Nächster Heartbeat in 60s
+
+            # Config drift check every hour
+            if tmod.time() >= next_config_check:
+                try:
+                    from core.logger_factory import check_config_drift
+
+                    drift_result = check_config_drift(
+                        config_module,
+                        expected_hash=config_hash,
+                        session_id=SESSION_ID
+                    )
+
+                    if drift_result["drift_detected"]:
+                        logger.warning(
+                            f"Config drift detected! Expected {config_hash}, got {drift_result['current_hash']}",
+                            extra={
+                                'event_type': 'CONFIG_DRIFT_WARNING',
+                                'expected_hash': config_hash,
+                                'current_hash': drift_result['current_hash']
+                            }
+                        )
+                    else:
+                        logger.debug(
+                            f"Config drift check passed (hash: {drift_result['current_hash']})",
+                            extra={
+                                'event_type': 'CONFIG_DRIFT_CHECK_PASSED',
+                                'config_hash': drift_result['current_hash']
+                            }
+                        )
+
+                except Exception as drift_error:
+                    logger.warning(
+                        f"Config drift check failed: {drift_error}",
+                        extra={'event_type': 'CONFIG_DRIFT_CHECK_ERROR', 'error': str(drift_error)}
+                    )
+
+                next_config_check = tmod.time() + 3600  # Next check in 1 hour
 
         logger.info("Thread-safe main loop ended", extra={'event_type': 'THREAD_SAFE_HEARTBEAT_ENDED'})
 
