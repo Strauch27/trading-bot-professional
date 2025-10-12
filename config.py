@@ -74,7 +74,7 @@ ATR_MIN_SAMPLES = 15
 # 3. ENTRY STRATEGIE
 # =============================================================================
 
-DROP_TRIGGER_VALUE = 0.96  # -4.0% Drop → Kaufsignal
+DROP_TRIGGER_VALUE = 0.985  # -1.5% Drop → Kaufsignal
 LOOKBACK_S = 120  # 2min Lookback-Fenster
 MODE = 4  # Mode 4: Drop-Trigger ohne Impuls
 CONFIRM_TICKS = 0  # Sofort scharf
@@ -100,8 +100,8 @@ ANCHOR_MAX_START_DROP_PCT = 6.0  # Zu Beginn max. 6% Drop erlaubt
 MAX_TRADES = 10  # Maximal 10 Positionen gleichzeitig
 POSITION_SIZE_USDT = 25.0  # 25 USDT pro Kauf
 ALLOW_AUTO_SIZE_UP = True  # Menge leicht erhöhen bei MinNotional
-MAX_AUTO_SIZE_UP_BPS = 25  # Max. +25 bps Notional-Erhöhung
-MAX_AUTO_SIZE_UP_ABS_USDT = 0.30  # Absolut gedeckelt bei +0.30 USDT
+MAX_AUTO_SIZE_UP_BPS = 500  # Max. +500 bps Notional-Erhöhung
+MAX_AUTO_SIZE_UP_ABS_USDT = 5.0  # Absolut gedeckelt bei +5.0 USDT
 MAX_PER_SYMBOL_USD = 60.0  # Maximal 60 USDT pro Coin
 TRADE_TTL_MIN = 120  # Position nach 120 Min zwangsschließen
 COOLDOWN_MIN = 15  # 15 Min Pause nach Verkauf
@@ -259,7 +259,7 @@ UNIVERSE_TOP_N_BY_VOL = 72
 MIN_NOTIONAL_USDT = 5.0
 EXCLUDE_SYMBOL_PREFIXES = ["BULL/", "BEAR/", "3L/", "3S/", "UP/", "DOWN/"]
 MIN_ORDER_VALUE = 5.1
-MIN_ORDER_BUFFER = 0.005
+MIN_ORDER_BUFFER = 0.002
 DUST_FACTOR = 0.9995
 MAX_HISTORY_LEN = 1440
 DUST_SWEEP_ENABLED = False
@@ -272,7 +272,7 @@ SETTLEMENT_TOLERANCE = 0.995
 SETTLEMENT_CHECK_INTERVAL = 30
 SETTLEMENT_MAX_ATTEMPTS = 8
 SETTLEMENT_POLL_INTERVAL_S = 20
-SAFETY_BUFFER_PCT = 0.02
+SAFETY_BUFFER_PCT = 0.01
 SAFETY_BUFFER_MIN = 0.5
 MIN_SLOT_USDT = 5.0
 SKIP_TRADE_IF_EXIT_UNDER_MIN = True
