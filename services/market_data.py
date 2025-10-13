@@ -26,6 +26,8 @@ from services.time_utils import (
     TF_MS
 )
 from services.md_audit import MarketDataAuditor
+from services.market_data.coalescing import get_coalescing_cache
+from services.market_data.rate_limit import get_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +294,9 @@ class MarketDataProvider:
         max_cache_size: int = 1000,
         max_bars_per_symbol: int = 1000,
         audit_log_dir: Optional[Path] = None,
-        enable_audit: bool = False
+        enable_audit: bool = False,
+        enable_coalescing: bool = True,
+        enable_rate_limiting: bool = True
     ):
         """
         Initialize market data provider.
@@ -305,6 +309,8 @@ class MarketDataProvider:
             max_bars_per_symbol: Maximum OHLCV bars per symbol
             audit_log_dir: Directory for audit logs
             enable_audit: Enable audit logging
+            enable_coalescing: Enable request coalescing (deduplication)
+            enable_rate_limiting: Enable API rate limiting (token bucket)
         """
         self.exchange_adapter = exchange_adapter
         self.ticker_cache = TickerCache(ticker_cache_ttl, ticker_soft_ttl, max_cache_size)
@@ -319,6 +325,14 @@ class MarketDataProvider:
             'ohlcv_partial_candles_removed': 0,
             'errors': 0
         }
+
+        # Request coalescing (prevents duplicate API calls)
+        self.enable_coalescing = enable_coalescing
+        self.coalescing_cache = get_coalescing_cache() if enable_coalescing else None
+
+        # Rate limiting (token bucket for API limits)
+        self.enable_rate_limiting = enable_rate_limiting
+        self.rate_limiter = get_rate_limiter() if enable_rate_limiting else None
 
         # Audit logger (optional)
         self.auditor = None
@@ -400,7 +414,27 @@ class MarketDataProvider:
                 # Cache miss - fetch from exchange
                 try:
                     co.beat(f"get_ticker_exchange_call:{symbol}")
-                    raw_ticker = self.exchange_adapter.fetch_ticker(symbol)
+
+                    # Define fetch function with rate limiting
+                    def _fetch_ticker():
+                        # Apply rate limiting if enabled
+                        if self.enable_rate_limiting and self.rate_limiter:
+                            with self.rate_limiter.acquire_context(endpoint_type="public"):
+                                return self.exchange_adapter.fetch_ticker(symbol)
+                        else:
+                            return self.exchange_adapter.fetch_ticker(symbol)
+
+                    # Use request coalescing to deduplicate parallel requests
+                    if self.enable_coalescing and self.coalescing_cache:
+                        # Multiple threads requesting same symbol will share one API call
+                        raw_ticker = self.coalescing_cache.get_or_fetch(
+                            key=f"ticker:{symbol}",
+                            fetch_fn=_fetch_ticker,
+                            timeout_ms=5000
+                        )
+                    else:
+                        # Direct fetch
+                        raw_ticker = _fetch_ticker()
 
                     ticker = TickerData(
                         symbol=symbol,
@@ -498,6 +532,50 @@ class MarketDataProvider:
         ticker = self.get_ticker(symbol)
         return ticker.spread_bps if ticker else None
 
+    def get_top5_depth(self, symbol: str, levels: int = 5) -> Tuple[float, float]:
+        """
+        Get cumulative notional depth for top N levels (Phase 7).
+
+        Returns:
+            Tuple of (bid_notional_usd, ask_notional_usd)
+            Returns (0.0, 0.0) on error.
+
+        Usage:
+            bid_depth, ask_depth = provider.get_top5_depth("BTC/USDT", levels=5)
+            if bid_depth < DEPTH_MIN_NOTIONAL_USD:
+                # Skip buy - insufficient depth
+        """
+        try:
+            # Fetch order book with rate limiting
+            if self.enable_rate_limiting and self.rate_limiter:
+                with self.rate_limiter.acquire_context(endpoint_type="public"):
+                    orderbook = self.exchange_adapter.fetch_order_book(symbol, limit=levels)
+            else:
+                orderbook = self.exchange_adapter.fetch_order_book(symbol, limit=levels)
+
+            # Calculate bid depth (cumulative notional)
+            bid_depth = 0.0
+            for bid_price, bid_qty in orderbook.get('bids', [])[:levels]:
+                bid_depth += float(bid_price) * float(bid_qty)
+
+            # Calculate ask depth (cumulative notional)
+            ask_depth = 0.0
+            for ask_price, ask_qty in orderbook.get('asks', [])[:levels]:
+                ask_depth += float(ask_price) * float(ask_qty)
+
+            return bid_depth, ask_depth
+
+        except Exception as e:
+            logger.error(f"Error fetching depth for {symbol}: {e}")
+            if self.auditor:
+                self.auditor.log_error(
+                    route="depth",
+                    symbol=symbol,
+                    error_type=type(e).__name__,
+                    error_msg=str(e)
+                )
+            return 0.0, 0.0
+
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -524,8 +602,13 @@ class MarketDataProvider:
             start_time = time.time()
 
             try:
-                # Fetch from exchange
-                raw_ohlcv = self.exchange_adapter.fetch_ohlcv(symbol, timeframe, limit=limit)
+                # Fetch from exchange with rate limiting
+                if self.enable_rate_limiting and self.rate_limiter:
+                    with self.rate_limiter.acquire_context(endpoint_type="public"):
+                        raw_ohlcv = self.exchange_adapter.fetch_ohlcv(symbol, timeframe, limit=limit)
+                else:
+                    raw_ohlcv = self.exchange_adapter.fetch_ohlcv(symbol, timeframe, limit=limit)
+
                 original_count = len(raw_ohlcv)
 
                 # Filter partial candles BEFORE parsing
@@ -681,11 +764,21 @@ class MarketDataProvider:
             ticker_cache_keys = self.ticker_cache._cache.keys()
             ohlcv_keys = list(self.ohlcv_history._data.keys())
 
-            return {
+            stats = {
                 'provider': self._statistics.copy(),
                 'ticker_cache': self.ticker_cache.get_statistics(),
                 'symbols_tracked': len(set(ticker_cache_keys + ohlcv_keys))
             }
+
+            # Add coalescing statistics if enabled
+            if self.enable_coalescing and self.coalescing_cache:
+                stats['coalescing'] = self.coalescing_cache.get_statistics()
+
+            # Add rate limiter statistics if enabled
+            if self.enable_rate_limiting and self.rate_limiter:
+                stats['rate_limiting'] = self.rate_limiter.get_statistics()
+
+            return stats
 
     def clear_cache(self) -> None:
         """Clear all cached data"""

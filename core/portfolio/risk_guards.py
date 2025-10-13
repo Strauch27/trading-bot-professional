@@ -560,6 +560,59 @@ def close_position(symbol: str):
     manager.close_position_tracking(symbol)
 
 
+# Phase 10: Consolidated Exit Evaluation
+def evaluate_all_exits(
+    symbol: str,
+    current_price: float,
+    side: str = "LONG",
+    config: Dict = None
+) -> Tuple[bool, Optional[StopSignals], Dict[str, Any]]:
+    """
+    Phase 10: Unified exit evaluation combining all exit types.
+
+    Consolidates:
+    - ATR stops
+    - Trailing stops
+    - Profit targets
+    - Time-based exits
+
+    Args:
+        symbol: Trading symbol
+        current_price: Current market price
+        side: Position side ("LONG" or "SHORT")
+        config: Exit configuration dict
+
+    Returns:
+        (should_exit, exit_signal, evaluation_context)
+    """
+    manager = get_risk_guard_manager()
+
+    # Check if position is tracked
+    stats = manager.get_position_stats(symbol, current_price)
+    if not stats.get("active"):
+        return False, None, {"error": "position_not_tracked"}
+
+    # Evaluate all exit signals
+    should_exit, exit_signal = manager.evaluate_exit_signals(
+        symbol=symbol,
+        current_price=current_price,
+        side=side,
+        config=config
+    )
+
+    # Build evaluation context
+    eval_ctx = {
+        "symbol": symbol,
+        "current_price": current_price,
+        "position_stats": stats,
+        "exit_triggered": should_exit,
+        "exit_reason": exit_signal.reason.value if exit_signal and exit_signal.reason else None,
+        "exit_details": exit_signal.details if exit_signal else {}
+    }
+
+    return should_exit, exit_signal, eval_ctx
+
+
 # Simplified Guards (as specified in requirements)
 def atr_stop(entry: float, last: float, atr: float, k: float = 2.0):
     """Simplified ATR stop check - direct from feedback"""

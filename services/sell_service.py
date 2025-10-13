@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Optional, List, Dict
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import time  # Phase 9: For telemetry timestamps
 from config import (
     TRADE_TTL_MIN, NEVER_MARKET_SELLS, ALLOW_MARKET_FALLBACK_TTL,
     EXIT_ESCALATION_BPS, EXIT_LADDER_BPS, EXIT_IOC_TTL_MS, MAX_SLIPPAGE_BPS_EXIT
@@ -12,6 +14,18 @@ from core.utils import (
 from core.logging.loggingx import log_event, exit_placed, exit_filled
 from .sizing_service import SizingService
 from .order_service import OrderService
+from core.telemetry import get_fill_tracker  # Phase 9
+
+# Phase 6: Symbol-scoped locking helper
+try:
+    from core.portfolio.locks import get_symbol_lock as _get_symbol_lock
+    LOCKS_AVAILABLE = True
+except ImportError:
+    LOCKS_AVAILABLE = False
+    @contextmanager
+    def _get_symbol_lock(symbol: str):
+        """Fallback: no-op context manager if locks not available"""
+        yield
 
 class SellService:
     """
@@ -60,6 +74,19 @@ class SellService:
         """
         coid = next_client_order_id(symbol, "SELL")
 
+        # Phase 9: Start telemetry tracking
+        tracker = get_fill_tracker()
+        telemetry_id = f"{symbol}_{coid}_{int(time.time()*1000)}"
+        tracker.start_order(
+            order_id=telemetry_id,
+            symbol=symbol,
+            side="SELL",
+            quantity=qty,
+            limit_price=price,
+            time_in_force="IOC",
+            coid=coid
+        )
+
         # Submit via OrderService (handles quantization, retry, error classification)
         result = self.order_service.submit_limit(
             symbol=symbol,
@@ -72,6 +99,15 @@ class SellService:
 
         # Log result
         if not result.success:
+            # Phase 9: Record failed order in telemetry
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=0.0,
+                status="ERROR",
+                attempts=result.attempts,
+                error_msg=result.error
+            )
+
             log_event(
                 "EXIT_ERROR",
                 level="ERROR",
@@ -96,6 +132,22 @@ class SellService:
                 ctx={"coid": coid, "attempts": result.attempts}
             )
 
+        # Phase 9: Record fill in telemetry
+        order = result.raw_order
+        if order:
+            status = (order.get("status") or "").upper()
+            filled_qty = float(order.get("filled") or 0.0)
+            avg_price = float(order.get("average") or price)
+
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=filled_qty,
+                avg_fill_price=avg_price if filled_qty > 0 else None,
+                status=status,
+                exchange_order_id=order.get("id"),
+                attempts=result.attempts
+            )
+
         # Return raw order for backwards compatibility
         return result.raw_order
 
@@ -115,6 +167,19 @@ class SellService:
 
         coid = next_client_order_id(symbol, "SELL")
 
+        # Phase 9: Start telemetry tracking (market order)
+        tracker = get_fill_tracker()
+        telemetry_id = f"{symbol}_{coid}_{int(time.time()*1000)}"
+        tracker.start_order(
+            order_id=telemetry_id,
+            symbol=symbol,
+            side="SELL",
+            quantity=qty,
+            limit_price=None,  # Market order has no limit price
+            time_in_force="IOC",
+            coid=coid
+        )
+
         # Submit via OrderService (handles quantization, retry, error classification)
         result = self.order_service.submit_market(
             symbol=symbol,
@@ -126,6 +191,15 @@ class SellService:
 
         # Log result
         if not result.success:
+            # Phase 9: Record failed order in telemetry
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=0.0,
+                status="ERROR",
+                attempts=result.attempts,
+                error_msg=result.error
+            )
+
             log_event(
                 "EXIT_ERROR",
                 level="ERROR",
@@ -149,6 +223,22 @@ class SellService:
                 ctx={"coid": coid, "attempts": result.attempts}
             )
 
+        # Phase 9: Record fill in telemetry
+        order = result.raw_order
+        if order:
+            status = (order.get("status") or "").upper()
+            filled_qty = float(order.get("filled") or 0.0)
+            avg_price = float(order.get("average") or 0.0)
+
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=filled_qty,
+                avg_fill_price=avg_price if filled_qty > 0 and avg_price > 0 else None,
+                status=status,
+                exchange_order_id=order.get("id"),
+                attempts=result.attempts
+            )
+
         # Return raw order for backwards compatibility
         return result.raw_order
 
@@ -158,17 +248,39 @@ class SellService:
         """
         Iteriert über gehaltene Assets; wenn TTL überschritten → Exit-Leiter (Limit-IOC),
         optional Market-Fallback gem. Policy.
-        """
-        for symbol, data in list(self.portfolio.held_assets.items()):
-            ts = data.get("timestamp")
-            if not ts:
-                continue
-            try:
-                open_time = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-            except Exception:
-                continue
 
-            age_min = (now_utc - open_time).total_seconds() / 60.0
+        Phase 5: Uses first_fill_ts for accurate TTL calculation.
+        """
+        import time
+
+        for symbol, data in list(self.portfolio.held_assets.items()):
+            # Phase 5: Prefer first_fill_ts over timestamp for TTL
+            first_fill_ts = data.get("first_fill_ts")
+            if first_fill_ts:
+                # Use first_fill_ts (Unix timestamp)
+                try:
+                    age_min = (time.time() - float(first_fill_ts)) / 60.0
+                except (ValueError, TypeError):
+                    # Fallback to timestamp if first_fill_ts is invalid
+                    ts = data.get("timestamp")
+                    if not ts:
+                        continue
+                    try:
+                        open_time = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        age_min = (now_utc - open_time).total_seconds() / 60.0
+                    except Exception:
+                        continue
+            else:
+                # Backward compatibility: use timestamp
+                ts = data.get("timestamp")
+                if not ts:
+                    continue
+                try:
+                    open_time = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    age_min = (now_utc - open_time).total_seconds() / 60.0
+                except Exception:
+                    continue
+
             if age_min < TRADE_TTL_MIN:
                 continue
 
@@ -232,7 +344,9 @@ class SellService:
                         })
                     except Exception:
                         pass
-                    self.portfolio.remove_held_asset(symbol)
+                    # Phase 6: Symbol-scoped lock for thread-safe position removal
+                    with _get_symbol_lock(symbol):
+                        self.portfolio.remove_held_asset(symbol)
                     if self.on_realized_pnl:
                         try:
                             self.on_realized_pnl(pnl_ctx.get("pnl_net_quote", 0.0), (pnl_ctx.get("pnl_net_quote", 0.0) or 0.0) > 0)
@@ -279,7 +393,9 @@ class SellService:
                                 })
                             except Exception:
                                 pass
-                            self.portfolio.remove_held_asset(symbol)
+                            # Phase 6: Symbol-scoped lock for thread-safe position removal
+                            with _get_symbol_lock(symbol):
+                                self.portfolio.remove_held_asset(symbol)
                             if self.on_realized_pnl:
                                 try:
                                     self.on_realized_pnl(pnl_ctx.get("pnl_net_quote", 0.0), (pnl_ctx.get("pnl_net_quote", 0.0) or 0.0) > 0)

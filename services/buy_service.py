@@ -2,11 +2,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone
+import time  # Phase 9: For telemetry timestamps
+import config as cfg  # Phase 8: Import config module for evaluate_all_entry_guards
 from config import (
     FEE_RATE,
     MIN_ORDER_BUFFER,
     BUY_ESCALATION_STEPS,
     PREDICTIVE_BUY_ZONE_BPS,
+    MAX_SLIPPAGE_BPS_ENTRY,  # Phase 4
+    MAX_SPREAD_BPS_ENTRY,  # Phase 7
+    DEPTH_MIN_NOTIONAL_USD,  # Phase 7
+    PREDICTIVE_BUY_ZONE_CAP_BPS,  # Phase 7
 )
 from core.utils import (
     next_client_order_id,
@@ -19,6 +25,8 @@ from core.logging.loggingx import (
 from .sizing_service import SizingService
 from core.utils import compute_avg_fill_and_fees
 from .order_service import OrderService
+from core.risk_limits import evaluate_all_entry_guards  # Phase 8
+from core.telemetry import get_fill_tracker  # Phase 9
 
 
 @dataclass
@@ -45,7 +53,7 @@ class BuyService:
         self.portfolio = portfolio
         self.order_service = order_service or OrderService(exchange)
 
-    def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict[str, Any]]:
+    def _place_limit_ioc(self, symbol: str, qty: float, price: float, decision_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Place limit IOC order using OrderService.
 
@@ -53,11 +61,26 @@ class BuyService:
             symbol: Trading pair
             qty: Order quantity
             price: Limit price
+            decision_id: Optional decision ID for telemetry correlation
 
         Returns:
             Order dict if successful, None otherwise
         """
         coid = next_client_order_id(symbol, "BUY")
+
+        # Phase 9: Start telemetry tracking
+        tracker = get_fill_tracker()
+        telemetry_id = f"{symbol}_{coid}_{int(time.time()*1000)}"
+        tracker.start_order(
+            order_id=telemetry_id,
+            symbol=symbol,
+            side="BUY",
+            quantity=qty,
+            limit_price=price,
+            time_in_force="IOC",
+            decision_id=decision_id,
+            coid=coid
+        )
 
         # Submit via OrderService (handles quantization, retry, error classification)
         result = self.order_service.submit_limit(
@@ -71,6 +94,15 @@ class BuyService:
 
         # Log result
         if not result.success:
+            # Phase 9: Record failed order in telemetry
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=0.0,
+                status="ERROR",
+                attempts=result.attempts,
+                error_msg=result.error
+            )
+
             log_event(
                 "BUY_ERROR",
                 level="ERROR",
@@ -95,6 +127,22 @@ class BuyService:
                 ctx={"coid": coid, "attempts": result.attempts}
             )
 
+        # Phase 9: Record fill in telemetry (basic recording here, detailed in place() after fee calc)
+        order = result.raw_order
+        if order:
+            status = (order.get("status") or "").upper()
+            filled_qty = float(order.get("filled") or 0.0)
+            avg_price = float(order.get("average") or price)
+
+            tracker.record_fill(
+                order_id=telemetry_id,
+                filled_qty=filled_qty,
+                avg_fill_price=avg_price if filled_qty > 0 else None,
+                status=status,
+                exchange_order_id=order.get("id"),
+                attempts=result.attempts
+            )
+
         # Return raw order for backwards compatibility
         return result.raw_order
 
@@ -106,6 +154,152 @@ class BuyService:
             price = ask * (1 + premium_bps / 10_000.0)
             tiers.append((price, step))
         return tiers
+
+    def _check_entry_slippage(
+        self,
+        symbol: str,
+        avg_fill_price: float,
+        ref_price: float,
+        premium_bps: int
+    ) -> Tuple[bool, float]:
+        """
+        Check if entry slippage exceeds threshold (Phase 4).
+
+        Args:
+            symbol: Trading pair
+            avg_fill_price: Average fill price
+            ref_price: Reference price (ask at order time)
+            premium_bps: Expected premium in bps
+
+        Returns:
+            (breach_occurred, actual_slippage_bps)
+        """
+        # Calculate expected price with premium
+        expected_price = ref_price * (1 + premium_bps / 10_000.0)
+
+        # Calculate actual slippage in bps
+        # Positive = paid more than expected, negative = paid less
+        slippage_bps = ((avg_fill_price - expected_price) / expected_price) * 10_000.0
+
+        # Check breach
+        breach = slippage_bps > MAX_SLIPPAGE_BPS_ENTRY
+
+        if breach:
+            log_event(
+                "ENTRY_SLIPPAGE_BREACH",
+                level="WARNING",
+                symbol=symbol,
+                message=f"Entry slippage exceeded threshold: {slippage_bps:.1f} bps > {MAX_SLIPPAGE_BPS_ENTRY} bps",
+                ctx={
+                    "avg_fill_price": float(avg_fill_price),
+                    "ref_price": float(ref_price),
+                    "expected_price": float(expected_price),
+                    "premium_bps": premium_bps,
+                    "slippage_bps": float(slippage_bps),
+                    "threshold_bps": MAX_SLIPPAGE_BPS_ENTRY
+                }
+            )
+        else:
+            log_event(
+                "ENTRY_SLIPPAGE_OK",
+                level="DEBUG",
+                symbol=symbol,
+                message=f"Entry slippage within threshold: {slippage_bps:.1f} bps",
+                ctx={
+                    "slippage_bps": float(slippage_bps),
+                    "threshold_bps": MAX_SLIPPAGE_BPS_ENTRY
+                }
+            )
+
+        return breach, slippage_bps
+
+    def _check_market_quality_guards(
+        self,
+        symbol: str,
+        ask: float,
+        premium_bps: int
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Check spread and depth guards before buy (Phase 7).
+
+        Args:
+            symbol: Trading pair
+            ask: Current ask price
+            premium_bps: Intended premium in bps
+
+        Returns:
+            (should_skip, skip_reason, guard_ctx)
+        """
+        guard_ctx: Dict[str, Any] = {}
+
+        # Check if exchange has get_spread/get_top5_depth (MarketDataProvider)
+        has_spread = hasattr(self.exchange, 'get_spread')
+        has_depth = hasattr(self.exchange, 'get_top5_depth')
+
+        # Phase 7.1: Spread guard
+        if has_spread:
+            try:
+                spread_bps = self.exchange.get_spread(symbol)
+                if spread_bps is not None:
+                    guard_ctx["spread_bps"] = float(spread_bps)
+                    if spread_bps > MAX_SPREAD_BPS_ENTRY:
+                        log_event(
+                            "BUY_SKIP_WIDE_SPREAD",
+                            level="WARNING",
+                            symbol=symbol,
+                            message=f"Spread too wide: {spread_bps:.1f} bps > {MAX_SPREAD_BPS_ENTRY} bps",
+                            ctx=guard_ctx
+                        )
+                        return True, "WIDE_SPREAD", guard_ctx
+            except Exception as e:
+                log_event(
+                    "SPREAD_CHECK_ERROR",
+                    level="ERROR",
+                    symbol=symbol,
+                    message=f"Error checking spread: {e}",
+                    ctx={}
+                )
+
+        # Phase 7.2: Depth guard (check ask side liquidity)
+        if has_depth:
+            try:
+                bid_depth, ask_depth = self.exchange.get_top5_depth(symbol, levels=5)
+                guard_ctx["bid_depth_usd"] = float(bid_depth)
+                guard_ctx["ask_depth_usd"] = float(ask_depth)
+
+                # Check ask-side depth (we're buying, so we care about ask liquidity)
+                if ask_depth < DEPTH_MIN_NOTIONAL_USD:
+                    log_event(
+                        "BUY_SKIP_THIN_DEPTH",
+                        level="WARNING",
+                        symbol=symbol,
+                        message=f"Insufficient ask depth: ${ask_depth:.2f} < ${DEPTH_MIN_NOTIONAL_USD}",
+                        ctx=guard_ctx
+                    )
+                    return True, "THIN_DEPTH", guard_ctx
+            except Exception as e:
+                log_event(
+                    "DEPTH_CHECK_ERROR",
+                    level="ERROR",
+                    symbol=symbol,
+                    message=f"Error checking depth: {e}",
+                    ctx={}
+                )
+
+        # Phase 7.3: Cap premium at PREDICTIVE_BUY_ZONE_CAP_BPS
+        if premium_bps > PREDICTIVE_BUY_ZONE_CAP_BPS:
+            guard_ctx["premium_capped"] = True
+            guard_ctx["original_premium_bps"] = premium_bps
+            guard_ctx["capped_premium_bps"] = PREDICTIVE_BUY_ZONE_CAP_BPS
+            log_event(
+                "BUY_PREMIUM_CAPPED",
+                level="INFO",
+                symbol=symbol,
+                message=f"Premium capped: {premium_bps} bps → {PREDICTIVE_BUY_ZONE_CAP_BPS} bps",
+                ctx=guard_ctx
+            )
+
+        return False, "", guard_ctx
 
     def place(self, plan: BuyPlan) -> Tuple[bool, Dict[str, Any]]:
         """
@@ -130,6 +324,35 @@ class BuyService:
             log_event("BUY_SKIP", symbol=symbol, message="No valid ask", ctx=ctx)
             return False, {"reason": "NO_ASK"}
 
+        # Phase 8: Consolidated entry guard evaluation (risk limits + market quality)
+        # Note: requires self.portfolio to be set for risk limit checks
+        if self.portfolio:
+            guards_passed, block_reason, guard_ctx = evaluate_all_entry_guards(
+                symbol=symbol,
+                order_value_usdt=plan.quote_usdt,
+                ask=ask,
+                portfolio=self.portfolio,
+                config=cfg,
+                market_data_provider=self.exchange  # Pass exchange (may be MarketDataProvider)
+            )
+            ctx.update(guard_ctx)
+
+            if not guards_passed:
+                log_event("BUY_SKIP", symbol=symbol, message=f"Entry guard blocked: {block_reason}", ctx=ctx)
+                return False, {"reason": block_reason, **guard_ctx}
+        else:
+            # Fallback: if no portfolio, just check market quality guards
+            should_skip, skip_reason, guard_ctx = self._check_market_quality_guards(
+                symbol=symbol,
+                ask=ask,
+                premium_bps=plan.premium_bps
+            )
+            ctx.update(guard_ctx)
+
+            if should_skip:
+                log_event("BUY_SKIP", symbol=symbol, message=f"Market quality guard: {skip_reason}", ctx=ctx)
+                return False, {"reason": skip_reason, **guard_ctx}
+
         # Start der Decision – Schema von loggingx: (id, symbol, side, strategy, price, quote, ctx)
         decision_start(
             dec_id,
@@ -146,14 +369,21 @@ class BuyService:
         placed_any = False
 
         for idx, (px, step_config) in enumerate(price_tiers, start=1):
+            # Get premium_bps and apply cap (Phase 7)
+            premium_bps = step_config.get("premium_bps", 0)
+            if premium_bps > PREDICTIVE_BUY_ZONE_CAP_BPS:
+                premium_bps = PREDICTIVE_BUY_ZONE_CAP_BPS
+
             # Frischen Ticker für jede Ladder-Stufe holen (verhindert stale prices)
             if idx > 1:  # Erste Stufe nutzt schon den aktuellen Ticker
                 fresh_ticker = fetch_ticker_cached(self.exchange, symbol)
                 fresh_ask = float(fresh_ticker.get("ask") or ask)  # Fallback auf originalen ask
                 if fresh_ask > 0:
                     # Preis-Tier basierend auf frischem Ask neu berechnen
-                    premium_bps = step_config.get("premium_bps", 0)
                     px = fresh_ask * (1 + premium_bps / 10_000.0)
+            else:
+                # Phase 7: Recalculate first tier price with capped premium
+                px = ask * (1 + premium_bps / 10_000.0)
 
             # Sizing: wie viel können wir uns bei diesem Limit leisten?
             qty, est_cost, min_required, sizing_reason = self.sizing.affordable_buy_qty(symbol, px, plan.quote_usdt)
@@ -171,7 +401,7 @@ class BuyService:
                 ctx[f"sizing_step_{idx}"] = sizing_reason
                 continue
 
-            order = self._place_limit_ioc(symbol, qty, px)
+            order = self._place_limit_ioc(symbol, qty, px, decision_id=dec_id)
             if not order:
                 continue
 
@@ -190,15 +420,53 @@ class BuyService:
                 # Buy-Fees in Quote bestimmen & pro Einheit verteilen
                 avg_px, filled_qty, _proceeds_q, buy_fees_q = compute_avg_fill_and_fees(order, trades)
                 buy_fee_per_unit = (buy_fees_q / filled_qty) if filled_qty > 0 else 0.0
+
+                # Phase 4: Check entry slippage
+                ref_ask = float(fresh_ask if idx > 1 and 'fresh_ask' in locals() else ask)
+                premium_bps = step_config.get("premium_bps", 0)
+                slippage_breach, slippage_bps = self._check_entry_slippage(
+                    symbol=symbol,
+                    avg_fill_price=avg_px,
+                    ref_price=ref_ask,
+                    premium_bps=premium_bps
+                )
+                ctx[f"step_{idx}_slippage_bps"] = float(slippage_bps)
+                ctx[f"step_{idx}_slippage_breach"] = slippage_breach
+
                 # Portfolio aktualisieren (WAC + Fee/Unit)
+                # Phase 6: Symbol-scoped lock for thread-safe position updates
                 if self.portfolio and filled_qty > 0:
-                    self.portfolio.add_held_asset(symbol, {
-                        "amount": filled_qty,
-                        "entry_price": float(avg_px or px),
-                        "buy_fee_quote_per_unit": buy_fee_per_unit,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
+                    try:
+                        from core.portfolio.locks import get_symbol_lock
+                        with get_symbol_lock(symbol):
+                            self.portfolio.add_held_asset(symbol, {
+                                "amount": filled_qty,
+                                "entry_price": float(avg_px or px),
+                                "buy_fee_quote_per_unit": buy_fee_per_unit,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                    except ImportError:
+                        # Fallback without locks if locks module not available
+                        self.portfolio.add_held_asset(symbol, {
+                            "amount": filled_qty,
+                            "entry_price": float(avg_px or px),
+                            "buy_fee_quote_per_unit": buy_fee_per_unit,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
                 placed_any = True
+
+                # Phase 4: Stop ladder if slippage breach
+                if slippage_breach:
+                    log_event(
+                        "BUY_LADDER_STOPPED",
+                        level="WARNING",
+                        symbol=symbol,
+                        message=f"Stopping buy ladder due to slippage breach at step {idx}",
+                        ctx={"step": idx, "slippage_bps": float(slippage_bps)}
+                    )
+                    ctx["ladder_stopped_reason"] = "SLIPPAGE_BREACH"
+                    break
+
                 break
 
         decision_end(

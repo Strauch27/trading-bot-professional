@@ -545,7 +545,11 @@ class PortfolioManager:
         return None
     
     def add_held_asset(self, symbol: str, asset_data: Dict):
-        """Fügt gehaltenes Asset hinzu mit WAC und Fee-Tracking"""
+        """
+        Fügt gehaltenes Asset hinzu mit WAC und Fee-Tracking.
+
+        Phase 5: Tracks first_fill_ts for accurate TTL calculation.
+        """
         data = dict(asset_data)
         # Stelle sicher dass beide Felder existieren
         if 'buy_price' not in data and 'buying_price' in data:
@@ -559,6 +563,15 @@ class PortfolioManager:
         old_price = float(existing.get("entry_price") or existing.get("buy_price") or 0.0)
         new_amt = float(data.get("amount") or 0.0)
         new_price = float(data.get("entry_price") or data.get("buy_price") or 0.0)
+
+        # Phase 5: Preserve first_fill_ts for TTL calculation
+        # Only set if this is the first fill (no existing position)
+        if old_amt == 0:
+            # First fill - set timestamp
+            data["first_fill_ts"] = data.get("first_fill_ts", time.time())
+        else:
+            # Subsequent fill - preserve original first_fill_ts
+            data["first_fill_ts"] = existing.get("first_fill_ts", time.time())
 
         total_amt = old_amt + new_amt
         if total_amt > 0:

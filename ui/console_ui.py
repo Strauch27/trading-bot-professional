@@ -173,3 +173,204 @@ def line(label: str, msg: str):
     label_text = Text(label, style="bold")
 
     console.print(timestamp, label_text, msg)
+
+
+# ============================================================================
+# Enhanced Logging Functions
+# ============================================================================
+
+def log_info(message: str, details: Dict[str, Any] = None):
+    """
+    Log info message with optional structured details.
+
+    Args:
+        message: Log message
+        details: Optional key-value details
+    """
+    if not RICH_AVAILABLE or not console:
+        print(f"[INFO] {message}")
+        if details:
+            for k, v in details.items():
+                print(f"       {k}: {v}")
+        return
+
+    console.print(f"[cyan]ℹ {message}[/cyan]")
+    if details:
+        for k, v in details.items():
+            console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
+
+
+def log_success(message: str, details: Dict[str, Any] = None):
+    """
+    Log success message.
+
+    Args:
+        message: Log message
+        details: Optional details
+    """
+    if not RICH_AVAILABLE or not console:
+        print(f"[SUCCESS] {message}")
+        if details:
+            for k, v in details.items():
+                print(f"          {k}: {v}")
+        return
+
+    console.print(f"[green bold]✓ {message}[/green bold]")
+    if details:
+        for k, v in details.items():
+            console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
+
+
+def log_warning(message: str, details: Dict[str, Any] = None):
+    """
+    Log warning message.
+
+    Args:
+        message: Log message
+        details: Optional details
+    """
+    if not RICH_AVAILABLE or not console:
+        print(f"[WARNING] {message}")
+        if details:
+            for k, v in details.items():
+                print(f"          {k}: {v}")
+        return
+
+    console.print(f"[yellow bold]⚠ {message}[/yellow bold]")
+    if details:
+        for k, v in details.items():
+            console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
+
+
+def log_error(message: str, error: str = None, details: Dict[str, Any] = None):
+    """
+    Log error message.
+
+    Args:
+        message: Log message
+        error: Error string
+        details: Optional details
+    """
+    if not RICH_AVAILABLE or not console:
+        print(f"[ERROR] {message}")
+        if error:
+            print(f"        Error: {error}")
+        if details:
+            for k, v in details.items():
+                print(f"        {k}: {v}")
+        return
+
+    console.print(f"[red bold]✗ {message}[/red bold]")
+    if error:
+        console.print(f"  [dim]Error:[/dim] [red]{error}[/red]")
+    if details:
+        for k, v in details.items():
+            console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
+
+
+# ============================================================================
+# Trade Summaries
+# ============================================================================
+
+def print_trade_summary(
+    symbol: str,
+    side: str,
+    quantity: float,
+    price: float,
+    pnl: float = None,
+    status: str = "FILLED"
+):
+    """
+    Print formatted trade summary.
+
+    Args:
+        symbol: Trading symbol
+        side: BUY/SELL
+        quantity: Order quantity
+        price: Execution price
+        pnl: P&L (for sells)
+        status: Order status
+    """
+    if not RICH_AVAILABLE or not console:
+        pnl_str = f" | P&L: ${pnl:+.2f}" if pnl is not None else ""
+        print(f"[TRADE] {side} {quantity:.4f} {symbol} @ ${price:.2f} | Status: {status}{pnl_str}")
+        return
+
+    # Side color
+    side_style = "green bold" if side == "BUY" else "red bold"
+
+    # Status color
+    status_style = "green" if status == "FILLED" else "yellow"
+
+    parts = [
+        Text("🔄 ", style="dim"),
+        Text(side, style=side_style),
+        Text(f" {quantity:.4f} ", style="white"),
+        Text(symbol, style="yellow bold"),
+        Text(f" @ ${price:.2f}", style="white"),
+        Text(f" [{status}]", style=status_style)
+    ]
+
+    if pnl is not None:
+        pnl_style = "green bold" if pnl > 0 else "red bold"
+        parts.append(Text(f" | P&L: ${pnl:+.2f}", style=pnl_style))
+
+    console.print(Text.assemble(*parts))
+
+
+def print_metric_line(label: str, value: Any, unit: str = "", good_threshold: float = None):
+    """
+    Print a metric line with optional threshold coloring.
+
+    Args:
+        label: Metric label
+        value: Metric value
+        unit: Unit string (e.g., "ms", "%", "USDT")
+        good_threshold: If set, color value based on threshold
+    """
+    if not RICH_AVAILABLE or not console:
+        print(f"{label}: {value}{unit}")
+        return
+
+    # Determine value color
+    value_style = "bold"
+    if good_threshold is not None and isinstance(value, (int, float)):
+        if value <= good_threshold:
+            value_style = "green bold"
+        else:
+            value_style = "yellow bold"
+
+    console.print(f"[cyan]{label}:[/cyan] [{value_style}]{value}{unit}[/{value_style}]")
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def is_rich_available() -> bool:
+    """Check if Rich library is available."""
+    return RICH_AVAILABLE
+
+
+def clear_screen():
+    """Clear the console screen."""
+    if RICH_AVAILABLE and console:
+        console.clear()
+    else:
+        # Fallback: ANSI escape code
+        print("\033[2J\033[H", end="")
+
+
+def print_separator(char: str = "─", length: int = 80):
+    """
+    Print a separator line.
+
+    Args:
+        char: Character to use
+        length: Line length
+    """
+    if not RICH_AVAILABLE or not console:
+        print(char * length)
+        return
+
+    console.print(f"[dim]{char * length}[/dim]")

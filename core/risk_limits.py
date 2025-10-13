@@ -203,3 +203,106 @@ class RiskLimitChecker:
             self._daily_trade_reset_ts = time.time()
 
         self._daily_trade_count += 1
+
+
+def evaluate_all_entry_guards(
+    symbol: str,
+    order_value_usdt: float,
+    ask: float,
+    portfolio,
+    config,
+    market_data_provider=None
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Phase 8: Consolidated entry guard evaluation.
+
+    Checks all entry-side risk guards in one place:
+    - Portfolio risk limits (positions, exposure, drawdown, etc.)
+    - Market quality guards (spread, depth)
+    - Any other configured pre-trade checks
+
+    Args:
+        symbol: Trading pair
+        order_value_usdt: Order value in USDT
+        ask: Current ask price
+        portfolio: PortfolioManager instance
+        config: Config module
+        market_data_provider: Optional MarketDataProvider for spread/depth checks
+
+    Returns:
+        (all_passed: bool, block_reason: str, guard_ctx: Dict)
+        - all_passed: True if all guards pass
+        - block_reason: First blocking reason if any guard fails (empty string if all pass)
+        - guard_ctx: Full context with all guard results
+    """
+    guard_ctx: Dict[str, Any] = {
+        "symbol": symbol,
+        "order_value_usdt": order_value_usdt
+    }
+
+    # 1. Portfolio Risk Limits
+    try:
+        risk_checker = RiskLimitChecker(portfolio, config)
+        limits_passed, limit_checks = risk_checker.check_limits(symbol, order_value_usdt)
+
+        guard_ctx["risk_limits"] = limit_checks
+        guard_ctx["risk_limits_passed"] = limits_passed
+
+        if not limits_passed:
+            # Find first failed limit
+            failed_limit = next((check for check in limit_checks if check['hit']), None)
+            if failed_limit:
+                block_reason = f"RISK_LIMIT_{failed_limit['limit'].upper()}"
+                logger.warning(
+                    f"Risk limit blocked order for {symbol}: {failed_limit['limit']} "
+                    f"({failed_limit['value']:.4f} > {failed_limit['threshold']:.4f})"
+                )
+                return False, block_reason, guard_ctx
+    except Exception as e:
+        logger.error(f"Error checking risk limits for {symbol}: {e}")
+        guard_ctx["risk_limits_error"] = str(e)
+        # Conservative: block on error
+        return False, "RISK_LIMITS_ERROR", guard_ctx
+
+    # 2. Market Quality Guards (Spread/Depth)
+    if market_data_provider:
+        try:
+            # Spread guard
+            has_spread = hasattr(market_data_provider, 'get_spread')
+            if has_spread:
+                spread_bps = market_data_provider.get_spread(symbol)
+                if spread_bps is not None:
+                    guard_ctx["spread_bps"] = float(spread_bps)
+                    max_spread = getattr(config, 'MAX_SPREAD_BPS_ENTRY', 10)
+
+                    if spread_bps > max_spread:
+                        logger.warning(
+                            f"Spread guard blocked order for {symbol}: "
+                            f"{spread_bps:.1f} bps > {max_spread} bps"
+                        )
+                        return False, "WIDE_SPREAD", guard_ctx
+
+            # Depth guard
+            has_depth = hasattr(market_data_provider, 'get_top5_depth')
+            if has_depth:
+                bid_depth, ask_depth = market_data_provider.get_top5_depth(symbol, levels=5)
+                guard_ctx["bid_depth_usd"] = float(bid_depth)
+                guard_ctx["ask_depth_usd"] = float(ask_depth)
+
+                min_depth = getattr(config, 'DEPTH_MIN_NOTIONAL_USD', 200)
+                if ask_depth < min_depth:
+                    logger.warning(
+                        f"Depth guard blocked order for {symbol}: "
+                        f"${ask_depth:.2f} < ${min_depth}"
+                    )
+                    return False, "THIN_DEPTH", guard_ctx
+
+        except Exception as e:
+            logger.error(f"Error checking market quality guards for {symbol}: {e}")
+            guard_ctx["market_quality_error"] = str(e)
+            # Non-critical: allow order to proceed if market quality checks fail
+            # (risk limits are more critical)
+
+    # All guards passed
+    guard_ctx["all_passed"] = True
+    return True, "", guard_ctx

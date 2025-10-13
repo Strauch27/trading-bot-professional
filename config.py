@@ -146,8 +146,52 @@ MODEL_DIR = "models"
 # Buy Execution
 BUY_MODE = "PREDICTIVE"  # "PREDICTIVE", "ESCALATION" oder "CLASSIC"
 PREDICTIVE_BUY_ZONE_BPS = 3  # 0.03% über Marktpreis
+PREDICTIVE_BUY_ZONE_CAP_BPS = 15  # Phase 7: Max Cap für Repricing
 USE_PREDICTIVE_BUYS = True
 BUY_LIMIT_PREMIUM_BPS = 8
+
+# Phase 7: Spread & Depth Guards
+MAX_SPREAD_BPS_ENTRY = 10  # Max Spread für Buy-Repricing (10 bps)
+DEPTH_MIN_NOTIONAL_USD = 200  # Min kumulierte Depth (Notional)
+
+# =============================================================================
+# ORDER FLOW HARDENING (Phases 2-12) - Feature Flags
+# =============================================================================
+
+# Phase 2: Idempotent COIDs + Persistence
+ENABLE_COID_MANAGER = True  # Idempotent Client Order IDs with persistent KV-store
+ENABLE_STARTUP_RECONCILE = True  # Reconcile pending COIDs on startup
+
+# Phase 4: Entry Slippage Guard
+ENABLE_ENTRY_SLIPPAGE_GUARD = True  # Check entry slippage vs expected price
+# MAX_SLIPPAGE_BPS_ENTRY already defined above (15 bps)
+
+# Phase 5: Exit TTL Timing
+USE_FIRST_FILL_TS_FOR_TTL = True  # Use first_fill_ts instead of order timestamp for TTL
+
+# Phase 6: Symbol-Scoped Locks
+ENABLE_SYMBOL_LOCKS = True  # Thread-safe per-symbol locking for portfolio ops
+
+# Phase 7: Spread/Depth Guards (already defined above)
+ENABLE_SPREAD_GUARD_ENTRY = True  # Block buys when spread > MAX_SPREAD_BPS_ENTRY
+ENABLE_DEPTH_GUARD_ENTRY = True  # Block buys when depth < DEPTH_MIN_NOTIONAL_USD
+# MAX_SPREAD_BPS_ENTRY and DEPTH_MIN_NOTIONAL_USD defined above
+
+# Phase 8: Risk Guards Consolidation
+ENABLE_CONSOLIDATED_ENTRY_GUARDS = True  # Use evaluate_all_entry_guards()
+
+# Phase 9: Fill Telemetry
+ENABLE_FILL_TELEMETRY = True  # Track fill rates, latency, slippage metrics
+FILL_TELEMETRY_MAX_HISTORY = 10000  # Max orders to keep in memory
+FILL_TELEMETRY_EXPORT_ENABLED = False  # Export telemetry to JSONL
+FILL_TELEMETRY_EXPORT_DIR = None  # Directory for telemetry exports (None = disabled)
+
+# Phase 10: Consolidated Exit Evaluation
+ENABLE_CONSOLIDATED_EXITS = True  # Use unified exit evaluation (ATR, trailing, profit targets)
+
+# Phase 11 & 12: Testing & Validation
+ENABLE_ORDER_FLOW_HARDENING = True  # Master switch for all order flow hardening features
+
 BUY_GTC_WAIT_SECS = 4.0
 BUY_GTC_MIN_PARTIAL = 0.25
 BUY_GTC_WAIT_DYNAMIC = True

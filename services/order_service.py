@@ -5,10 +5,15 @@ OrderService - Centralized Order Submission
 Provides unified interface for all order submissions with:
 - Retry logic (exponential backoff, max 3 attempts)
 - Error classification (Recoverable vs. Fatal)
-- Idempotent COID reuse
+- Idempotent COID reuse via COIDManager
 - Consistent logging
 
 All Buy/Sell operations MUST use this service instead of direct exchange calls.
+
+Phase 2 Enhancement:
+- Integrated with core.coid for idempotent COID generation
+- COID status tracking (PENDING → TERMINAL)
+- No duplicate orders on retry/crash
 """
 
 from __future__ import annotations
@@ -17,6 +22,14 @@ from typing import Optional, Dict, Any, List
 from enum import Enum
 import time
 import logging
+
+# Phase 2: Import COID manager
+try:
+    from core.coid import get_coid_manager, COIDStatus
+    COID_AVAILABLE = True
+except ImportError:
+    COID_AVAILABLE = False
+    logging.warning("core.coid not available, COID management disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +103,8 @@ class OrderService:
         exchange,
         max_retries: int = 3,
         base_retry_delay: float = 0.25,
-        max_retry_delay: float = 2.0
+        max_retry_delay: float = 2.0,
+        use_coid_manager: bool = True
     ):
         """
         Initialize OrderService.
@@ -100,11 +114,21 @@ class OrderService:
             max_retries: Maximum number of retry attempts
             base_retry_delay: Base delay between retries (seconds)
             max_retry_delay: Maximum delay between retries (seconds)
+            use_coid_manager: Use COIDManager for idempotent COIDs (Phase 2)
         """
         self.exchange = exchange
         self.max_retries = max_retries
         self.base_retry_delay = base_retry_delay
         self.max_retry_delay = max_retry_delay
+
+        # Phase 2: COID manager
+        self.use_coid_manager = use_coid_manager and COID_AVAILABLE
+        self.coid_manager = get_coid_manager() if self.use_coid_manager else None
+
+        if self.use_coid_manager:
+            logger.info("OrderService initialized with COID manager (Phase 2)")
+        else:
+            logger.info("OrderService initialized without COID manager")
 
     def submit_limit(
         self,
@@ -112,8 +136,10 @@ class OrderService:
         side: str,
         qty: float,
         price: float,
-        coid: str,
-        time_in_force: str = "IOC"
+        coid: Optional[str] = None,
+        time_in_force: str = "IOC",
+        decision_id: Optional[str] = None,
+        leg_idx: int = 0
     ) -> OrderResult:
         """
         Submit limit order with retry logic.
@@ -123,12 +149,27 @@ class OrderService:
             side: "buy" or "sell"
             qty: Order quantity
             price: Limit price
-            coid: Client order ID
+            coid: Client order ID (auto-generated if None and decision_id provided)
             time_in_force: Time in force (default: "IOC")
+            decision_id: Trading decision ID (for COID generation, Phase 2)
+            leg_idx: Order leg index (for multi-leg orders, Phase 2)
 
         Returns:
             OrderResult with submission details
         """
+        # Phase 2: Auto-generate COID if needed
+        if coid is None and decision_id and self.use_coid_manager:
+            coid = self.coid_manager.next_client_order_id(
+                decision_id=decision_id,
+                leg_idx=leg_idx,
+                side=side,
+                symbol=symbol
+            )
+            logger.info(f"Auto-generated COID: {coid} for {symbol} {side}")
+        elif coid is None:
+            # Fallback: generate simple timestamp-based COID
+            coid = f"{symbol.replace('/', '')}_{side}_{int(time.time()*1000)}"
+            logger.warning(f"Generated fallback COID (no decision_id): {coid}")
         # Quantize price and quantity
         try:
             price = float(self.exchange.price_to_precision(symbol, price))
@@ -166,8 +207,10 @@ class OrderService:
         symbol: str,
         side: str,
         qty: float,
-        coid: str,
-        time_in_force: str = "IOC"
+        coid: Optional[str] = None,
+        time_in_force: str = "IOC",
+        decision_id: Optional[str] = None,
+        leg_idx: int = 0
     ) -> OrderResult:
         """
         Submit market order with retry logic.
@@ -176,12 +219,27 @@ class OrderService:
             symbol: Trading pair (e.g., "BTC/USDT")
             side: "buy" or "sell"
             qty: Order quantity
-            coid: Client order ID
+            coid: Client order ID (auto-generated if None and decision_id provided)
             time_in_force: Time in force (default: "IOC")
+            decision_id: Trading decision ID (for COID generation, Phase 2)
+            leg_idx: Order leg index (for multi-leg orders, Phase 2)
 
         Returns:
             OrderResult with submission details
         """
+        # Phase 2: Auto-generate COID if needed
+        if coid is None and decision_id and self.use_coid_manager:
+            coid = self.coid_manager.next_client_order_id(
+                decision_id=decision_id,
+                leg_idx=leg_idx,
+                side=side,
+                symbol=symbol
+            )
+            logger.info(f"Auto-generated COID: {coid} for {symbol} {side} MARKET")
+        elif coid is None:
+            # Fallback: generate simple timestamp-based COID
+            coid = f"{symbol.replace('/', '')}_{side}_MKT_{int(time.time()*1000)}"
+            logger.warning(f"Generated fallback COID (no decision_id): {coid}")
         # Quantize quantity
         try:
             qty = float(self.exchange.amount_to_precision(symbol, qty))
@@ -326,6 +384,21 @@ class OrderService:
             fee = order.get("fee", {})
             fees = float(fee.get("cost") or 0.0)
 
+        # Phase 2: Update COID status
+        if self.use_coid_manager and coid:
+            coid_status = self._map_order_status_to_coid(status)
+            self.coid_manager.update_status(
+                coid=coid,
+                status=coid_status,
+                order_id=order.get("id"),
+                metadata={
+                    'filled_qty': filled_qty,
+                    'avg_price': avg_price,
+                    'fees': fees,
+                    'attempts': attempts
+                }
+            )
+
         return OrderResult(
             success=True,
             status=status,
@@ -338,6 +411,22 @@ class OrderService:
             attempts=attempts,
             raw_order=order
         )
+
+    def _map_order_status_to_coid(self, order_status: str) -> COIDStatus:
+        """Map order status to COID status (Phase 2)"""
+        status_upper = order_status.upper()
+        if status_upper in ('FILLED', 'CLOSED'):
+            return COIDStatus.FILLED
+        elif status_upper == 'CANCELED':
+            return COIDStatus.CANCELED
+        elif status_upper == 'REJECTED':
+            return COIDStatus.REJECTED
+        elif status_upper == 'EXPIRED':
+            return COIDStatus.EXPIRED
+        elif status_upper in ('PARTIALLY_FILLED', 'PARTIAL'):
+            return COIDStatus.PARTIALLY_FILLED
+        else:
+            return COIDStatus.PENDING
 
     def _classify_error(self, error: Exception) -> OrderErrorType:
         """
