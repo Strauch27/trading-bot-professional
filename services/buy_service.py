@@ -18,6 +18,7 @@ from core.logging.loggingx import (
 )
 from .sizing_service import SizingService
 from core.utils import compute_avg_fill_and_fees
+from .order_service import OrderService
 
 
 @dataclass
@@ -35,32 +36,67 @@ class BuyService:
     - Schritt 1: nahe Ask, kleiner Premium (bps)
     - Schritt 2..N: progressiv mehr Premium
     Sizing läuft über SizingService, Logging via loggingx.
+
+    Now uses OrderService for centralized order submission.
     """
-    def __init__(self, exchange, sizing: SizingService, portfolio=None):
+    def __init__(self, exchange, sizing: SizingService, portfolio=None, order_service: Optional[OrderService] = None):
         self.exchange = exchange
         self.sizing = sizing
         self.portfolio = portfolio
+        self.order_service = order_service or OrderService(exchange)
 
     def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict[str, Any]]:
+        """
+        Place limit IOC order using OrderService.
+
+        Args:
+            symbol: Trading pair
+            qty: Order quantity
+            price: Limit price
+
+        Returns:
+            Order dict if successful, None otherwise
+        """
         coid = next_client_order_id(symbol, "BUY")
-        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
-        px = float(self.exchange.price_to_precision(symbol, price))
-        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
-        # Sicherheitsnetz nach der Quantisierung
-        if qty <= 0 or px <= 0:
-            log_event("BUY_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty/price invalid: qty={qty}, price={px}")
-            return None
+        # Submit via OrderService (handles quantization, retry, error classification)
+        result = self.order_service.submit_limit(
+            symbol=symbol,
+            side="buy",
+            qty=qty,
+            price=price,
+            coid=coid,
+            time_in_force="IOC"
+        )
 
-        try:
-            order = self.exchange.create_limit_order(
-                symbol, "buy", qty, px, "IOC", coid, False
+        # Log result
+        if not result.success:
+            log_event(
+                "BUY_ERROR",
+                level="ERROR",
+                symbol=symbol,
+                message=result.error,
+                ctx={
+                    "price": price,
+                    "qty": qty,
+                    "error_type": result.error_type.value if result.error_type else "unknown",
+                    "attempts": result.attempts
+                }
             )
-            return order
-        except Exception as e:
-            log_event("BUY_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": px, "qty": qty})
             return None
+
+        # Log retry if multiple attempts
+        if result.attempts > 1:
+            log_event(
+                "ORDER_RETRY",
+                level="INFO",
+                symbol=symbol,
+                message=f"Order succeeded after {result.attempts} attempts",
+                ctx={"coid": coid, "attempts": result.attempts}
+            )
+
+        # Return raw order for backwards compatibility
+        return result.raw_order
 
     def _tiers(self, ask: float, escalation_steps: List[Dict[str, Any]]) -> List[Tuple[float, Dict[str, Any]]]:
         # Convert escalation steps to price tiers with metadata

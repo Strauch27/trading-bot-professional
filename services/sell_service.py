@@ -11,11 +11,14 @@ from core.utils import (
 )
 from core.logging.loggingx import log_event, exit_placed, exit_filled
 from .sizing_service import SizingService
+from .order_service import OrderService
 
 class SellService:
     """
     TTL-Enforcement & Exit-Leiter (Limit-IOC, optional Market-Fallback per Policy).
     Nutzt bestehende Utils/Logging – keine neue Logik „erfunden".
+
+    Now uses OrderService for centralized order submission.
     """
     def __init__(
         self,
@@ -30,6 +33,7 @@ class SellService:
         exit_ioc_ttl_ms: int = EXIT_IOC_TTL_MS,
         max_slippage_bps_exit: int = MAX_SLIPPAGE_BPS_EXIT,
         on_realized_pnl = None,
+        order_service: Optional[OrderService] = None,
     ):
         self.exchange = exchange
         self.portfolio = portfolio
@@ -40,49 +44,113 @@ class SellService:
         self.exit_ioc_ttl_ms = exit_ioc_ttl_ms
         self.max_slippage_bps_exit = max_slippage_bps_exit
         self.on_realized_pnl = on_realized_pnl
+        self.order_service = order_service or OrderService(exchange)
 
     def _place_limit_ioc(self, symbol: str, qty: float, price: float) -> Optional[Dict]:
+        """
+        Place limit IOC sell order using OrderService.
+
+        Args:
+            symbol: Trading pair
+            qty: Order quantity
+            price: Limit price
+
+        Returns:
+            Order dict if successful, None otherwise
+        """
         coid = next_client_order_id(symbol, "SELL")
-        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
-        px = float(self.exchange.price_to_precision(symbol, price))
-        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
-        # Sicherheitsnetz nach der Quantisierung
-        if qty <= 0 or px <= 0:
-            log_event("SELL_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty/price invalid: qty={qty}, price={px}")
-            return None
+        # Submit via OrderService (handles quantization, retry, error classification)
+        result = self.order_service.submit_limit(
+            symbol=symbol,
+            side="sell",
+            qty=qty,
+            price=price,
+            coid=coid,
+            time_in_force="IOC"
+        )
 
-        try:
-            order = self.exchange.create_limit_order(
-                symbol, "sell", qty, px, "IOC", coid, False
+        # Log result
+        if not result.success:
+            log_event(
+                "EXIT_ERROR",
+                level="ERROR",
+                symbol=symbol,
+                message=result.error,
+                ctx={
+                    "price": price,
+                    "qty": qty,
+                    "error_type": result.error_type.value if result.error_type else "unknown",
+                    "attempts": result.attempts
+                }
             )
-            return order
-        except Exception as e:
-            log_event("EXIT_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"price": px, "qty": qty})
             return None
+
+        # Log retry if multiple attempts
+        if result.attempts > 1:
+            log_event(
+                "ORDER_RETRY",
+                level="INFO",
+                symbol=symbol,
+                message=f"Order succeeded after {result.attempts} attempts",
+                ctx={"coid": coid, "attempts": result.attempts}
+            )
+
+        # Return raw order for backwards compatibility
+        return result.raw_order
 
     def _market_ioc(self, symbol: str, qty: float) -> Optional[Dict]:
+        """
+        Place market IOC sell order using OrderService.
+
+        Args:
+            symbol: Trading pair
+            qty: Order quantity
+
+        Returns:
+            Order dict if successful, None otherwise
+        """
         if self.never_market_sells:
             return None
+
         coid = next_client_order_id(symbol, "SELL")
-        # Finale Quantisierung direkt vor Order-Call (wirklich unmittelbar davor)
-        qty = float(self.exchange.amount_to_precision(symbol, qty))
 
-        # Sicherheitsnetz nach der Quantisierung
-        if qty <= 0:
-            log_event("SELL_MARKET_QUANTIZATION_ERROR", level="ERROR", symbol=symbol,
-                     message=f"quantized qty invalid: qty={qty}")
-            return None
+        # Submit via OrderService (handles quantization, retry, error classification)
+        result = self.order_service.submit_market(
+            symbol=symbol,
+            side="sell",
+            qty=qty,
+            coid=coid,
+            time_in_force="IOC"
+        )
 
-        try:
-            order = self.exchange.create_market_order(
-                symbol, "sell", qty, "IOC", coid
+        # Log result
+        if not result.success:
+            log_event(
+                "EXIT_ERROR",
+                level="ERROR",
+                symbol=symbol,
+                message=result.error,
+                ctx={
+                    "qty": qty,
+                    "error_type": result.error_type.value if result.error_type else "unknown",
+                    "attempts": result.attempts
+                }
             )
-            return order
-        except Exception as e:
-            log_event("EXIT_ERROR", level="ERROR", symbol=symbol, message=str(e), ctx={"qty": qty})
             return None
+
+        # Log retry if multiple attempts
+        if result.attempts > 1:
+            log_event(
+                "ORDER_RETRY",
+                level="INFO",
+                symbol=symbol,
+                message=f"Order succeeded after {result.attempts} attempts",
+                ctx={"coid": coid, "attempts": result.attempts}
+            )
+
+        # Return raw order for backwards compatibility
+        return result.raw_order
 
     # ersetzt durch compute_realized_pnl_net_sell (siehe Exit-Filled-Block)
 
