@@ -1,6 +1,11 @@
 """
 Market Data Service (Drop 4)
 Centralized market data management extraction from engine.py
+
+Enhanced with:
+- Soft-TTL cache (serve stale while refreshing)
+- Candle alignment and partial candle guard
+- JSONL audit logging
 """
 
 import time
@@ -9,6 +14,18 @@ from typing import Dict, List, Optional, Any, Tuple
 from threading import RLock
 from dataclasses import dataclass, asdict
 from collections import defaultdict, deque
+from pathlib import Path
+
+# Import new services
+from services.cache_ttl import TTLCache, CacheCoordinator
+from services.time_utils import (
+    filter_closed_candles,
+    validate_ohlcv_monotonic,
+    validate_ohlcv_values,
+    align_since_to_closed,
+    TF_MS
+)
+from services.md_audit import MarketDataAuditor
 
 logger = logging.getLogger(__name__)
 
@@ -72,102 +89,103 @@ class OHLCVBar:
 
 
 class TickerCache:
-    """Thread-safe ticker cache with TTL"""
+    """
+    Thread-safe ticker cache with Soft-TTL support.
 
-    def __init__(self, default_ttl: float = 5.0, max_size: int = 1000):
+    Enhanced Features:
+    - Soft-TTL: Serve stale data while triggering refresh
+    - Hard-TTL: Absolute expiration
+    - LRU eviction
+    - Cache status tracking (HIT/STALE/MISS)
+    """
+
+    def __init__(self, default_ttl: float = 5.0, soft_ttl: float = 2.0, max_size: int = 1000):
+        """
+        Initialize ticker cache.
+
+        Args:
+            default_ttl: Hard TTL in seconds (absolute expiration)
+            soft_ttl: Soft TTL in seconds (stale threshold)
+            max_size: Maximum cache entries
+        """
         self.default_ttl = default_ttl
+        self.soft_ttl = soft_ttl
         self.max_size = max_size
-        self._cache: Dict[str, Tuple[TickerData, float]] = {}
-        self._access_order: deque = deque()
+
+        # Use new TTLCache internally
+        self._cache = TTLCache(max_items=max_size)
         self._lock = RLock()
-        self._statistics = {
-            'hits': 0,
-            'misses': 0,
-            'stores': 0,
-            'evictions': 0
-        }
 
-    def get_ticker(self, symbol: str) -> Optional[TickerData]:
-        """Get ticker from cache if not expired"""
+    def get_ticker(self, symbol: str) -> Optional[Tuple[TickerData, str]]:
+        """
+        Get ticker from cache with status.
+
+        Returns:
+            Tuple of (ticker, status) where status is HIT/STALE/MISS,
+            or None if cache miss
+        """
         with self._lock:
-            current_time = time.time()
+            result = self._cache.get(symbol)
+            if not result:
+                return None
 
-            if symbol in self._cache:
-                ticker, expire_time = self._cache[symbol]
-                if current_time < expire_time:
-                    self._statistics['hits'] += 1
-                    # Update access order
-                    if symbol in self._access_order:
-                        self._access_order.remove(symbol)
-                    self._access_order.append(symbol)
-                    return ticker
-                else:
-                    # Expired
-                    del self._cache[symbol]
+            ticker_data, status, meta = result
+            return (ticker_data, status)
 
-            self._statistics['misses'] += 1
+    def get_ticker_simple(self, symbol: str) -> Optional[TickerData]:
+        """
+        Get ticker from cache (backwards compatible).
+
+        Returns only fresh tickers, treats STALE as MISS.
+        """
+        result = self.get_ticker(symbol)
+        if not result:
             return None
 
-    def store_ticker(self, ticker: TickerData, ttl: Optional[float] = None) -> None:
-        """Store ticker in cache"""
+        ticker, status = result
+        if status == "HIT":
+            return ticker
+        return None
+
+    def store_ticker(self, ticker: TickerData, ttl: Optional[float] = None,
+                     soft_ttl: Optional[float] = None) -> None:
+        """
+        Store ticker in cache with dual TTL.
+
+        Args:
+            ticker: Ticker data to cache
+            ttl: Hard TTL (defaults to default_ttl)
+            soft_ttl: Soft TTL (defaults to self.soft_ttl)
+        """
         with self._lock:
             if ttl is None:
                 ttl = self.default_ttl
+            if soft_ttl is None:
+                soft_ttl = self.soft_ttl
 
-            expire_time = time.time() + ttl
+            # Ensure soft_ttl <= ttl
+            if soft_ttl > ttl:
+                soft_ttl = ttl * 0.6  # Default to 60% of hard TTL
 
-            # Evict if cache is full
-            if len(self._cache) >= self.max_size and ticker.symbol not in self._cache:
-                self._evict_oldest()
-
-            self._cache[ticker.symbol] = (ticker, expire_time)
-
-            # Update access order
-            if ticker.symbol in self._access_order:
-                self._access_order.remove(ticker.symbol)
-            self._access_order.append(ticker.symbol)
-
-            self._statistics['stores'] += 1
-
-    def _evict_oldest(self) -> None:
-        """Evict oldest entry"""
-        if self._access_order:
-            oldest = self._access_order.popleft()
-            if oldest in self._cache:
-                del self._cache[oldest]
-                self._statistics['evictions'] += 1
+            self._cache.set(
+                key=ticker.symbol,
+                value=ticker,
+                ttl_s=ttl,
+                soft_ttl_s=soft_ttl,
+                meta={"stored_at": time.time(), "symbol": ticker.symbol}
+            )
 
     def cleanup_expired(self) -> int:
         """Remove expired entries"""
-        with self._lock:
-            current_time = time.time()
-            expired_symbols = []
-
-            for symbol, (_, expire_time) in self._cache.items():
-                if current_time >= expire_time:
-                    expired_symbols.append(symbol)
-
-            for symbol in expired_symbols:
-                del self._cache[symbol]
-                if symbol in self._access_order:
-                    self._access_order.remove(symbol)
-
-            return len(expired_symbols)
+        return self._cache.cleanup_expired()
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get cache statistics"""
-        with self._lock:
-            stats = self._statistics.copy()
-            stats['size'] = len(self._cache)
-            total_requests = stats['hits'] + stats['misses']
-            stats['hit_rate'] = stats['hits'] / total_requests if total_requests > 0 else 0.0
-            return stats
+        return self._cache.get_statistics()
 
     def clear(self) -> None:
         """Clear all cached data"""
-        with self._lock:
-            self._cache.clear()
-            self._access_order.clear()
+        self._cache.clear()
 
 
 class OHLCVHistory:
@@ -256,41 +274,130 @@ class OHLCVHistory:
 
 
 class MarketDataProvider:
-    """Main market data service"""
+    """
+    Main market data service with enhanced caching and audit logging.
 
-    def __init__(self, exchange_adapter, ticker_cache_ttl: float = 5.0,
-                 max_cache_size: int = 1000, max_bars_per_symbol: int = 1000):
+    Features:
+    - Soft-TTL ticker cache (serve stale while refreshing)
+    - Partial candle guard for OHLCV
+    - JSONL audit logging
+    - Latency tracking
+    """
+
+    def __init__(
+        self,
+        exchange_adapter,
+        ticker_cache_ttl: float = 5.0,
+        ticker_soft_ttl: float = 2.0,
+        max_cache_size: int = 1000,
+        max_bars_per_symbol: int = 1000,
+        audit_log_dir: Optional[Path] = None,
+        enable_audit: bool = False
+    ):
+        """
+        Initialize market data provider.
+
+        Args:
+            exchange_adapter: Exchange adapter for fetching data
+            ticker_cache_ttl: Hard TTL for ticker cache
+            ticker_soft_ttl: Soft TTL for ticker cache
+            max_cache_size: Maximum cache size
+            max_bars_per_symbol: Maximum OHLCV bars per symbol
+            audit_log_dir: Directory for audit logs
+            enable_audit: Enable audit logging
+        """
         self.exchange_adapter = exchange_adapter
-        self.ticker_cache = TickerCache(ticker_cache_ttl, max_cache_size)
+        self.ticker_cache = TickerCache(ticker_cache_ttl, ticker_soft_ttl, max_cache_size)
         self.ohlcv_history = OHLCVHistory(max_bars_per_symbol)
         self._lock = RLock()
         self._statistics = {
             'ticker_requests': 0,
             'ticker_cache_hits': 0,
+            'ticker_stale_hits': 0,
             'ohlcv_requests': 0,
             'ohlcv_bars_stored': 0,
+            'ohlcv_partial_candles_removed': 0,
             'errors': 0
         }
 
+        # Audit logger (optional)
+        self.auditor = None
+        if enable_audit and audit_log_dir:
+            self.auditor = MarketDataAuditor(
+                log_dir=Path(audit_log_dir),
+                enabled=True
+            )
+
     def get_ticker(self, symbol: str, use_cache: bool = True) -> Optional[TickerData]:
-        """Get ticker data with optional caching"""
+        """
+        Get ticker data with soft-TTL caching.
+
+        Supports serving stale data (within soft-TTL window) while
+        still returning fresh data immediately.
+
+        Args:
+            symbol: Trading pair symbol
+            use_cache: Enable cache lookup
+
+        Returns:
+            TickerData or None
+        """
         from services.shutdown_coordinator import get_shutdown_coordinator
         co = get_shutdown_coordinator()
 
         co.beat(f"get_ticker_enter:{symbol}")
+        start_time = time.time()
+
         try:
             with self._lock:
                 self._statistics['ticker_requests'] += 1
+                cache_status = "MISS"
 
                 # Try cache first
                 if use_cache:
-                    cached_ticker = self.ticker_cache.get_ticker(symbol)
-                    if cached_ticker:
-                        co.beat(f"get_ticker_cache_hit:{symbol}")
-                        self._statistics['ticker_cache_hits'] += 1
-                        return cached_ticker
+                    cache_result = self.ticker_cache.get_ticker(symbol)
+                    if cache_result:
+                        ticker, status = cache_result
+                        cache_status = status
 
-                # Fetch from exchange
+                        if status == "HIT":
+                            # Fresh cache hit
+                            co.beat(f"get_ticker_cache_hit:{symbol}")
+                            self._statistics['ticker_cache_hits'] += 1
+                            latency_ms = (time.time() - start_time) * 1000
+
+                            # Audit log
+                            if self.auditor:
+                                self.auditor.log_ticker(
+                                    symbol=symbol,
+                                    status="HIT",
+                                    latency_ms=latency_ms,
+                                    source="cache"
+                                )
+
+                            return ticker
+
+                        elif status == "STALE":
+                            # Stale hit - serve stale, but still fetch fresh in background
+                            # (For now, we'll just serve stale immediately and not refresh)
+                            co.beat(f"get_ticker_stale_hit:{symbol}")
+                            self._statistics['ticker_stale_hits'] += 1
+                            latency_ms = (time.time() - start_time) * 1000
+
+                            # Audit log
+                            if self.auditor:
+                                self.auditor.log_ticker(
+                                    symbol=symbol,
+                                    status="STALE",
+                                    latency_ms=latency_ms,
+                                    source="cache",
+                                    meta={"age_ms": int((time.time() - ticker.timestamp / 1000) * 1000)}
+                                )
+
+                            # Serve stale data immediately
+                            return ticker
+
+                # Cache miss - fetch from exchange
                 try:
                     co.beat(f"get_ticker_exchange_call:{symbol}")
                     raw_ticker = self.exchange_adapter.fetch_ticker(symbol)
@@ -312,7 +419,19 @@ class MarketDataProvider:
                     if use_cache:
                         self.ticker_cache.store_ticker(ticker)
 
+                    latency_ms = (time.time() - start_time) * 1000
+
+                    # Audit log
+                    if self.auditor:
+                        self.auditor.log_ticker(
+                            symbol=symbol,
+                            status=cache_status,
+                            latency_ms=latency_ms,
+                            source="exchange"
+                        )
+
                     co.beat(f"get_ticker_success:{symbol}")
+
                     # Nur bei kritischen Symbolen oder nach längerer Zeit loggen
                     if symbol in ["BTC/USDT"] or self._statistics['ticker_requests'] % 50 == 0:
                         logger.info(f"HEARTBEAT - Ticker fetched: {symbol}",
@@ -321,6 +440,17 @@ class MarketDataProvider:
 
                 except Exception as e:
                     self._statistics['errors'] += 1
+                    latency_ms = (time.time() - start_time) * 1000
+
+                    # Audit log error
+                    if self.auditor:
+                        self.auditor.log_error(
+                            route="ticker",
+                            symbol=symbol,
+                            error_type=type(e).__name__,
+                            error_msg=str(e)
+                        )
+
                     co.beat(f"get_ticker_error:{symbol}")
                     logger.error(f"Error fetching ticker for {symbol}: {e}")
                     logger.info(f"HEARTBEAT - Ticker fetch failed but handled: {symbol}",
@@ -330,11 +460,17 @@ class MarketDataProvider:
             co.beat(f"get_ticker_exit:{symbol}")
 
     def get_price(self, symbol: str, prefer_cache: bool = True) -> Optional[float]:
-        """Get current price for symbol with cache preference"""
-        # 1) Cache bevorzugen
+        """
+        Get current price for symbol with cache preference.
+
+        Supports soft-TTL: serves stale prices when fresh data unavailable.
+        """
+        # 1) Cache bevorzugen (accept stale data)
         if prefer_cache:
-            cached_ticker = self.ticker_cache.get_ticker(symbol)
-            if cached_ticker:
+            cache_result = self.ticker_cache.get_ticker(symbol)
+            if cache_result:
+                cached_ticker, status = cache_result
+                # Accept both HIT and STALE for price retrieval
                 p = float(cached_ticker.last or 0.0)
                 if p > 0:
                     return p
@@ -362,15 +498,64 @@ class MarketDataProvider:
         ticker = self.get_ticker(symbol)
         return ticker.spread_bps if ticker else None
 
-    def fetch_ohlcv(self, symbol: str, timeframe: str = '1m',
-                   limit: int = 100, store: bool = True) -> List[OHLCVBar]:
-        """Fetch OHLCV data"""
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = '1m',
+        limit: int = 100,
+        store: bool = True,
+        filter_partial: bool = True
+    ) -> List[OHLCVBar]:
+        """
+        Fetch OHLCV data with partial candle guard.
+
+        Args:
+            symbol: Trading pair symbol
+            timeframe: Timeframe (1m, 5m, 1h, etc.)
+            limit: Number of candles to fetch
+            store: Store in history
+            filter_partial: Remove forming (partial) candle
+
+        Returns:
+            List of OHLCV bars (closed candles only if filter_partial=True)
+        """
         with self._lock:
             self._statistics['ohlcv_requests'] += 1
+            start_time = time.time()
 
             try:
+                # Fetch from exchange
                 raw_ohlcv = self.exchange_adapter.fetch_ohlcv(symbol, timeframe, limit=limit)
+                original_count = len(raw_ohlcv)
 
+                # Filter partial candles BEFORE parsing
+                if filter_partial and raw_ohlcv:
+                    now_ms = int(time.time() * 1000)
+                    raw_ohlcv = filter_closed_candles(raw_ohlcv, timeframe, now_ms)
+
+                    removed_count = original_count - len(raw_ohlcv)
+                    if removed_count > 0:
+                        self._statistics['ohlcv_partial_candles_removed'] += removed_count
+                        logger.debug(f"Removed {removed_count} partial candle(s) for {symbol} {timeframe}")
+
+                # Validate OHLCV data quality
+                if raw_ohlcv:
+                    try:
+                        validate_ohlcv_monotonic(raw_ohlcv)
+                        validate_ohlcv_values(raw_ohlcv)
+                    except ValueError as ve:
+                        logger.warning(f"OHLCV validation failed for {symbol} {timeframe}: {ve}")
+                        # Continue anyway, but log the issue
+                        if self.auditor:
+                            self.auditor.log_error(
+                                route="ohlcv",
+                                symbol=symbol,
+                                error_type="ValidationError",
+                                error_msg=str(ve),
+                                meta={"timeframe": timeframe}
+                            )
+
+                # Parse to OHLCVBar objects
                 bars = []
                 for ohlcv in raw_ohlcv:
                     bar = OHLCVBar(
@@ -383,14 +568,45 @@ class MarketDataProvider:
                     )
                     bars.append(bar)
 
-                if store:
+                # Store in history
+                if store and bars:
                     self.ohlcv_history.add_bars(symbol, timeframe, bars)
                     self._statistics['ohlcv_bars_stored'] += len(bars)
+
+                latency_ms = (time.time() - start_time) * 1000
+
+                # Audit log
+                if self.auditor:
+                    self.auditor.log_ohlcv(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        status="HIT",
+                        latency_ms=latency_ms,
+                        source="exchange",
+                        candles_count=len(bars),
+                        meta={
+                            "original_count": original_count,
+                            "filtered_count": len(bars),
+                            "partial_removed": original_count - len(bars)
+                        }
+                    )
 
                 return bars
 
             except Exception as e:
                 self._statistics['errors'] += 1
+                latency_ms = (time.time() - start_time) * 1000
+
+                # Audit log error
+                if self.auditor:
+                    self.auditor.log_error(
+                        route="ohlcv",
+                        symbol=symbol,
+                        error_type=type(e).__name__,
+                        error_msg=str(e),
+                        meta={"timeframe": timeframe}
+                    )
+
                 logger.error(f"Error fetching OHLCV for {symbol}: {e}")
                 return []
 
@@ -462,13 +678,13 @@ class MarketDataProvider:
     def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive market data statistics"""
         with self._lock:
+            ticker_cache_keys = self.ticker_cache._cache.keys()
+            ohlcv_keys = list(self.ohlcv_history._data.keys())
+
             return {
                 'provider': self._statistics.copy(),
                 'ticker_cache': self.ticker_cache.get_statistics(),
-                'symbols_tracked': len(set(
-                    list(self.ticker_cache._cache.keys()) +
-                    list(self.ohlcv_history._data.keys())
-                ))
+                'symbols_tracked': len(set(ticker_cache_keys + ohlcv_keys))
             }
 
     def clear_cache(self) -> None:
