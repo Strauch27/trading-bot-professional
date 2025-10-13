@@ -53,6 +53,11 @@ from engine import TradingEngine
 from integrations.telegram import init_telegram_from_config, tg
 from integrations.telegram import start_telegram_command_server
 
+# UI Module für Rich Terminal Output
+from ui.console_ui import banner, start_summary, line, ts
+from ui.live_monitors import LiveHeartbeat, PortfolioMonitorView
+from telemetry import mem
+
 
 def _ensure_runtime_dirs():
     """
@@ -345,6 +350,17 @@ def main():
     # Extract session ID from session directory
     SESSION_ID = Path(SESSION_DIR).name  # e.g. 'session_20250907_190217'
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
+
+    # Display Rich Banner with Session Info
+    START_ISO = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    MODE_FOR_BANNER = "LIVE" if GLOBAL_TRADING else "OBSERVE"
+    banner(
+        app_name="Trading Bot",
+        mode=MODE_FOR_BANNER,
+        session_dir=SESSION_DIR,
+        session_id=SESSION_ID,
+        start_iso=START_ISO
+    )
 
     # Phase 3: Set session ID and log config snapshot
     from core.trace_context import set_session_id
@@ -868,26 +884,20 @@ def main():
             logger.warning(f"Failed to start live drop monitor: {e}",
                           extra={'event_type': 'DROP_MONITOR_START_FAILED', 'error': str(e)})
 
-    # Print clean startup summary to terminal
-    from core.utils.startup_summary import print_startup_summary
-
+    # Display Rich Start Summary
     start_budget = portfolio.my_budget if portfolio else 0.0
-    start_equity = start_budget  # Could calculate with unrealized PnL if needed
     mode_str = "LIVE" if global_trading and exchange else "OBSERVE"
 
-    # Portfolio reset info
-    portfolio_was_reset = reset_portfolio_on_start and exchange
-    reset_from_budget = getattr(portfolio, '_reset_from_budget', start_budget)
-
-    print_startup_summary(
-        exchange_name="MEXC",
-        coin_count=len(topcoins),
-        budget=start_budget,
-        equity=start_equity,
-        mode=mode_str,
-        portfolio_reset=portfolio_was_reset,
-        reset_from=reset_from_budget,
-        reset_to=start_budget
+    start_summary(
+        coins=len(topcoins),
+        budget_usdt=start_budget,
+        cfg={
+            'TP': settings.take_profit_threshold,
+            'SL': settings.stop_loss_threshold,
+            'DT': settings.drop_trigger_value,
+            'FSM_MODE': FSM_MODE,
+            'FSM_ENABLED': FSM_ENABLED
+        }
     )
 
     logger.info("Bot erfolgreich initialisiert", extra={'event_type': 'BOT_READY'})
@@ -970,6 +980,9 @@ def main():
         heartbeat_failures = 0
         max_heartbeat_failures = 3
 
+        # Initialize LiveHeartbeat display
+        live_heartbeat = LiveHeartbeat()
+
         while not shutdown_coordinator.is_shutdown_requested():
             # Wait for shutdown with timeout (responsive to signals)
             shutdown_signaled = shutdown_coordinator.wait_for_shutdown(timeout=1.0)
@@ -988,25 +1001,39 @@ def main():
                     # Gather extended heartbeat information
                     positions_count = len(engine.positions) if engine and hasattr(engine, 'positions') else 0
 
-                    # Get memory status if available
-                    memory_status = "unknown"
-                    try:
-                        from services.memory_manager import get_memory_manager
-                        memory_mgr = get_memory_manager()
-                        memory_info = memory_mgr.get_memory_status()
-                        memory_status = f"{memory_info['current_memory']['percent']:.1f}%"
-                    except Exception:
-                        pass
+                    # Get memory metrics
+                    rss_mb = mem.rss_mb()
+                    mem_pct = mem.percent()
+
+                    # Calculate uptime
+                    uptime_s = tmod.time() - start_time
+
+                    # Update LiveHeartbeat display
+                    heartbeat_stats = {
+                        "session_id": SESSION_ID,
+                        "time": ts(),
+                        "engine": engine_running,
+                        "mode": mode,
+                        "budget": f"{budget:.2f} USDT",
+                        "positions": positions_count,
+                        "coins": len(topcoins),
+                        "rss_mb": rss_mb,
+                        "mem_pct": mem_pct,
+                        "uptime_s": uptime_s
+                    }
+                    live_heartbeat.update(heartbeat_stats)
 
                     # Enhanced heartbeat log
                     logger.info(f"📊 HEARTBEAT - engine={engine_running}, mode={mode}, budget={budget:.2f} USDT, "
-                               f"positions={positions_count}, memory={memory_status}",
+                               f"positions={positions_count}, RSS={rss_mb:.1f}MB, Mem={mem_pct:.1f}%, Uptime={uptime_s:.0f}s",
                                extra={'event_type': 'HEARTBEAT',
                                       'engine_running': engine_running,
                                       'mode': mode,
                                       'budget': budget,
                                       'positions_count': positions_count,
-                                      'memory_status': memory_status})
+                                      'rss_mb': rss_mb,
+                                      'mem_pct': mem_pct,
+                                      'uptime_s': uptime_s})
 
                     # Phase 3: Log structured heartbeat event
                     try:
@@ -1018,7 +1045,9 @@ def main():
                             mode=mode,
                             budget=budget,
                             positions_count=positions_count,
-                            memory_status=memory_status
+                            rss_mb=rss_mb,
+                            mem_pct=mem_pct,
+                            uptime_s=uptime_s
                         )
                     except Exception as health_log_error:
                         # Don't fail heartbeat if logging fails
