@@ -32,7 +32,7 @@ except ImportError:
     def load_dotenv(*args, **kwargs):  # type: ignore[no-redef]
         """Fallback when dotenv is not installed"""
         pass
-    load_dotenv()  # Call dummy to satisfy same flow
+    load_dotenv()  # type: ignore[misc]  # Call dummy to satisfy same flow
 
 # Einheitlicher Config-Import + Alias
 import config as config_module  # config.py liegt im Projektwurzelordner
