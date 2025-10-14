@@ -26,8 +26,16 @@ from services.time_utils import (
     TF_MS
 )
 from services.md_audit import MarketDataAuditor
-from services.market_data.coalescing import get_coalescing_cache
-from services.market_data.rate_limit import get_rate_limiter
+
+# Import from market_data submodule
+import sys
+import os
+_market_data_dir = os.path.join(os.path.dirname(__file__), 'market_data')
+if _market_data_dir not in sys.path:
+    sys.path.insert(0, _market_data_dir)
+
+from coalescing import get_coalescing_cache  # type: ignore[import-not-found]
+from rate_limit import get_rate_limiter  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
