@@ -15,7 +15,14 @@
       "Bash(/opt/homebrew/bin/python3:*)",
       "Bash(./venv/bin/pip install:*)",
       "Bash(chmod:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(./venv/bin/python3:*)",
+      "Bash(pkill:*)",
+      "Bash(timeout 30 ./venv/bin/python3 main.py)",
+      "Bash(awk:*)",
+      "Bash(xargs -r kill -9)"
     ],
     "deny": [],
     "ask": []

@@ -676,12 +676,8 @@ def main():
             logger.info(f"Initializing HybridEngine in mode: {FSM_MODE}",
                        extra={'event_type': 'HYBRID_ENGINE_INIT', 'mode': FSM_MODE})
 
-            # Prepare engine_config for legacy engine (if needed by hybrid mode)
-            engine_config = {
-                'settings': settings,
-                'topcoins': topcoins,
-            }
-
+            # Hybrid engine - legacy engine will use default EngineConfig
+            # (passing dict causes TypeError: 'dict' object has no attribute)
             engine = HybridEngine(
                 exchange=exchange,
                 portfolio=portfolio,
@@ -689,7 +685,7 @@ def main():
                 telegram=None,  # Telegram wird später gesetzt
                 watchlist=engine_watchlist,
                 mode=FSM_MODE,
-                engine_config=engine_config
+                engine_config=None  # Let legacy engine use defaults
             )
             logger.info(f"HybridEngine created: {engine}",
                        extra={'event_type': 'HYBRID_ENGINE_CREATED', 'mode': FSM_MODE})
@@ -994,8 +990,8 @@ def main():
         heartbeat_failures = 0
         max_heartbeat_failures = 3
 
-        # Initialize LiveHeartbeat display
-        live_heartbeat = LiveHeartbeat()
+        # Initialize LiveHeartbeat display (DISABLED - causes double rendering)
+        # live_heartbeat = LiveHeartbeat()
 
         while not shutdown_coordinator.is_shutdown_requested():
             # Wait for shutdown with timeout (responsive to signals)
@@ -1027,20 +1023,20 @@ def main():
                     # Calculate uptime
                     uptime_s = tmod.time() - start_time
 
-                    # Update LiveHeartbeat display
-                    heartbeat_stats = {
-                        "session_id": SESSION_ID,
-                        "time": ts(),
-                        "engine": engine_running,
-                        "mode": mode,
-                        "budget": f"{budget:.2f} USDT",
-                        "positions": positions_count,
-                        "coins": len(topcoins),
-                        "rss_mb": rss_mb,
-                        "mem_pct": mem_pct,
-                        "uptime_s": uptime_s
-                    }
-                    live_heartbeat.update(heartbeat_stats)
+                    # Update LiveHeartbeat display (DISABLED - logs show heartbeat info)
+                    # heartbeat_stats = {
+                    #     "session_id": SESSION_ID,
+                    #     "time": ts(),
+                    #     "engine": engine_running,
+                    #     "mode": mode,
+                    #     "budget": f"{budget:.2f} USDT",
+                    #     "positions": positions_count,
+                    #     "coins": len(topcoins),
+                    #     "rss_mb": rss_mb,
+                    #     "mem_pct": mem_pct,
+                    #     "uptime_s": uptime_s
+                    # }
+                    # live_heartbeat.update(heartbeat_stats)
 
                     # Enhanced heartbeat log
                     logger.info(f"📊 HEARTBEAT - engine={engine_running}, mode={mode}, budget={budget:.2f} USDT, "

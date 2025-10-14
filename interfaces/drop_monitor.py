@@ -85,13 +85,21 @@ class DropMonitor:
         drops = []
 
         try:
-            # Get topcoins from engine
-            topcoins = getattr(self.engine, 'topcoins', {})
+            # Get topcoins from engine (handle HybridEngine)
+            topcoins = getattr(self.engine, 'topcoins', None)
+
+            # If HybridEngine, try to access legacy_engine.topcoins
+            if topcoins is None and hasattr(self.engine, 'legacy_engine'):
+                topcoins = getattr(self.engine.legacy_engine, 'topcoins', {})
+
             if not topcoins:
+                logger.debug(f"Drop monitor: No topcoins found (engine type: {type(self.engine).__name__})")
                 return []
 
             # Get portfolio for anchors (if applicable)
             portfolio = getattr(self.engine, 'portfolio', None)
+            if portfolio is None and hasattr(self.engine, 'legacy_engine'):
+                portfolio = getattr(self.engine.legacy_engine, 'portfolio', None)
 
             for symbol, price_history in topcoins.items():
                 try:
@@ -278,31 +286,45 @@ class DropMonitor:
         """
         Start live drop monitor (blocking).
 
-        This will take over the terminal with a live-updating table.
+        Outputs drop data as structured logs instead of Rich.Live for better compatibility.
         Call this in a background thread to avoid blocking main execution.
         """
-        if not RICH_AVAILABLE:
-            logger.warning("Rich library not available - drop monitor disabled")
-            return
-
-        if not self.console:
-            logger.warning("Console not initialized - drop monitor disabled")
-            return
-
         self.running = True
 
         try:
-            logger.info("Starting live drop monitor...")
+            logger.info("Starting live drop monitor (log-based mode)...")
 
-            with Live(
-                self._generate_table_content(),
-                console=self.console,
-                refresh_per_second=1.0 / self.refresh_seconds,
-                screen=False,  # Don't take over entire screen
-                auto_refresh=True
-            ) as live:
-                while self.running:
-                    time.sleep(1)
+            while self.running:
+                try:
+                    # Calculate drop data
+                    drop_data = self._calculate_drop_data()
+
+                    if drop_data:
+                        # Build summary message
+                        top_3 = drop_data[:3]
+                        summary_parts = []
+                        for i, drop in enumerate(top_3, 1):
+                            symbol = drop['symbol']
+                            drop_pct = drop['drop_pct']
+                            distance = drop['distance_to_trigger']
+                            status = drop['status']
+
+                            # Status emoji
+                            emoji = "🔵" if status == "TRIGGERED" else "🔴" if status == "CRITICAL" else "🟡" if status == "WARNING" else "🟢"
+                            summary_parts.append(f"{emoji} {symbol}: {drop_pct:.2f}% ({distance:+.2f}% to trigger)")
+
+                        summary = " | ".join(summary_parts)
+                        logger.info(f"📉 TOP DROPS: {summary}",
+                                   extra={'event_type': 'DROP_MONITOR_UPDATE', 'top_drops': drop_data[:self.top_n]})
+                    else:
+                        logger.debug("Drop monitor: No data available yet")
+
+                    # Sleep until next refresh
+                    time.sleep(self.refresh_seconds)
+
+                except Exception as e:
+                    logger.warning(f"Error in drop monitor loop: {e}")
+                    time.sleep(self.refresh_seconds)
 
         except KeyboardInterrupt:
             logger.info("Drop monitor interrupted by user")

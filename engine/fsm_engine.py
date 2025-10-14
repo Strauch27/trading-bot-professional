@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 # Core FSM - Table-Driven Architecture
 from core.fsm.state import CoinState
 from core.fsm.phases import Phase
-from core.fsm.fsm_machine import FSMMachine
+from core.fsm.fsm_machine import FSMachine
 from core.fsm.transitions import get_transition_table
 from core.fsm.fsm_events import FSMEvent, EventContext
 from core.fsm.state_data import StateData, OrderContext
@@ -82,7 +82,7 @@ class FSMTradingEngine:
         self._initialize_services()
 
         # Table-Driven FSM Components
-        self.fsm = FSMMachine(get_transition_table())
+        self.fsm = FSMachine()
         self.timeout_manager = TimeoutManager()
         self.partial_fill_handler = PartialFillHandler()
         self.snapshot_manager = SnapshotManager()

@@ -362,15 +362,15 @@ DEFAULT_SLIPPAGE_BPS = 15
 # 10. LOGGING & MONITORING
 # =============================================================================
 
-LOG_LEVEL = "DEBUG"
+LOG_LEVEL = "DEBUG"  # File logs: Vollständiges Debug-Logging
 LOG_SCHEMA_VERSION = 4
 ENABLE_PRETTY_TRADE_LOGS = True
 ENABLE_RICH_LOGGING = True  # Use Rich Console for colored structured logging
-CONSOLE_LEVEL = "DEBUG"
-SHOW_EVENT_TYPE_IN_CONSOLE = True
-SHOW_THREAD_NAME_IN_CONSOLE = True
+CONSOLE_LEVEL = "INFO"  # Terminal: Nur wichtige Meldungen (INFO, WARNING, ERROR)
+SHOW_EVENT_TYPE_IN_CONSOLE = False  # Weniger Clutter im Terminal
+SHOW_THREAD_NAME_IN_CONSOLE = False  # Weniger Clutter im Terminal
 ENABLE_PNL_MONITOR = True
-VERBOSE_GUARD_LOGS = True
+VERBOSE_GUARD_LOGS = False  # Guards nur in File-Logs, nicht im Terminal
 LOG_MAX_BYTES = 50_000_000
 LOG_BACKUP_COUNT = 5
 WRITE_SNAPSHOTS = True
@@ -418,8 +418,8 @@ ACTIVE_ORDER_SYNC_JITTER_S = 5
 # =============================================================================
 
 # Master Switch & Mode Selection
-FSM_ENABLED = False  # False = Legacy engine (default), True = Use FSM_MODE
-FSM_MODE = "legacy"  # Options: "legacy", "fsm", or "both" (parallel validation)
+FSM_ENABLED = True  # False = Legacy engine (default), True = Use FSM_MODE
+FSM_MODE = "both"  # Options: "legacy", "fsm", or "both" (parallel validation)
 
 # Phase Event Logging (JSONL audit trail for all phase transitions)
 PHASE_LOG_FILE = os.path.join(LOG_DIR, f"phase_events_{run_timestamp}.jsonl")
