@@ -9,14 +9,23 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from config import ORDER_UPDATE_MIN_INTERVAL_S, ORDER_UPDATE_MIN_DELTA_FILLED
 try:
-    from config import (ENABLE_PRETTY_TRADE_LOGS, USE_ANSI_COLORS, ICONS, 
-                       PRICE_DECIMALS, QTY_DECIMALS, PNL_DECIMALS, 
-                       SHOW_TIF, SHOW_MAKER, SHOW_DURATION_LONG)
+    from config import (ENABLE_PRETTY_TRADE_LOGS, USE_ANSI_COLORS, ICONS,
+                       PRICE_DECIMALS, QTY_DECIMALS, PNL_DECIMALS,
+                       SHOW_TIF, SHOW_MAKER, SHOW_DURATION_LONG, ENABLE_RICH_LOGGING)
 except Exception:
     ENABLE_PRETTY_TRADE_LOGS, USE_ANSI_COLORS = True, True
     ICONS = {}
     PRICE_DECIMALS, QTY_DECIMALS, PNL_DECIMALS = 6, 6, 2
     SHOW_TIF, SHOW_MAKER, SHOW_DURATION_LONG = True, True, True
+    ENABLE_RICH_LOGGING = False
+
+# Rich Console Integration (optional)
+try:
+    from ui.console_ui import log_info, log_success, log_warning, log_error, is_rich_available
+    RICH_AVAILABLE = is_rich_available()
+except ImportError:
+    RICH_AVAILABLE = False
+    log_info = log_success = log_warning = log_error = None
 
 # =============================================================================
 # ANSI COLOR HELPERS
@@ -619,7 +628,7 @@ def log_event(event_type: str, *,
               context: dict = None,
               **kwargs):
     """
-    Log structured event - CRASH-SAFE version.
+    Log structured event - CRASH-SAFE version with optional Rich Console output.
     NEVER allows logger failures to crash the application.
     """
     try:
@@ -636,9 +645,18 @@ def log_event(event_type: str, *,
         if kwargs:
             payload["context"].update(kwargs)
 
+        # Write to JSON event log
         logger = logging.getLogger("events")
         log_level = getattr(logging, level.upper(), logging.INFO)
         logger.log(log_level, json.dumps(payload, ensure_ascii=False, default=_json_default))
+
+        # Rich Console Output (if enabled)
+        if ENABLE_RICH_LOGGING and RICH_AVAILABLE:
+            try:
+                _rich_console_output(event_type, level, symbol, message, context or {})
+            except Exception:
+                # Rich output failure should not crash - continue silently
+                pass
 
     except Exception as e:
         # CRITICAL: Logger must NEVER crash the application
@@ -660,6 +678,44 @@ def log_event(event_type: str, *,
         except Exception:
             # Ultimate fallback - continue execution without logging
             pass
+
+
+def _rich_console_output(event_type: str, level: str, symbol: str, message: str, context: dict):
+    """
+    Output log event to Rich Console with formatting.
+
+    Args:
+        event_type: Event type (e.g., "BUY_SKIP", "EXIT_FILLED")
+        level: Log level (INFO, WARNING, ERROR, SUCCESS)
+        symbol: Trading symbol
+        message: Log message
+        context: Additional context dict
+    """
+    # Build formatted message
+    msg_parts = [event_type]
+    if symbol:
+        msg_parts.append(f"[{symbol}]")
+    if message:
+        msg_parts.append(message)
+
+    full_message = " ".join(msg_parts)
+
+    # Map log level to Rich function
+    level_upper = level.upper()
+
+    # Determine which Rich function to use
+    if level_upper in ("ERROR", "CRITICAL"):
+        if log_error:
+            log_error(full_message, details=context)
+    elif level_upper == "WARNING":
+        if log_warning:
+            log_warning(full_message, details=context)
+    elif level_upper == "SUCCESS" or event_type in ("BUY_FILLED", "SELL_FILLED", "EXIT_FILLED"):
+        if log_success:
+            log_success(full_message, details=context)
+    else:  # INFO, DEBUG, etc.
+        if log_info:
+            log_info(full_message, details=context)
 
 def log_audit_event(event_type: str, details: dict, level: str = "INFO"):
     """Log audit event with immutable trail - CRASH-SAFE version"""

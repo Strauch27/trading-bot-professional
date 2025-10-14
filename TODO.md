@@ -1,6 +1,6 @@
 # Trading Bot - Offene TODOs
 
-**Stand**: 2025-10-13
+**Stand**: 2025-10-14
 **Session**: feat/order-flow-hardening
 
 ---
@@ -11,7 +11,7 @@
 |---------|--------|-----------|
 | **MEMORY MANAGEMENT** | ✅ 100% Complete | - |
 | **ORDER OPTIMIERUNG** | ✅ 95% Complete | NIEDRIG |
-| **TERMINAL OPTIMIERUNG** | ⚠️ 33% Complete | MITTEL |
+| **TERMINAL OPTIMIERUNG** | ✅ 100% Complete | - |
 
 ---
 
@@ -378,25 +378,24 @@ class OrderFSM:
 - ✅ Phase 11: Unit Tests (42 tests)
 - ✅ Phase 12: Feature Flags
 
-### Terminal Optimierung: ⚠️ 33%
+### Terminal Optimierung: ✅ 100%
 - ✅ Rich Console Basis (ui/console_ui.py)
-- ❌ Live Monitors (LiveHeartbeat, DropMonitor, PortfolioMonitor)
-- ❌ Rich Logging Integration (log_event → Rich)
+- ✅ Live Monitors (LiveHeartbeat, DropMonitor, PortfolioMonitor)
+- ✅ Rich Logging Integration (log_event → Rich)
+- ✅ Feature Flags (ENABLE_RICH_LOGGING, ENABLE_LIVE_MONITORS, etc.)
+- ✅ Validation Tests (tests/test_terminal_ui.py, tests/validate_terminal_ui.py)
 
 ---
 
 ## 🎯 Nächste Schritte (Empfohlen)
 
-### Option A: Terminal UI Vervollständigen (3-4h)
-1. **Live Monitors implementieren** (3h)
-   - LiveHeartbeat Panel
-   - DropMonitorView
-   - PortfolioMonitorView
-2. **Rich Logging Integration** (1h)
-   - Bridge log_event() → Rich Console
-   - Feature Flag + Tests
+### ✅ Option A: Terminal UI Vervollständigen - ABGESCHLOSSEN
+- ✅ Live Monitors implementiert (LiveHeartbeat, DropMonitorView, PortfolioMonitorView, LiveDashboard)
+- ✅ Rich Logging Integration abgeschlossen
+- ✅ Feature Flags hinzugefügt
+- ✅ Validationstests erstellt
 
-### Option B: Testen & Deployment (2-3h)
+### Option B: Testen & Deployment (2-3h) - EMPFOHLEN
 1. **Integration Tests schreiben**
    - End-to-End Buy/Sell mit allen Guards
    - Coalescing unter Last

@@ -365,6 +365,7 @@ DEFAULT_SLIPPAGE_BPS = 15
 LOG_LEVEL = "DEBUG"
 LOG_SCHEMA_VERSION = 4
 ENABLE_PRETTY_TRADE_LOGS = True
+ENABLE_RICH_LOGGING = True  # Use Rich Console for colored structured logging
 CONSOLE_LEVEL = "DEBUG"
 SHOW_EVENT_TYPE_IN_CONSOLE = True
 SHOW_THREAD_NAME_IN_CONSOLE = True
@@ -559,6 +560,12 @@ TERMINAL_PRESETS = {
 for _k, _v in TERMINAL_PRESETS.get(TERMINAL_PRESET, {}).items():
     globals()[_k] = _v
 STATUS_LINE_TICK_S = 30
+
+# Live Monitors (Rich Console Live Displays)
+ENABLE_LIVE_MONITORS = True  # Enable Rich Live Monitors (Heartbeat, Drop, Portfolio)
+ENABLE_LIVE_HEARTBEAT = True  # Show live system + API + fill metrics panel
+ENABLE_LIVE_DASHBOARD = True  # Combined dashboard with all monitors
+LIVE_MONITOR_REFRESH_S = 2.0  # Update interval in seconds (2.0 = 0.5 Hz)
 
 # Live Drop Monitor (Terminal UI)
 ENABLE_LIVE_DROP_MONITOR = True  # Live-updating Terminal-Table mit Top Drops

@@ -65,25 +65,32 @@ def _fmt_duration(seconds: float) -> str:
 
 class LiveHeartbeat:
     """
-    Live-updating heartbeat display showing system status.
+    Live-updating heartbeat display showing system status and metrics.
 
     Updates continuously with:
-    - Session-ID
-    - Engine status
-    - Trading mode
-    - Budget and positions
-    - Memory usage
-    - Uptime
+    - Session-ID, Engine status, Trading mode
+    - Budget, positions, memory, uptime
+    - API Metrics (latency P50/P95/P99, cache hit rate, throttle rate)
+    - Fill Metrics (fill rate, limit/market success)
+    - Exchange connection status
     """
 
-    def __init__(self):
-        """Initialize LiveHeartbeat display."""
+    def __init__(self, market_data_provider=None, fill_tracker=None):
+        """
+        Initialize LiveHeartbeat display.
+
+        Args:
+            market_data_provider: MarketDataProvider instance for API metrics
+            fill_tracker: FillTracker instance for fill metrics
+        """
         self._live = None
         self._last_stats = {}
+        self.md_provider = market_data_provider
+        self.fill_tracker = fill_tracker
 
-    def _render(self, stats: Dict[str, Any]) -> Table:
+    def _render(self, stats: Dict[str, Any]) -> Panel:
         """
-        Render heartbeat table from stats.
+        Render heartbeat panel with system and API metrics.
 
         Args:
             stats: Statistics dict with keys:
@@ -99,26 +106,25 @@ class LiveHeartbeat:
                 - uptime_s: Uptime in seconds
 
         Returns:
-            Rich Table object
+            Rich Panel with multiple tables
         """
-        table = Table(
-            title="📊 Heartbeat",
+        # Table 1: System Status
+        system_table = Table(
+            title="System Status",
             show_header=True,
-            header_style="bold cyan on blue",
+            header_style="bold cyan",
             border_style="blue",
             expand=True
         )
 
-        # Add columns
-        columns = [
+        system_columns = [
             "Session-ID", "Time", "Engine", "Mode", "Budget",
             "Positions", "#Coins", "RSS MB", "Mem %", "Uptime"
         ]
-        for col in columns:
-            table.add_column(col, justify="center")
+        for col in system_columns:
+            system_table.add_column(col, justify="center")
 
-        # Add data row
-        table.add_row(
+        system_table.add_row(
             stats.get("session_id", "—"),
             stats.get("time", "—"),
             str(stats.get("engine", False)),
@@ -131,7 +137,143 @@ class LiveHeartbeat:
             _fmt_duration(stats.get("uptime_s", 0))
         )
 
-        return table
+        # Table 2: API Metrics (if MarketDataProvider available)
+        metrics_table = None
+        if self.md_provider:
+            try:
+                md_stats = self.md_provider.get_statistics()
+
+                metrics_table = Table(
+                    title="API Metrics",
+                    show_header=True,
+                    header_style="bold yellow",
+                    border_style="yellow",
+                    expand=True
+                )
+
+                # Columns for API metrics
+                metric_columns = [
+                    "Ticker Req", "Cache Hit%", "Stale%", "OHLCV Req",
+                    "Coalesce%", "Throttled%", "Errors"
+                ]
+                for col in metric_columns:
+                    metrics_table.add_column(col, justify="center")
+
+                # Extract statistics
+                provider_stats = md_stats.get("provider", {})
+                cache_stats = md_stats.get("ticker_cache", {})
+                coalesce_stats = md_stats.get("coalescing", {})
+                rate_limit_stats = md_stats.get("rate_limiting", {})
+
+                ticker_requests = provider_stats.get("ticker_requests", 0)
+                cache_hits = provider_stats.get("ticker_cache_hits", 0)
+                stale_hits = provider_stats.get("ticker_stale_hits", 0)
+                ohlcv_requests = provider_stats.get("ohlcv_requests", 0)
+                errors = provider_stats.get("errors", 0)
+
+                # Calculate percentages
+                cache_hit_pct = (cache_hits / ticker_requests * 100) if ticker_requests > 0 else 0
+                stale_pct = (stale_hits / ticker_requests * 100) if ticker_requests > 0 else 0
+                coalesce_rate = coalesce_stats.get("coalesce_rate", 0) * 100 if coalesce_stats else 0
+
+                # Throttle rate from rate limiter
+                throttle_pct = 0
+                if rate_limit_stats:
+                    public_stats = rate_limit_stats.get("public", {})
+                    throttle_pct = public_stats.get("throttle_rate", 0) * 100
+
+                # Color coding based on values
+                def color_value(value, good_threshold, warn_threshold):
+                    if value <= good_threshold:
+                        return f"[green]{value:.1f}[/green]"
+                    elif value <= warn_threshold:
+                        return f"[yellow]{value:.1f}[/yellow]"
+                    else:
+                        return f"[red]{value:.1f}[/red]"
+
+                metrics_table.add_row(
+                    str(ticker_requests),
+                    color_value(cache_hit_pct, 70, 50) + "%",
+                    color_value(stale_pct, 10, 30) + "%",
+                    str(ohlcv_requests),
+                    color_value(coalesce_rate, 50, 20) + "%",
+                    color_value(throttle_pct, 5, 20) + "%",
+                    f"[red]{errors}[/red]" if errors > 0 else "0"
+                )
+
+            except Exception as e:
+                # If metrics retrieval fails, skip metrics table
+                metrics_table = None
+
+        # Table 3: Fill Metrics (if FillTracker available)
+        fill_table = None
+        if self.fill_tracker:
+            try:
+                fill_stats = self.fill_tracker.get_statistics()
+
+                fill_table = Table(
+                    title="Fill Metrics",
+                    show_header=True,
+                    header_style="bold green",
+                    border_style="green",
+                    expand=True
+                )
+
+                fill_columns = [
+                    "Total Orders", "Full Fill%", "Partial%", "No Fill%",
+                    "Avg Latency", "P95 Latency", "Avg Slippage"
+                ]
+                for col in fill_columns:
+                    fill_table.add_column(col, justify="center")
+
+                total_orders = fill_stats.get("total_orders", 0)
+                fill_rates = fill_stats.get("fill_rates", {})
+                latency = fill_stats.get("latency", {})
+                slippage = fill_stats.get("slippage", {})
+
+                full_fill_pct = fill_rates.get("full_fill", 0) * 100
+                partial_pct = fill_rates.get("partial_fill", 0) * 100
+                no_fill_pct = fill_rates.get("no_fill", 0) * 100
+                avg_latency_ms = latency.get("mean_ms", 0)
+                p95_latency_ms = latency.get("p95_ms", 0)
+                avg_slippage_bps = slippage.get("mean_bps", 0)
+
+                # Color coding
+                def color_latency(ms):
+                    if ms <= 50:
+                        return f"[green]{ms:.0f}ms[/green]"
+                    elif ms <= 200:
+                        return f"[yellow]{ms:.0f}ms[/yellow]"
+                    else:
+                        return f"[red]{ms:.0f}ms[/red]"
+
+                fill_table.add_row(
+                    str(total_orders),
+                    f"[green]{full_fill_pct:.1f}%[/green]",
+                    f"[yellow]{partial_pct:.1f}%[/yellow]" if partial_pct > 0 else "0%",
+                    f"[red]{no_fill_pct:.1f}%[/red]" if no_fill_pct > 0 else "0%",
+                    color_latency(avg_latency_ms),
+                    color_latency(p95_latency_ms),
+                    f"{avg_slippage_bps:+.1f} bps"
+                )
+
+            except Exception as e:
+                # If fill metrics retrieval fails, skip fill table
+                fill_table = None
+
+        # Combine tables into panel
+        tables = [system_table]
+        if metrics_table:
+            tables.append(metrics_table)
+        if fill_table:
+            tables.append(fill_table)
+
+        return Panel(
+            Group(*tables),
+            title="📊 Live Heartbeat",
+            border_style="cyan",
+            expand=True
+        )
 
     def update(self, stats: Dict[str, Any]):
         """
@@ -340,3 +482,148 @@ class PortfolioMonitorView:
             border_style="green",
             expand=True
         )
+
+
+# ============================================================================
+# Combined Live Dashboard
+# ============================================================================
+
+class LiveDashboard:
+    """
+    Combined live dashboard showing all monitors.
+
+    Displays:
+    - LiveHeartbeat (system + API + fill metrics)
+    - DropMonitorView (top drops)
+    - PortfolioMonitorView (positions)
+
+    Usage:
+        dashboard = LiveDashboard(
+            market_data_provider=md_provider,
+            fill_tracker=tracker,
+            portfolio=portfolio
+        )
+
+        # In main loop:
+        dashboard.update(
+            system_stats={...},
+            drop_rows=[...],
+            portfolio_rows=[...]
+        )
+
+        # Stop when done:
+        dashboard.stop()
+    """
+
+    def __init__(
+        self,
+        market_data_provider=None,
+        fill_tracker=None,
+        portfolio=None
+    ):
+        """
+        Initialize live dashboard.
+
+        Args:
+            market_data_provider: MarketDataProvider instance
+            fill_tracker: FillTracker instance
+            portfolio: PortfolioManager instance
+        """
+        self.heartbeat = LiveHeartbeat(market_data_provider, fill_tracker)
+        self.drop_view = DropMonitorView()
+        self.portfolio_view = PortfolioMonitorView()
+        self.portfolio = portfolio
+        self._live = None
+
+    def _render_all(
+        self,
+        system_stats: Dict[str, Any],
+        drop_rows: List[Dict[str, Any]] = None,
+        portfolio_data: Dict[str, Any] = None
+    ) -> Group:
+        """
+        Render all monitors into a single group.
+
+        Args:
+            system_stats: System statistics for heartbeat
+            drop_rows: Drop monitor rows
+            portfolio_data: Portfolio data dict with keys:
+                - slots_used, slots_total, rows, free_slots,
+                  invested, pnl_total, realized_today, ts
+
+        Returns:
+            Rich Group with all panels
+        """
+        panels = []
+
+        # Heartbeat panel
+        try:
+            heartbeat_panel = self.heartbeat._render(system_stats)
+            panels.append(heartbeat_panel)
+        except Exception as e:
+            pass  # Skip on error
+
+        # Drop monitor panel
+        if drop_rows:
+            try:
+                drop_panel = self.drop_view.render(drop_rows)
+                if drop_panel:
+                    panels.append(drop_panel)
+            except Exception as e:
+                pass  # Skip on error
+
+        # Portfolio monitor panel
+        if portfolio_data:
+            try:
+                portfolio_panel = self.portfolio_view.render(
+                    slots_used=portfolio_data.get("slots_used", 0),
+                    slots_total=portfolio_data.get("slots_total", 10),
+                    rows=portfolio_data.get("rows", []),
+                    free_slots=portfolio_data.get("free_slots", 10),
+                    invested=portfolio_data.get("invested", 0),
+                    pnl_total=portfolio_data.get("pnl_total", 0.0),
+                    realized_today=portfolio_data.get("realized_today", 0.0),
+                    ts=portfolio_data.get("ts", "")
+                )
+                if portfolio_panel:
+                    panels.append(portfolio_panel)
+            except Exception as e:
+                pass  # Skip on error
+
+        return Group(*panels) if panels else Group()
+
+    def update(
+        self,
+        system_stats: Dict[str, Any],
+        drop_rows: List[Dict[str, Any]] = None,
+        portfolio_data: Dict[str, Any] = None
+    ):
+        """
+        Update dashboard with new data.
+
+        Args:
+            system_stats: System statistics
+            drop_rows: Drop monitor rows
+            portfolio_data: Portfolio data
+        """
+        if not RICH_AVAILABLE:
+            return
+
+        rendered = self._render_all(system_stats, drop_rows, portfolio_data)
+
+        if self._live is None:
+            from rich.console import Console
+            self._live = Live(
+                rendered,
+                refresh_per_second=0.5,
+                console=Console()
+            )
+            self._live.start()
+        else:
+            self._live.update(rendered)
+
+    def stop(self):
+        """Stop live dashboard."""
+        if self._live:
+            self._live.stop()
+            self._live = None
