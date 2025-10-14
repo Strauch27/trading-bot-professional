@@ -116,9 +116,13 @@ class DropMonitor:
 
                     if self.use_drop_anchor and portfolio:
                         # Mode 4: Use persistent anchor
-                        anchor_data = portfolio.get_drop_anchor(symbol)
-                        if anchor_data:
-                            peak_price = anchor_data.get('peak_price')
+                        anchor_val = portfolio.get_drop_anchor(symbol)
+                        # get_drop_anchor returns float or None
+                        if isinstance(anchor_val, (int, float)) and anchor_val > 0:
+                            peak_price = float(anchor_val)
+                        elif isinstance(anchor_val, dict):
+                            # backward-compat: accept {'price': x} or {'peak_price': x}
+                            peak_price = anchor_val.get('price') or anchor_val.get('peak_price')
 
                     # Fallback: Use recent peak from price history
                     if not peak_price and hasattr(price_history, '__iter__'):
