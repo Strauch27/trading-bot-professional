@@ -25,19 +25,14 @@ from collections import deque
 from datetime import datetime as dt_datetime, timezone
 from pathlib import Path
 try:
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv()  # Load .env early for Telegram
-except ImportError:
-    # Fallback wenn dotenv nicht installiert
-    pass
-
-# Define load_dotenv function for later use
-try:
     from dotenv import load_dotenv
+    load_dotenv()  # Load .env early for Telegram
 except ImportError:
-    def load_dotenv(*args, **kwargs) -> None:  # type: ignore[misc]
+    # Fallback wenn dotenv nicht installiert - definiere Dummy-Funktion
+    def load_dotenv(*args, **kwargs):  # type: ignore[no-redef]
         """Fallback when dotenv is not installed"""
         pass
+    load_dotenv()  # Call dummy to satisfy same flow
 
 # Einheitlicher Config-Import + Alias
 import config as config_module  # config.py liegt im Projektwurzelordner
