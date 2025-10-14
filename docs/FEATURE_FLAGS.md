@@ -240,6 +240,79 @@ This document provides a comprehensive reference for all feature flags in the tr
 
 ---
 
+## 🔄 Order FSM (Finite State Machine)
+
+### ENABLE_ORDER_FSM
+**Location**: `core/fsm/order_fsm.py`
+**Type**: Boolean (Implicit)
+**Default**: `False` (Optional Feature)
+**Description**: Explicit state machine for order lifecycle tracking.
+
+**Purpose**: Optional enhancement for explicit order state validation and history tracking.
+
+**Impact**:
+- ✅ Explicit state validation (PENDING → PARTIAL → FILLED/CANCELED/EXPIRED)
+- ✅ Transition guards prevent invalid state changes
+- ✅ Complete state history audit trail
+- ✅ Weighted average price tracking across partial fills
+- ✅ Terminal state enforcement (cannot transition once filled/canceled/expired)
+- ⚠️ Small memory overhead (~1KB per order)
+
+**States**:
+```
+PENDING → PARTIAL → FILLED (terminal)
+        ↓         ↓
+        CANCELED  EXPIRED (terminal)
+        ↓
+        FAILED (terminal)
+```
+
+**Features**:
+- **State Validation**: Prevents invalid transitions (e.g., FILLED → PARTIAL)
+- **Fill Tracking**: Automatic weighted average price calculation
+- **Auto-Transitions**: Automatically transitions to PARTIAL or FILLED on fills
+- **State History**: Complete audit trail of all state transitions
+- **Serialization**: Can be persisted to disk for crash recovery
+
+**Usage** (Optional):
+```python
+from core.fsm.order_fsm import get_order_fsm_manager
+
+# Create order FSM
+manager = get_order_fsm_manager()
+fsm = manager.create_order(
+    order_id="order_123",
+    symbol="BTC/USDT",
+    side="buy",
+    total_qty=0.1
+)
+
+# Record fills
+fsm.record_fill(fill_qty=0.05, fill_price=50000.0, auto_transition=True)
+# State: PENDING → PARTIAL
+
+fsm.record_fill(fill_qty=0.05, fill_price=50100.0, auto_transition=True)
+# State: PARTIAL → FILLED
+
+# Query state
+assert fsm.is_filled()
+assert fsm.fill_rate == 1.0
+print(fsm.get_statistics())
+```
+
+**Integration Points**:
+- Can be integrated with `COIDManager` for enhanced state tracking
+- Can be used by `OrderService` to validate state transitions
+- Can be used by `FillTelemetry` to track fill history
+
+**Testing**: 36 unit tests covering all state transitions and edge cases
+
+**Note**: This is an **optional** enhancement. The current COID-based order tracking is sufficient for production use. Order FSM provides additional benefits for systems requiring explicit state validation and detailed audit trails.
+
+**Rollback**: Simply don't use the FSM Manager - no impact on existing functionality
+
+---
+
 ## 🎨 Terminal UI
 
 ### ENABLE_RICH_LOGGING
