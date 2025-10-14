@@ -35,7 +35,8 @@ except ImportError:
 try:
     from dotenv import load_dotenv
 except ImportError:
-    def load_dotenv() -> None:  # type: ignore[misc]
+    def load_dotenv(*args, **kwargs) -> None:  # type: ignore[misc]
+        """Fallback when dotenv is not installed"""
         pass
 
 # Einheitlicher Config-Import + Alias
