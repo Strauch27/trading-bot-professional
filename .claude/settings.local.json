@@ -9,7 +9,13 @@
       "Bash(git checkout:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nfeat: Market Data Enhancements (Option A)\n\n- Add soft-TTL cache with HIT/STALE/MISS status\n- Add candle alignment and partial candle guard\n- Add JSONL audit logging for market data operations\n- Integrate enhancements into MarketDataProvider\n- Add comprehensive test suite (42 tests, all passing)\n\nPerformance improvements:\n- Ticker fetch latency: 10-50ms → <1ms (10-50x faster)\n- Automatic partial candle filtering prevents false signals\n\nComponents:\n- services/time_utils.py: Candle alignment and validation\n- services/cache_ttl.py: Soft-TTL cache with request coalescing\n- services/md_audit.py: JSONL audit logging\n- services/market_data.py: Enhanced provider with all features\n- tests/: Comprehensive test suite\n- docs/MARKET_DATA_ENHANCEMENTS.md: Full documentation\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(/opt/homebrew/bin/python3 -m pip install:*)",
+      "Bash(/opt/homebrew/bin/python3:*)",
+      "Bash(./venv/bin/pip install:*)",
+      "Bash(chmod:*)",
+      "mcp__ide__getDiagnostics"
     ],
     "deny": [],
     "ask": []

@@ -22,14 +22,20 @@ import pathlib
 import faulthandler
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime as dt_datetime, timezone
 from pathlib import Path
 try:
-    from dotenv import load_dotenv
-    load_dotenv()  # Load .env early for Telegram
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # Load .env early for Telegram
 except ImportError:
     # Fallback wenn dotenv nicht installiert
-    def load_dotenv():
+    pass
+
+# Define load_dotenv function for later use
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv() -> None:  # type: ignore[misc]
         pass
 
 # Einheitlicher Config-Import + Alias
@@ -140,7 +146,7 @@ def setup_exchange():
         'secret': api_secret,
         'enableRateLimit': True,
         'timeout': 30000,  # 30 Sekunden Timeout
-        'session': session,  # Verwende gemeinsame Session
+        'session': session,  # type: ignore[arg-type]
         'options': {
             'adjustForTimeDifference': True,
             'recvWindow': 30000,  # 30s Toleranz (erhöht von 10s)
@@ -156,7 +162,8 @@ def setup_exchange():
     # Robuster Zeit-Sync und Market-Loading
     try:
         # robustere Defaults
-        exchange.options['recvWindow'] = 30000       # 30s Toleranz
+        if hasattr(exchange, 'options') and isinstance(exchange.options, dict):
+            exchange.options['recvWindow'] = 30000  # type: ignore[index]
         # expliziter Zeitabgleich gegen MEXC
         _ = exchange.load_time_difference()          # ms-Diff berechnen & intern kompensieren
     except Exception as e:
@@ -266,7 +273,7 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
             portfolio.refresh_budget()
 
             # Check for Ctrl+C während des Wartens
-            if 'engine' in globals() and not engine.running:
+            if 'engine' in globals() and hasattr(engine, 'running') and not engine.running:  # type: ignore[attr-defined]
                 return False
     
 
@@ -352,7 +359,7 @@ def main():
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
 
     # Display Rich Banner with Session Info
-    START_ISO = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    START_ISO = dt_datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     MODE_FOR_BANNER = "LIVE" if GLOBAL_TRADING else "OBSERVE"
     banner(
         app_name="Trading Bot",
@@ -488,10 +495,11 @@ def main():
                     # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
                         from services.market_data import fetch_ticker_cached
-                        SYMBOLS = config_module.SYMBOLS
+                        # Verwende topcoins_keys statt nicht-existierendem SYMBOLS
+                        symbols_list = getattr(config_module, 'topcoins_keys', [])
 
-                        # Nur aktive Symbole, max 50 pro Sweep-Zyklus
-                        symbols = list(SYMBOLS[:50]) if hasattr(config_module, 'SYMBOLS') else []
+                        # Nur aktive Symbole, max 50 pro Sweep-Zyklus, konvertiere zu "BTC/USDT" Format
+                        symbols = [s.replace("USDT", "/USDT") for s in symbols_list[:50]] if symbols_list else []
                         prices = {}
 
                         for symbol in symbols:
@@ -499,7 +507,7 @@ def main():
                                 # fetch_ticker_cached() statt frischem HTTP
                                 ticker = fetch_ticker_cached(exchange, symbol)
                                 if ticker and ticker.get('last'):
-                                    prices[symbol] = float(ticker.get('last'))
+                                    prices[symbol] = float(ticker.get('last'))  # type: ignore[arg-type]
                                 # Drosseln: 200ms zwischen Calls (shutdown-aware)
                                 if get_shutdown_coordinator().wait_for_shutdown(timeout=0.2):
                                     logger.debug("Shutdown requested during dust sweep price fetch")
@@ -571,8 +579,7 @@ def main():
     # Drop-Anchors initialisieren wenn BACKFILL_MINUTES=0 und Mode 4
     if BACKFILL_MINUTES == 0 and DROP_TRIGGER_MODE == 4 and USE_DROP_ANCHOR:
         # Setze initiale Anchors für alle Coins ohne persistente Anchors
-        from datetime import datetime, timezone
-        current_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        current_ts = dt_datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         initialized_anchors = 0
         
         for symbol, price in preise.items():
@@ -612,29 +619,36 @@ def main():
     # Trading Engine initialisieren und starten
     # Settings fuer Dependency Injection (robust)
     try:
-        Settings = config_module.Settings
-    except ImportError:
+        Settings = config_module.Settings  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
         _cfg = config_module
-        Settings = getattr(_cfg, "C", None)
+        Settings = getattr(_cfg, "C", None)  # type: ignore[assignment]
         if Settings is None:
             # Fallback: Klasse Settings aus Modul-Konstanten bauen
-            class Settings:
+            class Settings:  # type: ignore[no-redef]
                 pass
             for _k, _v in _cfg.__dict__.items():
                 if isinstance(_k, str) and _k.isupper():
                     setattr(Settings, _k, _v)
             del _k, _v, _cfg
-    
+
     # Settings instanziieren (ist jetzt immer eine Klasse)
-    settings = Settings()
-    
+    settings = Settings()  # type: ignore[misc]
+
+    # Zugriff auf Settings-Attribute mit Fallback
+    tp_threshold = getattr(settings, 'take_profit_threshold', getattr(settings, 'TAKE_PROFIT_THRESHOLD', 1.005))
+    sl_threshold = getattr(settings, 'stop_loss_threshold', getattr(settings, 'STOP_LOSS_THRESHOLD', 0.990))
+    dt_value = getattr(settings, 'drop_trigger_value', getattr(settings, 'DROP_TRIGGER_VALUE', 0.980))
+    dt_mode = getattr(settings, 'drop_trigger_mode', getattr(settings, 'DROP_TRIGGER_MODE', 4))
+    dt_lookback = getattr(settings, 'drop_trigger_lookback_min', getattr(settings, 'DROP_TRIGGER_LOOKBACK_MIN', 2))
+
     logger.info(
         f"Settings initialisiert: "
-        f"TP={settings.take_profit_threshold:.3f}, "
-        f"SL={settings.stop_loss_threshold:.3f}, "
-        f"DT={settings.drop_trigger_value:.3f} ({-(1.0 - settings.drop_trigger_value)*100:.1f}%), "
-        f"Mode={settings.drop_trigger_mode}, LB={settings.drop_trigger_lookback_min}m",
-        extra={'event_type': 'SETTINGS_INIT', 'settings': settings.to_dict()}
+        f"TP={tp_threshold:.3f}, "
+        f"SL={sl_threshold:.3f}, "
+        f"DT={dt_value:.3f} ({-(1.0 - dt_value)*100:.1f}%), "
+        f"Mode={dt_mode}, LB={dt_lookback}m",
+        extra={'event_type': 'SETTINGS_INIT', 'settings': settings.to_dict() if hasattr(settings, 'to_dict') else {}}  # type: ignore[attr-defined]
     )
     
     # Create simple orderbookprovider (mock implementation)
@@ -821,11 +835,15 @@ def main():
                     try:
                         logger.info("Starting Rich status table...",
                                    extra={'event_type': 'RICH_TABLE_STARTING'})
-                        run_live_table(
-                            get_states_func=lambda: engine.get_states(),
-                            refresh_hz=RICH_TABLE_REFRESH_HZ,
-                            show_idle=RICH_TABLE_SHOW_IDLE
-                        )
+                        # Check if engine has get_states method
+                        if hasattr(engine, 'get_states'):
+                            run_live_table(
+                                get_states_func=lambda: engine.get_states(),  # type: ignore[attr-defined]
+                                refresh_hz=RICH_TABLE_REFRESH_HZ,
+                                show_idle=RICH_TABLE_SHOW_IDLE
+                            )
+                        else:
+                            logger.warning("Engine does not have get_states method, skipping Rich status table")
                     except Exception as e:
                         logger.warning(f"Rich status table error: {e}",
                                       extra={'event_type': 'RICH_TABLE_ERROR', 'error': str(e)})
@@ -892,9 +910,9 @@ def main():
         coins=len(topcoins),
         budget_usdt=start_budget,
         cfg={
-            'TP': settings.take_profit_threshold,
-            'SL': settings.stop_loss_threshold,
-            'DT': settings.drop_trigger_value,
+            'TP': tp_threshold,
+            'SL': sl_threshold,
+            'DT': dt_value,
             'FSM_MODE': FSM_MODE,
             'FSM_ENABLED': FSM_ENABLED
         }
@@ -999,7 +1017,12 @@ def main():
                     engine_running = engine.is_running() if engine else False
 
                     # Gather extended heartbeat information
-                    positions_count = len(engine.positions) if engine and hasattr(engine, 'positions') else 0
+                    positions_count = 0
+                    if engine:
+                        if hasattr(engine, 'positions'):
+                            positions_count = len(engine.positions)  # type: ignore[attr-defined]
+                        elif hasattr(engine, 'portfolio') and hasattr(engine.portfolio, 'held_assets'):
+                            positions_count = len(engine.portfolio.held_assets)
 
                     # Get memory metrics
                     rss_mb = mem.rss_mb()
