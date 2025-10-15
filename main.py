@@ -811,8 +811,8 @@ def main():
                 logger.warning(f"Failed to start Prometheus server: {e}",
                               extra={'event_type': 'PROMETHEUS_START_FAILED', 'error': str(e)})
 
-        # Rich Terminal Status Table
-        ENABLE_RICH_TABLE = getattr(config_module, 'ENABLE_RICH_TABLE', False)
+        # Rich Terminal Status Table (DISABLED - replaced by Live Dashboard)
+        ENABLE_RICH_TABLE = False  # Deactivated - use ENABLE_LIVE_DASHBOARD instead
 
         if ENABLE_RICH_TABLE:
             try:
@@ -854,8 +854,8 @@ def main():
                 logger.warning(f"Failed to start Rich status table: {e}",
                               extra={'event_type': 'RICH_TABLE_START_FAILED', 'error': str(e)})
 
-    # --- Live Drop Monitor (Terminal UI) ---
-    ENABLE_LIVE_DROP_MONITOR = getattr(config_module, 'ENABLE_LIVE_DROP_MONITOR', False)
+    # --- Live Drop Monitor (Terminal UI) (DISABLED - replaced by Live Dashboard) ---
+    ENABLE_LIVE_DROP_MONITOR = False  # Deactivated - use ENABLE_LIVE_DASHBOARD instead
 
     if ENABLE_LIVE_DROP_MONITOR:
         try:
@@ -911,6 +911,29 @@ def main():
     )
 
     logger.info("Bot erfolgreich initialisiert", extra={'event_type': 'BOT_READY'})
+
+    # --- Live Dashboard (NEW - replaces old monitors) ---
+    ENABLE_LIVE_DASHBOARD = getattr(config_module, 'ENABLE_LIVE_DASHBOARD', True)
+
+    if ENABLE_LIVE_DASHBOARD:
+        try:
+            from ui.dashboard import run_dashboard
+            import threading
+
+            dashboard_thread = threading.Thread(
+                target=run_dashboard,
+                args=(engine, portfolio, config_module),
+                daemon=True,
+                name="LiveDashboard"
+            )
+            dashboard_thread.start()
+            logger.info("Live Dashboard thread started", extra={'event_type': 'DASHBOARD_STARTED'})
+
+            # Give dashboard time to initialize before engine starts
+            tmod.sleep(1.0)
+        except Exception as e:
+            logger.warning(f"Live Dashboard could not start: {e}",
+                          extra={'event_type': 'DASHBOARD_START_FAILED', 'error': str(e)})
 
     # Ensure system stability (critical for avoiding race conditions)
     try:

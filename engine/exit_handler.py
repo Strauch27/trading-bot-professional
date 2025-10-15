@@ -202,6 +202,14 @@ class ExitHandler:
             logger.info(f"SELL FILLED {symbol} @{result.avg_price:.6f} x{result.filled_amount:.6f} "
                        f"[{reason}] PnL: {realized_pnl:.2f}")
 
+            # Dashboard event
+            try:
+                from ui.dashboard import emit_dashboard_event
+                pnl_sign = "📈" if realized_pnl >= 0 else "📉"
+                emit_dashboard_event("SELL_FILLED", f"{pnl_sign} {symbol} @ ${result.avg_price:.4f} | PnL: ${realized_pnl:.2f}")
+            except Exception:
+                pass
+
         except Exception as e:
             logger.error(f"Exit fill handling error: {e}")
 

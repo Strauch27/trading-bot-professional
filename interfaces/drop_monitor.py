@@ -318,6 +318,10 @@ class DropMonitor:
                             summary_parts.append(f"{emoji} {symbol}: {drop_pct:.2f}% ({distance:+.2f}% to trigger)")
 
                         summary = " | ".join(summary_parts)
+
+                        # Console output for user visibility
+                        print(f"\n📉 TOP DROPS: {summary}\n", flush=True)
+
                         logger.info(f"📉 TOP DROPS: {summary}",
                                    extra={'event_type': 'DROP_MONITOR_UPDATE', 'top_drops': drop_data[:self.top_n]})
                     else:

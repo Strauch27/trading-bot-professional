@@ -256,6 +256,19 @@ class BuyDecisionHandler:
             buy_triggered, context = self.engine.buy_signal_service.evaluate_buy_signal(symbol, current_price)
             trace_step("evaluate_buy_signal_result", symbol=symbol, triggered=buy_triggered, context=context)
 
+            # Console output for debugging buy signals
+            if buy_triggered:
+                print(f"\n🔥 BUY TRIGGER HIT: {symbol} @ {current_price:.6f} | "
+                      f"Drop: {context.get('drop_pct', 0):.2f}% | "
+                      f"Anchor: {context.get('anchor', 0):.6f}\n", flush=True)
+
+                # Dashboard event
+                try:
+                    from ui.dashboard import emit_dashboard_event
+                    emit_dashboard_event("BUY_TRIGGER", f"{symbol} @ ${current_price:.4f} (Drop: {context.get('drop_pct', 0):.2f}%)")
+                except Exception:
+                    pass
+
             # Phase 1: Log structured drop_trigger_eval event
             with Trace(decision_id=decision_id):
                 # Get anchor price from rolling window
@@ -385,6 +398,16 @@ class BuyDecisionHandler:
         trace_step("buy_candidate", symbol=symbol, price=current_price, budget=usdt_balance, signal=signal)
         logger.info(f"BUY CANDIDATE {symbol} 🔥 price={current_price:.10f} budget={usdt_balance:.2f} signal={signal}",
                    extra={'event_type':'BUY_CANDIDATE','symbol':symbol,'price':current_price,'budget':usdt_balance})
+
+        # Console output for buy candidate visibility
+        print(f"\n💰 BUY CANDIDATE: {symbol} @ {current_price:.6f} | Budget: ${usdt_balance:.2f} | Signal: {signal}\n", flush=True)
+
+        # Dashboard event
+        try:
+            from ui.dashboard import emit_dashboard_event
+            emit_dashboard_event("BUY_CANDIDATE", f"{symbol} @ ${current_price:.4f}")
+        except Exception:
+            pass
 
         try:
             # Calculate position size
@@ -1039,6 +1062,16 @@ class BuyDecisionHandler:
             # Format unified BUY notification message
             total_cost = filled_amount * avg_price
             buy_msg = f"🛒 BUY {symbol} @{avg_price:.6f} x{filled_amount:.6f} [{signal}] Cost: ${total_cost:.2f}"
+
+            # Console output for order fill visibility
+            print(f"\n✅ {buy_msg}\n", flush=True)
+
+            # Dashboard event
+            try:
+                from ui.dashboard import emit_dashboard_event
+                emit_dashboard_event("BUY_FILLED", f"{symbol} @ ${avg_price:.4f} x{filled_amount:.4f} (Cost: ${total_cost:.2f})")
+            except Exception:
+                pass
 
             # Terminal output (already exists)
             logger.info(f"BUY FILLED {symbol} @{avg_price:.6f} x{filled_amount:.6f} [{signal}]")

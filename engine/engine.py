@@ -361,7 +361,8 @@ class TradingEngine:
                         logger.info(f"💓 Engine heartbeat #{loop_counter} - Active: {len(self.positions)} positions, {len(self.topcoins)} symbols",
                                    extra={'event_type': 'ENGINE_HEARTBEAT', 'positions': len(self.positions),
                                           'symbols': len(self.topcoins), 'cycle': loop_counter})
-                        print(f"💓 Engine läuft - Cycle #{loop_counter} - {len(self.positions)} Positionen, {len(self.topcoins)} Symbole")
+                        # Deactivated - Dashboard shows status
+                        # print(f"💓 Engine läuft - Cycle #{loop_counter} - {len(self.positions)} Positionen, {len(self.topcoins)} Symbole")
 
                     # 1. Market Data Updates (every 5s)
                     if cycle_start - self.last_market_update > 5.0:
@@ -439,11 +440,11 @@ class TradingEngine:
                         self._periodic_maintenance()
                         co.beat("after_maintenance")
 
-                    # 7. TopDrops Ticker (if enabled, at configured interval)
-                    if cycle_start % self.config.top_drops_interval_s < 1.0 and self.config.enable_top_drops_ticker:
-                        co.beat("before_topdrops_ticker")
-                        self._emit_topdrops_ticker()
-                        co.beat("after_topdrops_ticker")
+                    # 7. TopDrops Ticker (DISABLED - replaced by Live Dashboard)
+                    # if cycle_start % self.config.top_drops_interval_s < 1.0 and self.config.enable_top_drops_ticker:
+                    #     co.beat("before_topdrops_ticker")
+                    #     self._emit_topdrops_ticker()
+                    #     co.beat("after_topdrops_ticker")
 
                     # 8. Performance Metrics Logging (every 60s)
                     if cycle_start % 60 < 1.0:
