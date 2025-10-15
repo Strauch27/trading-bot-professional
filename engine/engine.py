@@ -16,58 +16,50 @@ import time
 import threading
 import logging
 from typing import Dict, List, Optional, Any
-from collections import deque
-from datetime import datetime, timezone
 
 # Core Dependencies
 import config
-import ccxt
-from decimal import Decimal, ROUND_DOWN
 
 # Service Imports (All Drops)
 from services import (
     # Drop 1: PnL Service
-    PnLService, TradeRecord, PnLSummary, PositionState,
+    PnLService, PnLSummary,
 
     # Drop 2: Trailing & Signals
-    TrailingStopController, TrailingStopManager,
-    ExitSignalQueue, SignalManager,
+    TrailingStopManager, SignalManager,
 
     # Drop 3: Exchange Adapter & Orders
     OrderService, OrderCache,
 
     # Drop 4: Exit Management & Market Data
-    ExitManager, ExitContext, ExitResult,
-    MarketDataProvider, TickerData, fetch_ticker_cached,
+    ExitManager, MarketDataProvider,
 
     # Drop 5: Buy Signals & Market Guards
     BuySignalService, MarketGuards,
 )
 
 # Adapter Imports
-from adapters.exchange import ExchangeAdapter, MockExchange
+from adapters.exchange import ExchangeAdapter
 
 # Logging Imports
-from core.logging.logger import JsonlLogger, new_decision_id, new_client_order_id
+from core.logging.logger import JsonlLogger
 from core.logging.adaptive_logger import get_adaptive_logger, guard_stats_maybe_summarize
 
 # Buy Flow Logger
 from services.buy_flow_logger import get_buy_flow_logger, shutdown_buy_flow_logger
 
 # Debug Tracing System
-from core.logging.debug_tracer import trace_function, trace_step, get_execution_summary
+from core.logging.debug_tracer import trace_function, trace_step
 
 # Shutdown Coordinator
 from services.shutdown_coordinator import get_shutdown_coordinator
 
 # Drop-Trigger System
 from signals.drop_trigger import DropTrigger
-from signals.rolling_window import RollingWindow
 from signals.confirm import Stabilizer
 
 # PnL and Telemetry System
 from core.utils.pnl import PnLTracker
-from core.utils.order_flow import on_order_update
 from core.utils.telemetry import RollingStats, heartbeat_emit
 
 # Refactored Modules
@@ -577,7 +569,6 @@ class TradingEngine:
         try:
             trace_step("market_health_check", market_health="unknown")
             market_health = "unknown"
-            allow_buy_eval = True
 
             # Max positions check
             if len(self.positions) >= self.config.max_positions:

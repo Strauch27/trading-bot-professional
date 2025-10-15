@@ -11,9 +11,7 @@ Contains:
 
 import time
 import logging
-from typing import Dict
 
-from core.logging.logger import new_decision_id
 from services import ExitResult
 
 logger = logging.getLogger(__name__)

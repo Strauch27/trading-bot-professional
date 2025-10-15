@@ -1,0 +1,43 @@
+# Ruff Configuration for Trading Bot Professional
+
+# Exclude legacy code and auto-generated files
+exclude = [
+    "backup_legacy/",
+    ".venv/",
+    "venv/",
+    "__pycache__/",
+    "*.pyc",
+]
+
+# Line length to match Black
+line-length = 120
+
+[lint]
+# Enable Pyflakes (F), pycodestyle (E, W), and isort (I) by default
+select = ["E", "F", "W", "I"]
+
+# Ignore specific rules that are too strict for this codebase
+ignore = [
+    "E402",  # Module level import not at top of file (needed for conditional imports)
+    "E701",  # Multiple statements on one line (colon) - common pattern in codebase
+    "E702",  # Multiple statements on one line (semicolon) - common pattern
+    "E731",  # Do not assign lambda - sometimes useful for simple cases
+    "F403",  # Star imports - used intentionally in config
+    "F405",  # May be undefined from star imports - consequence of F403
+]
+
+# Allow unused variables when they start with underscore
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[lint.per-file-ignores]
+# Config files can use undefined names from star imports
+"config.py" = ["F821"]
+"main.py" = ["F401", "F811"]  # Allow some unused imports in main entry point
+"__init__.py" = ["F401"]  # Init files often have unused imports for re-export
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with 4 spaces
+indent-width = 4
