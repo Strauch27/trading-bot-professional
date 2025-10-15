@@ -15,11 +15,10 @@ Updates continuously without scrolling using Rich Live.
 import time
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from collections import deque
 
 try:
-    from rich.console import Console
     from rich.layout import Layout
     from rich.live import Live
     from rich.panel import Panel
@@ -134,7 +133,6 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
     try:
         # Access topcoins from engine
         topcoins = getattr(engine, 'topcoins', {})
-        drop_trigger_value = getattr(config_module, 'DROP_TRIGGER_VALUE', 0.98)
 
         for symbol in topcoins.keys():
             try:
@@ -329,7 +327,7 @@ def run_dashboard(engine, portfolio, config_module):
     logger.info("Starting live dashboard...", extra={'event_type': 'DASHBOARD_START'})
 
     try:
-        with Live(layout, screen=True, redirect_stderr=False, refresh_per_second=2) as live:
+        with Live(layout, screen=True, redirect_stderr=False, refresh_per_second=2):
             while True:
                 # Check for shutdown
                 if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():

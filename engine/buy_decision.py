@@ -10,7 +10,7 @@ Contains:
 
 import time
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 import config
 from core.logging.logger import new_decision_id, new_client_order_id
@@ -706,8 +706,6 @@ class BuyDecisionHandler:
         )
 
         # Place buy order with IOC for aggressive fills (slight overpay but guaranteed execution)
-        from config import BUY_LIMIT_PREMIUM_BPS
-
         # Calculate aggressive price: ASK + premium for guaranteed fill
         bid = coin_data.get('bid', current_price) if coin_data else current_price
         ask = coin_data.get('ask', current_price) if coin_data else current_price
