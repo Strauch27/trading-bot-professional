@@ -76,6 +76,17 @@ class BuyDecisionHandler:
         try:
             trace_step("decision_started", symbol=symbol, price=current_price, decision_id=decision_id)
 
+            # 0. Update Rolling Window FIRST (before guards, always!)
+            # CRITICAL: This must run BEFORE any early returns from guards
+            trace_step("update_drop_window", symbol=symbol, price=current_price)
+            if symbol not in self.engine.rolling_windows:
+                from signals.rolling_window import RollingWindow
+                lookback_s = getattr(config, 'DROP_TRIGGER_LOOKBACK_SECONDS', 60)
+                self.engine.rolling_windows[symbol] = RollingWindow(lookback_s)
+
+            now_ts = time.time()
+            self.engine.rolling_windows[symbol].add(now_ts, current_price)
+
             # 1. Update price data in buy signal service
             trace_step("update_buy_signal_service", symbol=symbol, price=current_price)
             self.engine.buy_signal_service.update_price(symbol, current_price)
@@ -203,20 +214,7 @@ class BuyDecisionHandler:
                 else:
                     trace_step("sizing_passed", symbol=symbol)
 
-            # 5a. Update Rolling Window and Drop Trigger
-            trace_step("update_drop_trigger_system", symbol=symbol)
-
-            # Initialize Rolling Window for symbol if needed
-            if symbol not in self.engine.rolling_windows:
-                from signals.rolling_window import RollingWindow
-                lookback_s = getattr(config, 'DROP_TRIGGER_LOOKBACK_SECONDS', 60)
-                self.engine.rolling_windows[symbol] = RollingWindow(lookback_s)
-
-            # Add current price to rolling window
-            now_ts = time.time()
-            self.engine.rolling_windows[symbol].add(now_ts, current_price)
-
-            # 5b. Signal Stabilization Check
+            # 5. Signal Stabilization Check
             trace_step("signal_stabilization", symbol=symbol)
             # Simple condition: spread reasonable (could be enhanced)
             stabilize_condition = True

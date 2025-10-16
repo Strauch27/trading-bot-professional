@@ -1,15 +1,17 @@
 """
-Market Data Service (Drop 4)
+Market Data Service (Drop 4 + Drop Tracking)
 Centralized market data management extraction from engine.py
 
 Enhanced with:
 - Soft-TTL cache (serve stale while refreshing)
 - Candle alignment and partial candle guard
 - JSONL audit logging
+- RollingWindowManager for drop tracking (long-term solution)
 """
 
 import time
 import logging
+import math
 from typing import Dict, List, Optional, Any, Tuple
 from threading import RLock
 from dataclasses import dataclass, asdict
@@ -292,6 +294,7 @@ class MarketDataProvider:
     - Partial candle guard for OHLCV
     - JSONL audit logging
     - Latency tracking
+    - RollingWindowManager for drop tracking (long-term solution)
     """
 
     def __init__(
@@ -304,7 +307,9 @@ class MarketDataProvider:
         audit_log_dir: Optional[Path] = None,
         enable_audit: bool = False,
         enable_coalescing: bool = True,
-        enable_rate_limiting: bool = True
+        enable_rate_limiting: bool = True,
+        enable_drop_tracking: bool = True,
+        event_bus = None
     ):
         """
         Initialize market data provider.
@@ -319,6 +324,8 @@ class MarketDataProvider:
             enable_audit: Enable audit logging
             enable_coalescing: Enable request coalescing (deduplication)
             enable_rate_limiting: Enable API rate limiting (token bucket)
+            enable_drop_tracking: Enable RollingWindowManager for drop tracking
+            event_bus: Event bus for publishing drop snapshots (optional)
         """
         self.exchange_adapter = exchange_adapter
         self.ticker_cache = TickerCache(ticker_cache_ttl, ticker_soft_ttl, max_cache_size)
@@ -331,7 +338,8 @@ class MarketDataProvider:
             'ohlcv_requests': 0,
             'ohlcv_bars_stored': 0,
             'ohlcv_partial_candles_removed': 0,
-            'errors': 0
+            'errors': 0,
+            'drop_snapshots_emitted': 0
         }
 
         # Request coalescing (prevents duplicate API calls)
@@ -348,6 +356,34 @@ class MarketDataProvider:
             self.auditor = MarketDataAuditor(
                 log_dir=Path(audit_log_dir),
                 enabled=True
+            )
+
+        # Drop Tracking (Long-term solution: RollingWindowManager)
+        self.enable_drop_tracking = enable_drop_tracking
+        self.rw_manager = None
+        self.event_bus = event_bus
+        self.last_snapshot_emit_ms = 0
+        self.snapshot_interval_ms = 500  # Default, can be overridden from config
+
+        if self.enable_drop_tracking:
+            # Import config and RollingWindowManager
+            import config
+            from core.rolling_windows import RollingWindowManager
+
+            lookback_s = getattr(config, 'DROP_LOOKBACK_SECONDS', 300)
+            persist = getattr(config, 'DROP_PERSIST_WINDOWS', True)
+            base_path = getattr(config, 'DROP_STORAGE_PATH', 'state/drop_windows')
+            self.snapshot_interval_ms = getattr(config, 'DROP_SNAPSHOT_INTERVAL_MS', 500)
+
+            self.rw_manager = RollingWindowManager(
+                lookback_s=lookback_s,
+                persist=persist,
+                base_path=base_path
+            )
+
+            logger.info(
+                f"Drop tracking enabled: lookback={lookback_s}s, "
+                f"persist={persist}, snapshot_interval={self.snapshot_interval_ms}ms"
             )
 
     def get_ticker(self, symbol: str, use_cache: bool = True) -> Optional[TickerData]:
@@ -735,12 +771,66 @@ class MarketDataProvider:
 
         return results
 
+    def _maybe_emit_drop_snapshots(self, now: float):
+        """
+        Emit drop snapshots periodically via event bus.
+
+        Args:
+            now: Current timestamp
+        """
+        if not self.enable_drop_tracking or not self.rw_manager or not self.event_bus:
+            return
+
+        # Check if it's time to emit snapshots
+        ms = math.floor(now * 1000)
+        if ms - self.last_snapshot_emit_ms < self.snapshot_interval_ms:
+            return
+
+        self.last_snapshot_emit_ms = ms
+
+        # Collect all current prices from cache
+        prices = {}
+        with self._lock:
+            # Get all symbols in ticker cache
+            for symbol_key in self.ticker_cache._cache.keys():
+                ticker_result = self.ticker_cache.get_ticker(symbol_key)
+                if ticker_result:
+                    ticker, status = ticker_result
+                    # Accept both HIT and STALE for snapshots
+                    if ticker and ticker.last > 0:
+                        prices[symbol_key] = ticker.last
+
+        # Generate snapshots
+        snaps = self.rw_manager.get_all_snapshots(prices, now)
+
+        if snaps:
+            # Publish to event bus
+            self.event_bus.publish("drop.snapshots", snaps)
+
+            # Update statistics
+            self._statistics['drop_snapshots_emitted'] += 1
+
+            # Optional: Persist windows
+            if self.rw_manager.persist:
+                try:
+                    self.rw_manager.persist_all()
+                except Exception as e:
+                    logger.debug(f"Failed to persist rolling windows: {e}")
+
+            # Audit log (sample every 10th emission)
+            if self._statistics['drop_snapshots_emitted'] % 10 == 0:
+                logger.debug(
+                    f"Emitted drop snapshots: {len(snaps)} symbols, "
+                    f"total emissions: {self._statistics['drop_snapshots_emitted']}"
+                )
+
     def update_market_data(self, symbols: List[str]) -> Dict[str, bool]:
-        """Update market data for multiple symbols"""
+        """Update market data for multiple symbols with drop tracking"""
         from services.shutdown_coordinator import get_shutdown_coordinator
         co = get_shutdown_coordinator()
 
         co.beat("md_update_start")
+        now = time.time()
         results = {}
 
         for symbol in symbols:
@@ -749,6 +839,13 @@ class MarketDataProvider:
                 ticker = self.get_ticker(symbol, use_cache=False)
                 results[symbol] = ticker is not None
 
+                # Update rolling window for drop tracking
+                if ticker and self.enable_drop_tracking and self.rw_manager:
+                    try:
+                        self.rw_manager.update(symbol, now, ticker.last)
+                    except Exception as e:
+                        logger.debug(f"Failed to update rolling window for {symbol}: {e}")
+
                 # Optionally fetch latest OHLCV
                 if ticker:
                     self.fetch_ohlcv(symbol, '1m', limit=1, store=True)
@@ -756,6 +853,9 @@ class MarketDataProvider:
             except Exception as e:
                 logger.error(f"Market data update failed for {symbol}: {e}")
                 results[symbol] = False
+
+        # Emit drop snapshots periodically
+        self._maybe_emit_drop_snapshots(now)
 
         co.beat("md_update_end")
         logger.info(f"HEARTBEAT - Market data update completed for {len(symbols)} symbols, {sum(results.values())} successful",

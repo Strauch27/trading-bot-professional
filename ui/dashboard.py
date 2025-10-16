@@ -127,54 +127,85 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
 
 
 def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
-    """Collect and calculate top drop data."""
+    """Collect and calculate top drop data from snapshot store (long-term solution)."""
     drops = []
 
     try:
-        # Access topcoins from engine
-        topcoins = getattr(engine, 'topcoins', {})
-        rolling_windows = getattr(engine, 'rolling_windows', {})
+        # Access drop snapshot store (long-term solution)
+        drop_snapshot_store = getattr(engine, 'drop_snapshot_store', {})
 
-        for symbol in topcoins.keys():
-            try:
-                # Get current price
-                current_price = engine.get_current_price(symbol)
-                if not current_price or current_price <= 0:
+        # If snapshot store is available and populated, use it (preferred)
+        if drop_snapshot_store:
+            logger.debug(f"Using drop_snapshot_store with {len(drop_snapshot_store)} symbols")
+
+            for symbol, snap in drop_snapshot_store.items():
+                try:
+                    drop_pct = snap.get('drop_pct')
+                    if drop_pct is None:
+                        continue
+
+                    drops.append({
+                        'symbol': symbol,
+                        'drop_pct': drop_pct,
+                        'current_price': snap.get('current', 0),
+                        'anchor': snap.get('peak', 0),
+                    })
+                except Exception as e:
+                    logger.debug(f"Error processing snapshot for {symbol}: {e}")
                     continue
 
-                # Get anchor (peak price) from rolling_windows
-                anchor = None
-                if symbol in rolling_windows:
-                    try:
-                        # Use the MAXIMUM price in the rolling window (peak), not the oldest price
-                        anchor = rolling_windows[symbol].max
-                    except AttributeError:
-                        # Window exists but doesn't have max property (shouldn't happen)
-                        logger.debug(f"Rolling window for {symbol} missing max property")
+        # Fallback to legacy rolling_windows (quick fix compatibility)
+        else:
+            logger.debug("Falling back to legacy rolling_windows")
+            topcoins = getattr(engine, 'topcoins', {})
+            rolling_windows = getattr(engine, 'rolling_windows', {})
 
-                # Fallback to portfolio anchor
-                if not anchor or anchor <= 0:
-                    try:
-                        anchor = portfolio.get_drop_anchor(symbol)
-                    except Exception:
-                        pass
+            for symbol in topcoins.keys():
+                try:
+                    # Get current price
+                    current_price = engine.get_current_price(symbol)
+                    if not current_price or current_price <= 0:
+                        continue
 
-                # Final fallback: use current price as anchor (window not yet filled)
-                if not anchor or anchor <= 0:
-                    anchor = current_price
+                    # Get anchor (peak price) from rolling_windows
+                    anchor = None
+                    if symbol in rolling_windows:
+                        try:
+                            # Use the MAXIMUM price in the rolling window (peak), not the oldest price
+                            anchor = rolling_windows[symbol].max
+                            # Validate anchor: must be valid float and > 0
+                            if anchor in (None, float("-inf")) or anchor <= 0:
+                                anchor = None
+                        except AttributeError:
+                            # Window exists but doesn't have max property (shouldn't happen)
+                            logger.debug(f"Rolling window for {symbol} missing max property")
 
-                # Calculate drop percentage
-                drop_pct = ((current_price / anchor) - 1.0) * 100
+                    # Fallback to portfolio anchor
+                    if not anchor or anchor <= 0:
+                        try:
+                            anchor = portfolio.get_drop_anchor(symbol)
+                        except Exception:
+                            pass
 
-                drops.append({
-                    'symbol': symbol,
-                    'drop_pct': drop_pct,
-                    'current_price': current_price,
-                    'anchor': anchor,
-                })
-            except Exception as e:
-                logger.debug(f"Error calculating drop for {symbol}: {e}")
-                continue
+                    # Final fallback: use current price as anchor (window not yet filled)
+                    if not anchor or anchor <= 0:
+                        anchor = current_price
+
+                    # Calculate drop percentage
+                    drop_pct = ((current_price / anchor) - 1.0) * 100
+
+                    # Debug log for transparency
+                    logger.debug(f"[DROP_UI] {symbol} cur={current_price:.8f} anchor={anchor:.8f} drop={drop_pct:.2f}%")
+
+                    drops.append({
+                        'symbol': symbol,
+                        'drop_pct': drop_pct,
+                        'current_price': current_price,
+                        'anchor': anchor,
+                    })
+                except Exception as e:
+                    logger.debug(f"Error calculating drop for {symbol}: {e}")
+                    continue
 
         # Sort by drop % (most negative first)
         drops.sort(key=lambda x: x['drop_pct'])

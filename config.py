@@ -93,6 +93,12 @@ ANCHOR_STALE_MINUTES = 60  # Anker älter als 60 Min neu initialisieren
 ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT = 5.0  # Max 5% über Peak erlaubt
 ANCHOR_MAX_START_DROP_PCT = 6.0  # Zu Beginn max. 6% Drop erlaubt
 
+# Drop Tracking (Long-term solution: RollingWindowManager)
+DROP_LOOKBACK_SECONDS = 300  # 5 min Lookback für Drop-Peak-Tracking
+DROP_SNAPSHOT_INTERVAL_MS = 500  # Snapshot-Events alle 500ms
+DROP_PERSIST_WINDOWS = True  # Persistiere RollingWindows zwischen Restarts
+DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
+
 # =============================================================================
 # 4. POSITION MANAGEMENT
 # =============================================================================
@@ -163,7 +169,7 @@ ENABLE_COID_MANAGER = True  # Idempotent Client Order IDs with persistent KV-sto
 ENABLE_STARTUP_RECONCILE = True  # Reconcile pending COIDs on startup
 
 # Phase 4: Entry Slippage Guard
-ENABLE_ENTRY_SLIPPAGE_GUARD = True  # Check entry slippage vs expected price
+ENABLE_ENTRY_SLIPPAGE_GUARD = False  # Check entry slippage vs expected price
 # MAX_SLIPPAGE_BPS_ENTRY already defined above (15 bps)
 
 # Phase 5: Exit TTL Timing
@@ -173,8 +179,8 @@ USE_FIRST_FILL_TS_FOR_TTL = True  # Use first_fill_ts instead of order timestamp
 ENABLE_SYMBOL_LOCKS = True  # Thread-safe per-symbol locking for portfolio ops
 
 # Phase 7: Spread/Depth Guards (already defined above)
-ENABLE_SPREAD_GUARD_ENTRY = True  # Block buys when spread > MAX_SPREAD_BPS_ENTRY
-ENABLE_DEPTH_GUARD_ENTRY = True  # Block buys when depth < DEPTH_MIN_NOTIONAL_USD
+ENABLE_SPREAD_GUARD_ENTRY = False  # Block buys when spread > MAX_SPREAD_BPS_ENTRY
+ENABLE_DEPTH_GUARD_ENTRY = False  # Block buys when depth < DEPTH_MIN_NOTIONAL_USD
 # MAX_SPREAD_BPS_ENTRY and DEPTH_MIN_NOTIONAL_USD defined above
 
 # Phase 8: Risk Guards Consolidation

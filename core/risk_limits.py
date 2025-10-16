@@ -75,7 +75,7 @@ class RiskLimitChecker:
         try:
             # 1. Max Positions Check
             current_positions = len(self.portfolio.held_assets)
-            max_positions = getattr(self.config, 'max_trades', 10)
+            max_positions = getattr(self.config, 'MAX_TRADES', 10)
 
             limit_checks.append({
                 "limit": "max_positions",
@@ -168,7 +168,7 @@ class RiskLimitChecker:
 
             # 6. Minimum Free Cash Reserve Check
             try:
-                cash_reserve = getattr(self.config, 'cash_reserve_usdt', 50.0)
+                cash_reserve = getattr(self.config, 'CASH_RESERVE_USDT', 50.0)
                 free_after_trade = self.portfolio.my_budget - order_value_usdt
 
                 limit_checks.append({
@@ -265,37 +265,42 @@ def evaluate_all_entry_guards(
         return False, "RISK_LIMITS_ERROR", guard_ctx
 
     # 2. Market Quality Guards (Spread/Depth)
-    if market_data_provider:
+    enable_spread_guard = getattr(config, 'ENABLE_SPREAD_GUARD_ENTRY', False)
+    enable_depth_guard = getattr(config, 'ENABLE_DEPTH_GUARD_ENTRY', False)
+
+    if market_data_provider and (enable_spread_guard or enable_depth_guard):
         try:
             # Spread guard
-            has_spread = hasattr(market_data_provider, 'get_spread')
-            if has_spread:
-                spread_bps = market_data_provider.get_spread(symbol)
-                if spread_bps is not None:
-                    guard_ctx["spread_bps"] = float(spread_bps)
-                    max_spread = getattr(config, 'MAX_SPREAD_BPS_ENTRY', 10)
+            if enable_spread_guard:
+                has_spread = hasattr(market_data_provider, 'get_spread')
+                if has_spread:
+                    spread_bps = market_data_provider.get_spread(symbol)
+                    if spread_bps is not None:
+                        guard_ctx["spread_bps"] = float(spread_bps)
+                        max_spread = getattr(config, 'MAX_SPREAD_BPS_ENTRY', 10)
 
-                    if spread_bps > max_spread:
-                        logger.warning(
-                            f"Spread guard blocked order for {symbol}: "
-                            f"{spread_bps:.1f} bps > {max_spread} bps"
-                        )
-                        return False, "WIDE_SPREAD", guard_ctx
+                        if spread_bps > max_spread:
+                            logger.warning(
+                                f"Spread guard blocked order for {symbol}: "
+                                f"{spread_bps:.1f} bps > {max_spread} bps"
+                            )
+                            return False, "WIDE_SPREAD", guard_ctx
 
             # Depth guard
-            has_depth = hasattr(market_data_provider, 'get_top5_depth')
-            if has_depth:
-                bid_depth, ask_depth = market_data_provider.get_top5_depth(symbol, levels=5)
-                guard_ctx["bid_depth_usd"] = float(bid_depth)
-                guard_ctx["ask_depth_usd"] = float(ask_depth)
+            if enable_depth_guard:
+                has_depth = hasattr(market_data_provider, 'get_top5_depth')
+                if has_depth:
+                    bid_depth, ask_depth = market_data_provider.get_top5_depth(symbol, levels=5)
+                    guard_ctx["bid_depth_usd"] = float(bid_depth)
+                    guard_ctx["ask_depth_usd"] = float(ask_depth)
 
-                min_depth = getattr(config, 'DEPTH_MIN_NOTIONAL_USD', 200)
-                if ask_depth < min_depth:
-                    logger.warning(
-                        f"Depth guard blocked order for {symbol}: "
-                        f"${ask_depth:.2f} < ${min_depth}"
-                    )
-                    return False, "THIN_DEPTH", guard_ctx
+                    min_depth = getattr(config, 'DEPTH_MIN_NOTIONAL_USD', 200)
+                    if ask_depth < min_depth:
+                        logger.warning(
+                            f"Depth guard blocked order for {symbol}: "
+                            f"${ask_depth:.2f} < ${min_depth}"
+                        )
+                        return False, "THIN_DEPTH", guard_ctx
 
         except Exception as e:
             logger.error(f"Error checking market quality guards for {symbol}: {e}")

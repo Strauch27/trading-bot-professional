@@ -232,12 +232,16 @@ class BuyService:
         """
         guard_ctx: Dict[str, Any] = {}
 
+        # Check if guards are enabled
+        enable_spread_guard = getattr(cfg, 'ENABLE_SPREAD_GUARD_ENTRY', False)
+        enable_depth_guard = getattr(cfg, 'ENABLE_DEPTH_GUARD_ENTRY', False)
+
         # Check if exchange has get_spread/get_top5_depth (MarketDataProvider)
         has_spread = hasattr(self.exchange, 'get_spread')
         has_depth = hasattr(self.exchange, 'get_top5_depth')
 
-        # Phase 7.1: Spread guard
-        if has_spread:
+        # Phase 7.1: Spread guard (if enabled)
+        if enable_spread_guard and has_spread:
             try:
                 spread_bps = self.exchange.get_spread(symbol)
                 if spread_bps is not None:
@@ -260,8 +264,8 @@ class BuyService:
                     ctx={}
                 )
 
-        # Phase 7.2: Depth guard (check ask side liquidity)
-        if has_depth:
+        # Phase 7.2: Depth guard (check ask side liquidity) (if enabled)
+        if enable_depth_guard and has_depth:
             try:
                 bid_depth, ask_depth = self.exchange.get_top5_depth(symbol, levels=5)
                 guard_ctx["bid_depth_usd"] = float(bid_depth)
@@ -421,17 +425,20 @@ class BuyService:
                 avg_px, filled_qty, _proceeds_q, buy_fees_q = compute_avg_fill_and_fees(order, trades)
                 buy_fee_per_unit = (buy_fees_q / filled_qty) if filled_qty > 0 else 0.0
 
-                # Phase 4: Check entry slippage
-                ref_ask = float(fresh_ask if idx > 1 and 'fresh_ask' in locals() else ask)
-                premium_bps = step_config.get("premium_bps", 0)
-                slippage_breach, slippage_bps = self._check_entry_slippage(
-                    symbol=symbol,
-                    avg_fill_price=avg_px,
-                    ref_price=ref_ask,
-                    premium_bps=premium_bps
-                )
-                ctx[f"step_{idx}_slippage_bps"] = float(slippage_bps)
-                ctx[f"step_{idx}_slippage_breach"] = slippage_breach
+                # Phase 4: Check entry slippage (if enabled)
+                slippage_breach = False
+                slippage_bps = 0.0
+                if getattr(cfg, 'ENABLE_ENTRY_SLIPPAGE_GUARD', False):
+                    ref_ask = float(fresh_ask if idx > 1 and 'fresh_ask' in locals() else ask)
+                    premium_bps = step_config.get("premium_bps", 0)
+                    slippage_breach, slippage_bps = self._check_entry_slippage(
+                        symbol=symbol,
+                        avg_fill_price=avg_px,
+                        ref_price=ref_ask,
+                        premium_bps=premium_bps
+                    )
+                    ctx[f"step_{idx}_slippage_bps"] = float(slippage_bps)
+                    ctx[f"step_{idx}_slippage_breach"] = slippage_breach
 
                 # Portfolio aktualisieren (WAC + Fee/Unit)
                 # Phase 6: Symbol-scoped lock for thread-safe position updates
