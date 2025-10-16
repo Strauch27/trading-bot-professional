@@ -153,20 +153,16 @@ class TradingEngine:
         self.position_manager = PositionManager(self)
         self.exit_handler = ExitHandler(self)
 
+        # Subscribe to EXIT_FILLED events for unified PnL handling (use correct EventBus instance)
+        self.event_bus.subscribe("EXIT_FILLED", self.exit_handler.on_exit_filled_event)
+        logger.info("Subscribed to 'EXIT_FILLED' on unified EventBus")
+
         # Log configuration snapshot for audit trail
         self.monitoring.log_configuration_snapshot(self.config)
 
         # Start log management
         from core.logging.log_manager import start_log_management
         start_log_management()
-
-        # Subscribe to event bus for unified PnL handling
-        try:
-            from core.events.event_bus import subscribe
-            subscribe("EXIT_FILLED", self.exit_handler.on_exit_filled_event)
-            logger.info("Subscribed to EXIT_FILLED events for unified PnL handling")
-        except Exception as e:
-            logger.warning(f"Event bus subscription failed: {e}")
 
         # Engine State
         self.last_market_update = 0

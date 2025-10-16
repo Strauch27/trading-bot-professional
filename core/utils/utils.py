@@ -526,17 +526,16 @@ class SettlementManager:
         
         # Entkopplung via Runtime-Event; Engine-Hook aktualisiert PnL & Telegram
         try:
-            from core.events.event_bus import emit
-            emit(
-                "EXIT_FILLED",
-                symbol=symbol,
-                qty=amount,
-                avg_exit_price=exit_price,
-                entry_avg_price=entry_price,
-                sell_fees_quote=fee,
-                buy_fees_alloc_quote=0.0,  # Vereinfacht für utils.py
-                reason="exit_utils"
-            )
+            from core.events import get_event_bus
+            get_event_bus().publish("EXIT_FILLED", {
+                "symbol": symbol,
+                "qty": amount,
+                "avg_exit_price": exit_price,
+                "entry_avg_price": entry_price,
+                "sell_fees_quote": fee,
+                "buy_fees_alloc_quote": 0.0,  # Vereinfacht für utils.py
+                "reason": "exit_utils"
+            })
         except Exception:
             pass
         
