@@ -462,7 +462,7 @@ ACTIVE_ORDER_SYNC_JITTER_S = 5
 
 # Master Switch & Mode Selection
 FSM_ENABLED = True  # False = Legacy engine (default), True = Use FSM_MODE
-FSM_MODE = "both"  # Options: "legacy", "fsm", or "both" (parallel validation)
+FSM_MODE = "legacy"  # Options: "legacy", "fsm", or "both" (parallel validation)
 
 # Phase Event Logging (JSONL audit trail for all phase transitions)
 PHASE_LOG_FILE = os.path.join(LOG_DIR, f"phase_events_{run_timestamp}.jsonl")

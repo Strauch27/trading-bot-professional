@@ -95,12 +95,22 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
         List of log lines (may be fewer than n_lines if file is short)
     """
     try:
-        # Find most recent log file in logs/ directory
-        log_pattern = "logs/trading_bot_*.log"
-        log_files = glob.glob(log_pattern)
+        # Try multiple log locations
+        log_patterns = [
+            "logs/trading_bot_*.log",           # Legacy location
+            "sessions/*/logs/*.log",            # New session-based location
+            "sessions/*/*.log",                 # Alternative session location
+        ]
+
+        log_files = []
+        for pattern in log_patterns:
+            log_files.extend(glob.glob(pattern))
 
         if not log_files:
-            return ["No log files found"]
+            return ["No log files found - checked:",
+                    "  logs/trading_bot_*.log",
+                    "  sessions/*/logs/*.log",
+                    "  sessions/*/*.log"]
 
         # Get most recent log file
         latest_log = max(log_files, key=lambda p: Path(p).stat().st_mtime)

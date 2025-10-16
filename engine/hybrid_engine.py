@@ -17,7 +17,9 @@ import threading
 from typing import Dict, Any, Optional
 
 from .engine import TradingEngine as LegacyEngine
-from .fsm_engine import FSMTradingEngine
+
+# Lazy import of FSM engine to avoid import errors if dependencies are missing
+# from .fsm_engine import FSMTradingEngine  # Moved to _initialize_engines()
 from core.fsm.state import CoinState
 from core.fsm.phases import Phase
 
@@ -48,6 +50,7 @@ class HybridEngine:
             mode: "legacy", "fsm", or "both"
             engine_config: Legacy engine config
         """
+        logger.info(f"DEBUG: HybridEngine.__init__ START - mode parameter='{mode}'")
         logger.info(f"Initializing Hybrid Engine in mode: {mode}")
 
         self.mode = mode.lower()
@@ -78,6 +81,7 @@ class HybridEngine:
 
     def _initialize_engines(self):
         """Initialize engines based on mode."""
+        logger.info(f"DEBUG: _initialize_engines() called with self.mode='{self.mode}' (type={type(self.mode).__name__})")
         if self.mode in ["legacy", "both"]:
             logger.info("Initializing Legacy Engine...")
             try:
@@ -99,6 +103,9 @@ class HybridEngine:
         if self.mode in ["fsm", "both"]:
             logger.info("Initializing FSM Engine...")
             try:
+                # Lazy import to avoid dependencies when FSM is not used
+                from .fsm_engine import FSMTradingEngine
+
                 self.fsm_engine = FSMTradingEngine(
                     exchange=self.exchange,
                     portfolio=self.portfolio,
@@ -108,12 +115,13 @@ class HybridEngine:
                 )
                 logger.info("FSM Engine initialized successfully")
             except Exception as e:
-                logger.error(f"FSM Engine initialization failed: {e}")
+                logger.error(f"FSM Engine initialization failed: {e}", exc_info=True)
                 if self.mode == "fsm":
                     raise  # Fatal for FSM-only mode
 
     def start(self):
         """Start active engines based on mode."""
+        print(f"[HYBRID_ENGINE] Starting Hybrid Engine (mode={self.mode})...")  # DEBUG: Direct console output
         logger.info(f"Starting Hybrid Engine (mode={self.mode})...")
 
         if self.mode in ["legacy", "both"] and self.legacy_engine:
@@ -355,6 +363,51 @@ class HybridEngine:
                 return self.portfolio.get_drop_anchor(symbol)
         except Exception as e:
             logger.debug(f"Drop anchor fetch failed for {symbol}: {e}")
+
+        return None
+
+    @property
+    def drop_snapshot_store(self) -> Dict[str, Any]:
+        """
+        Get drop snapshot store from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, 'drop_snapshot_store'):
+            return self.legacy_engine.drop_snapshot_store
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'drop_snapshot_store'):
+            return self.fsm_engine.drop_snapshot_store
+
+        return {}
+
+    @property
+    def _snap_recv(self) -> int:
+        """
+        Get snapshot reception counter from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, '_snap_recv'):
+            return self.legacy_engine._snap_recv
+
+        if self.fsm_engine and hasattr(self.fsm_engine, '_snap_recv'):
+            return self.fsm_engine._snap_recv
+
+        return 0
+
+    @property
+    def shutdown_coordinator(self):
+        """
+        Get shutdown coordinator from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, 'shutdown_coordinator'):
+            return self.legacy_engine.shutdown_coordinator
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'shutdown_coordinator'):
+            return self.fsm_engine.shutdown_coordinator
 
         return None
 

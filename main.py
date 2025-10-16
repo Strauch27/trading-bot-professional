@@ -950,6 +950,11 @@ def main():
 
     # Hauptloop starten
     try:
+        # DEBUG: Print engine type and check start method
+        print(f"[MAIN] About to call engine.start() - engine type: {type(engine)}")
+        print(f"[MAIN] engine.start method: {engine.start}")
+        print(f"[MAIN] Has HybridEngine? {hasattr(engine, 'legacy_engine')}")
+
         # Start engine with timeout monitoring
         start_time = tmod.time()
         engine.start()

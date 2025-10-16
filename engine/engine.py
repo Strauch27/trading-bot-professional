@@ -374,10 +374,12 @@ class TradingEngine:
 
     def start(self):
         """Start the trading engine"""
+        print("[TRADING_ENGINE] start() called")  # DEBUG: Direct console output
         if self.running:
             logger.warning("Engine already running")
             return
 
+        print("[TRADING_ENGINE] Starting Trading Engine...")  # DEBUG: Direct console output
         logger.info("Starting Trading Engine...")
 
         # Start market data loop (only once)
