@@ -172,13 +172,13 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
                     if symbol in rolling_windows:
                         try:
                             # Use the MAXIMUM price in the rolling window (peak), not the oldest price
-                            anchor = rolling_windows[symbol].max
+                            anchor = rolling_windows[symbol].max()
                             # Validate anchor: must be valid float and > 0
                             if anchor in (None, float("-inf")) or anchor <= 0:
                                 anchor = None
                         except AttributeError:
-                            # Window exists but doesn't have max property (shouldn't happen)
-                            logger.debug(f"Rolling window for {symbol} missing max property")
+                            # Window exists but doesn't have max() method (shouldn't happen)
+                            logger.debug(f"Rolling window for {symbol} missing max() method")
 
                     # Fallback to portfolio anchor
                     if not anchor or anchor <= 0:

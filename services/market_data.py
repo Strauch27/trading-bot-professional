@@ -493,9 +493,11 @@ class MarketDataProvider:
                         change_percent_24h=raw_ticker.get('percentage')
                     )
 
-                    # Store in cache
-                    if use_cache:
+                    # persist to soft-TTL cache so snapshot emitter sees it
+                    try:
                         self.ticker_cache.store_ticker(ticker)
+                    except Exception:
+                        logger.debug(f"ticker_cache.store_ticker failed for {symbol}")
 
                     latency_ms = (time.time() - start_time) * 1000
 

@@ -81,11 +81,11 @@ class BuyDecisionHandler:
             trace_step("update_drop_window", symbol=symbol, price=current_price)
             if symbol not in self.engine.rolling_windows:
                 from signals.rolling_window import RollingWindow
-                lookback_s = getattr(config, 'DROP_TRIGGER_LOOKBACK_SECONDS', 60)
-                self.engine.rolling_windows[symbol] = RollingWindow(lookback_s)
+                window_len = getattr(config, 'DROP_TRIGGER_LOOKBACK_SECONDS', 60)
+                self.engine.rolling_windows[symbol] = RollingWindow(window_len)
 
-            now_ts = time.time()
-            self.engine.rolling_windows[symbol].add(now_ts, current_price)
+            # signals.RollingWindow API = push(price)
+            self.engine.rolling_windows[symbol].push(current_price)
 
             # 1. Update price data in buy signal service
             trace_step("update_buy_signal_service", symbol=symbol, price=current_price)
