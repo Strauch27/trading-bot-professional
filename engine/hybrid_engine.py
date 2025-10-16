@@ -288,6 +288,76 @@ class HybridEngine:
 
         return legacy_running or fsm_running
 
+    # ========== Dashboard Compatibility (Delegation) ==========
+
+    @property
+    def topcoins(self) -> Dict[str, Any]:
+        """
+        Get topcoins/watchlist from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        # Priority: legacy_engine > fsm_engine > watchlist
+        if self.legacy_engine and hasattr(self.legacy_engine, 'topcoins'):
+            return self.legacy_engine.topcoins
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'watchlist'):
+            return self.fsm_engine.watchlist
+
+        # Fallback to watchlist passed during init
+        return self.watchlist or {}
+
+    @property
+    def rolling_windows(self) -> Dict[str, Any]:
+        """
+        Get rolling windows from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, 'rolling_windows'):
+            return self.legacy_engine.rolling_windows
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'rolling_windows'):
+            return self.fsm_engine.rolling_windows
+
+        return {}
+
+    def get_current_price(self, symbol: str) -> Optional[float]:
+        """
+        Get current price from active engine.
+
+        Dashboard compatibility: Delegates to internal engine's market data.
+        """
+        # Try legacy engine first
+        if self.legacy_engine and hasattr(self.legacy_engine, 'get_current_price'):
+            try:
+                return self.legacy_engine.get_current_price(symbol)
+            except Exception as e:
+                logger.debug(f"Legacy engine price fetch failed for {symbol}: {e}")
+
+        # Try FSM engine
+        if self.fsm_engine and hasattr(self.fsm_engine, 'market_data'):
+            try:
+                return self.fsm_engine.market_data.get_price(symbol)
+            except Exception as e:
+                logger.debug(f"FSM engine price fetch failed for {symbol}: {e}")
+
+        return None
+
+    def get_drop_anchor(self, symbol: str) -> Optional[float]:
+        """
+        Get drop anchor from portfolio.
+
+        Dashboard compatibility: Delegates to portfolio manager.
+        """
+        try:
+            if self.portfolio and hasattr(self.portfolio, 'get_drop_anchor'):
+                return self.portfolio.get_drop_anchor(symbol)
+        except Exception as e:
+            logger.debug(f"Drop anchor fetch failed for {symbol}: {e}")
+
+        return None
+
     # ========== Manual Operations (delegate to active engine) ==========
 
     def add_manual_position(self, symbol: str, amount: float, entry_price: float, **kwargs) -> bool:

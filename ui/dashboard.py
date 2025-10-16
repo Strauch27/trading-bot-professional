@@ -133,6 +133,7 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
     try:
         # Access topcoins from engine
         topcoins = getattr(engine, 'topcoins', {})
+        rolling_windows = getattr(engine, 'rolling_windows', {})
 
         for symbol in topcoins.keys():
             try:
@@ -141,10 +142,25 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
                 if not current_price or current_price <= 0:
                     continue
 
-                # Get anchor (peak price)
-                anchor = portfolio.get_drop_anchor(symbol)
+                # Get anchor (peak price) from rolling_windows
+                anchor = None
+                if symbol in rolling_windows:
+                    try:
+                        # Use the MAXIMUM price in the rolling window (peak), not the oldest price
+                        anchor = rolling_windows[symbol].max
+                    except AttributeError:
+                        # Window exists but doesn't have max property (shouldn't happen)
+                        logger.debug(f"Rolling window for {symbol} missing max property")
+
+                # Fallback to portfolio anchor
                 if not anchor or anchor <= 0:
-                    # Fallback: use current price as anchor
+                    try:
+                        anchor = portfolio.get_drop_anchor(symbol)
+                    except Exception:
+                        pass
+
+                # Final fallback: use current price as anchor (window not yet filled)
+                if not anchor or anchor <= 0:
                     anchor = current_price
 
                 # Calculate drop percentage
@@ -255,7 +271,7 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
     table.add_column("#", style="dim", justify="right", width=3)
     table.add_column("Symbol", style="bold", width=12)
     table.add_column("Drop %", justify="right", width=8)
-    table.add_column("Trigger", justify="right", width=8)
+    table.add_column("To Trig", justify="right", width=8)
 
     drop_trigger_pct = config_data.get('DT', 0)
 

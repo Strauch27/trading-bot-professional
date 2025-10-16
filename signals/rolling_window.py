@@ -35,3 +35,9 @@ class RollingWindow:
     def is_full(self):
         """Check if window is at maximum capacity"""
         return len(self.q) == self.q.maxlen
+
+    def get_window_start_price(self):
+        """Get the first (oldest) price in the rolling window (anchor price)"""
+        if len(self.q) > 0:
+            return self.q[0]
+        return None
