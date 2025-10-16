@@ -14,6 +14,8 @@ Updates continuously without scrolling using Rich Live.
 
 import time
 import logging
+import glob
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 from collections import deque
@@ -29,6 +31,11 @@ except ImportError:
     RICH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Global state for debug display
+_show_debug = True  # Show debug footer by default
+_last_symbol = None  # Last snapshot symbol
+_last_price = None   # Last snapshot price
 
 
 class DashboardEventBus:
@@ -67,6 +74,44 @@ def emit_dashboard_event(event_type: str, message: str):
         emit_dashboard_event("BUY_FILLED", "APE/USDT @ 1.2351")
     """
     _event_bus.emit(event_type, message)
+
+
+def update_snapshot_debug(symbol: str, price: float):
+    """
+    Update last snapshot debug info.
+
+    Call this from engine when snapshots are received.
+    """
+    global _last_symbol, _last_price
+    _last_symbol = symbol
+    _last_price = price
+
+
+def get_log_tail(n_lines: int = 20) -> List[str]:
+    """
+    Read the last N lines from the most recent log file.
+
+    Returns:
+        List of log lines (may be fewer than n_lines if file is short)
+    """
+    try:
+        # Find most recent log file in logs/ directory
+        log_pattern = "logs/trading_bot_*.log"
+        log_files = glob.glob(log_pattern)
+
+        if not log_files:
+            return ["No log files found"]
+
+        # Get most recent log file
+        latest_log = max(log_files, key=lambda p: Path(p).stat().st_mtime)
+
+        # Read last N lines
+        with open(latest_log, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = deque(f, maxlen=n_lines)
+            return list(lines)
+
+    except Exception as e:
+        return [f"Error reading logs: {e}"]
 
 
 def get_config_data(config_module, start_time: float) -> Dict[str, Any]:
@@ -354,7 +399,12 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
         except (IndexError, KeyError, TypeError):
             pass
 
-    title = f"📉 Top Drops (Trigger: {drop_trigger_pct:.1f}%) • rx={snap_rx} • ts={last_tick_ts}"
+    # Add last snapshot symbol and price
+    last_snap_info = ""
+    if _last_symbol and _last_price is not None:
+        last_snap_info = f" • {_last_symbol}={_last_price:.8f}"
+
+    title = f"📉 Top Drops (Trigger: {drop_trigger_pct:.1f}%) • rx={snap_rx} • ts={last_tick_ts}{last_snap_info}"
     return Panel(table, title=title, border_style="cyan", expand=True)
 
 
@@ -369,6 +419,27 @@ def make_footer_panel(last_event: str) -> Panel:
     return Panel(content, border_style="yellow", expand=True)
 
 
+def make_debug_panel() -> Panel:
+    """Create the debug panel with last 20 log lines."""
+    log_lines = get_log_tail(20)
+
+    # Create text content with log lines
+    content = Text()
+    for line in log_lines:
+        # Truncate very long lines
+        line = line.rstrip()
+        if len(line) > 150:
+            line = line[:147] + "..."
+        content.append(line + "\n", style="dim white")
+
+    return Panel(
+        content,
+        title="🔍 DEBUG LOG (last 20 lines) - Press 'd' to toggle",
+        border_style="dim blue",
+        expand=True
+    )
+
+
 def run_dashboard(engine, portfolio, config_module):
     """
     Main function to run the live dashboard.
@@ -379,13 +450,29 @@ def run_dashboard(engine, portfolio, config_module):
         logger.warning("Rich library not available - dashboard disabled")
         return
 
+    # Check if debug mode is enabled
+    import config
+    debug_drops = getattr(config, "DEBUG_DROPS", False)
+
     # Create layout
     layout = Layout(name="root")
-    layout.split(
-        Layout(name="header", size=5),
-        Layout(ratio=1, name="main"),
-        Layout(size=3, name="footer"),
-    )
+
+    if debug_drops:
+        # Layout with debug panel
+        layout.split(
+            Layout(name="header", size=5),
+            Layout(ratio=1, name="main"),
+            Layout(size=3, name="footer"),
+            Layout(size=12, name="debug"),
+        )
+    else:
+        # Standard layout without debug panel
+        layout.split(
+            Layout(name="header", size=5),
+            Layout(ratio=1, name="main"),
+            Layout(size=3, name="footer"),
+        )
+
     layout["main"].split_row(
         Layout(name="side", ratio=1),
         Layout(name="body", ratio=2)
@@ -418,6 +505,10 @@ def run_dashboard(engine, portfolio, config_module):
                     layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
                     layout["footer"].update(make_footer_panel(last_event))
+
+                    # Update debug panel if enabled
+                    if debug_drops:
+                        layout["debug"].update(make_debug_panel())
 
                 except Exception as update_error:
                     logger.debug(f"Dashboard update error: {update_error}")

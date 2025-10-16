@@ -683,7 +683,7 @@ class TradingEngine:
             # DEBUG_DROPS: Count and log first reception
             self._snap_recv += 1
 
-            # DEBUG_DROPS: Log first snapshot reception
+            # DEBUG_DROPS: Log first snapshot reception and update dashboard debug
             if self._snap_recv == 1 and snapshots and getattr(config, "DEBUG_DROPS", False):
                 s = snapshots[0]
                 last_price = s.get("price", {}).get("last", -1)
@@ -691,6 +691,15 @@ class TradingEngine:
                     f"SNAP_RX first symbol={s.get('symbol')} last={last_price:.8f}",
                     extra={"event_type": "SNAP_RX_FIRST"}
                 )
+
+            # Update dashboard debug info with latest snapshot
+            if snapshots and getattr(config, "DEBUG_DROPS", False):
+                from ui.dashboard import update_snapshot_debug
+                s = snapshots[0]  # Take first snapshot as sample
+                symbol = s.get("symbol")
+                last_price = s.get("price", {}).get("last")
+                if symbol and last_price:
+                    update_snapshot_debug(symbol, last_price)
 
             with self._lock:
                 for snap in snapshots:
