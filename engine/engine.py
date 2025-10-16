@@ -119,6 +119,7 @@ class TradingEngine:
         self.running = False
         self.main_thread = None
         self._lock = threading.RLock()
+        self._snap_recv = 0  # DEBUG_DROPS: Count received snapshot batches
 
         # Drop Snapshot Store (Long-term solution)
         self.drop_snapshot_store: Dict[str, Dict] = {}  # symbol -> latest drop snapshot
@@ -394,6 +395,26 @@ class TradingEngine:
         self.main_thread.start()
         logger.info("Trading Engine initialized successfully")
 
+        # DEBUG_DROPS: Watchdog - check if snapshots arrive within 5s
+        if getattr(config, "DEBUG_DROPS", False):
+            import time
+            from core.events import topic_counters
+
+            t0 = time.time()
+            while time.time() - t0 < 5.0:
+                time.sleep(0.25)
+                if self._snap_recv > 0:
+                    logger.info("DEBUG_DROPS: Watchdog passed - snapshots received within 5s")
+                    break
+
+            if self._snap_recv == 0:
+                pub = topic_counters["published"].get("market.snapshots", 0)
+                symbols = getattr(config, "TOPCOINS_SYMBOLS", [])
+                logger.critical(
+                    f"DEBUG_DROPS: no snapshots received in 5s; published={pub} symbols={symbols[:5] if symbols else []}",
+                    extra={"event_type": "DEBUG_DROPS_WATCHDOG_FAILED"}
+                )
+
     def stop(self):
         """Stop the trading engine"""
         self.running = False
@@ -659,6 +680,18 @@ class TradingEngine:
         }
         """
         try:
+            # DEBUG_DROPS: Count and log first reception
+            self._snap_recv += 1
+
+            # DEBUG_DROPS: Log first snapshot reception
+            if self._snap_recv == 1 and snapshots and getattr(config, "DEBUG_DROPS", False):
+                s = snapshots[0]
+                last_price = s.get("price", {}).get("last", -1)
+                logger.info(
+                    f"SNAP_RX first symbol={s.get('symbol')} last={last_price:.8f}",
+                    extra={"event_type": "SNAP_RX_FIRST"}
+                )
+
             with self._lock:
                 for snap in snapshots:
                     # Validate snapshot version

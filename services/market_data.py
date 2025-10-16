@@ -964,7 +964,19 @@ class MarketDataProvider:
         self._thread = threading.Thread(target=self._loop, name="MarketDataLoop", daemon=True)
         self._thread.start()
 
-        logger.info("MARKET_DATA_LOOP_STARTED", extra={"event_type": "MARKET_DATA_LOOP_STARTED"})
+        # Get symbols and poll_ms for debug logging
+        import config
+        symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
+        poll_ms = getattr(config, "MD_POLL_MS", 1000)
+
+        logger.info(
+            f"MARKET_DATA_LOOP_STARTED symbols={len(symbols)} poll_ms={poll_ms}",
+            extra={
+                "event_type": "MARKET_DATA_LOOP_STARTED",
+                "symbols": symbols[:5] if symbols else [],  # Log first 5 symbols
+                "poll_ms": poll_ms
+            }
+        )
 
     def stop(self):
         """Stop market data polling loop"""
@@ -978,6 +990,7 @@ class MarketDataProvider:
         import config
         poll_ms = getattr(config, "MD_POLL_MS", 1000)
         poll_s = poll_ms / 1000.0
+        debug_drops = getattr(config, "DEBUG_DROPS", False)
 
         logger.info(f"Market data loop started with poll interval {poll_ms}ms")
 
@@ -986,21 +999,45 @@ class MarketDataProvider:
         if not symbols:
             symbols = ["BTC/USDT", "ETH/USDT"]  # Fallback
 
+        logger.info(f"MD_LOOP symbols_count={len(symbols)} first_5={symbols[:5] if symbols else []}")
+
         while self._running:
             try:
-                # Fetch all market snapshots
-                snaps = self.update_market_data(symbols)
+                # Fetch all market snapshots (returns Dict[str, bool] indicating success per symbol)
+                results = self.update_market_data(symbols)
+                success_count = sum(1 for v in results.values() if v)
 
-                # Log visible poll tick
-                if snaps:
-                    logger.debug(f"MD_POLL tick published count={len(snaps)}")
+                # DEBUG_DROPS: Detailed logging
+                if debug_drops:
+                    # Get first symbol price for sample logging
+                    first_sym = symbols[0] if symbols else None
+                    first_price = None
+                    if first_sym:
+                        cache_result = self.ticker_cache.get_ticker(first_sym)
+                        if cache_result:
+                            ticker, _ = cache_result
+                            first_price = ticker.last
+
+                    if success_count > 0:
+                        logger.debug(
+                            f"MD_POLL published count={success_count}/{len(symbols)} "
+                            f"first={first_sym} last={first_price:.8f if first_price else -1}"
+                        )
+                    else:
+                        logger.warning(
+                            f"MD_POLL produced 0 snapshots; symbols={symbols[:5] if symbols else []}"
+                        )
                 else:
-                    logger.warning("MD_POLL tick produced 0 snapshots")
+                    # Normal logging (less verbose)
+                    if success_count > 0:
+                        logger.debug(f"MD_POLL tick published count={success_count}/{len(symbols)}")
+                    else:
+                        logger.warning("MD_POLL tick produced 0 snapshots")
 
                 # Log telemetry (sample 10%)
                 if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:
                     try:
-                        self.telemetry.write("market", {"count": len(snaps), "success": sum(snaps.values())})
+                        self.telemetry.write("market", {"count": success_count, "total": len(symbols)})
                     except Exception:
                         pass
 

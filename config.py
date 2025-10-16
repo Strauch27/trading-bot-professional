@@ -109,6 +109,9 @@ WINDOW_STORE = "state/drop_windows"  # Window persistence directory
 USE_NEW_PIPELINE = True  # Use new snapshot-based pipeline architecture
 ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run testing)
 
+# Debug Drops - Detailed Logging for Drop% Debugging
+DEBUG_DROPS = True  # Enable detailed drop% debug logging with counters and watchdog
+
 # Guards - Market Quality (NEW - Simplified)
 MAX_SPREAD_BPS = 12  # Maximum spread in basis points (disabled if guards off)
 MIN_DEPTH_USD = 200  # Minimum order book depth in USD (disabled if guards off)

@@ -103,6 +103,9 @@ class EventBus:
 # Global event bus instance
 _global_event_bus: EventBus = None
 
+# Topic counters for debugging (only active when DEBUG_DROPS=True)
+topic_counters = {"published": {}, "received": {}}
+
 
 def get_event_bus() -> EventBus:
     """
@@ -114,4 +117,20 @@ def get_event_bus() -> EventBus:
     global _global_event_bus
     if _global_event_bus is None:
         _global_event_bus = EventBus()
+
+        # Wrap publish with debug counters if DEBUG_DROPS is enabled
+        try:
+            import config
+            if getattr(config, "DEBUG_DROPS", False):
+                orig_publish = _global_event_bus.publish
+
+                def dbg_publish(topic, payload):
+                    topic_counters["published"][topic] = topic_counters["published"].get(topic, 0) + 1
+                    return orig_publish(topic, payload)
+
+                _global_event_bus.publish = dbg_publish
+                logger.debug("EventBus debug counters enabled (DEBUG_DROPS=True)")
+        except Exception as e:
+            logger.debug(f"Could not enable EventBus debug counters: {e}")
+
     return _global_event_bus

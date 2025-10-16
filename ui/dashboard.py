@@ -308,7 +308,7 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
     return Panel(table, title=title, border_style="magenta", expand=True)
 
 
-def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]) -> Panel:
+def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
     """Create the top drops panel."""
     table = Table(expand=True, show_header=True)
     table.add_column("#", style="dim", justify="right", width=3)
@@ -341,7 +341,20 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
                 Text(f"{distance:+.2f}%", style=style)
             )
 
-    title = f"📉 Top Drops (Trigger: {drop_trigger_pct:.1f}%)"
+    # DEBUG_DROPS: Add snapshot reception counter to title
+    snap_rx = getattr(engine, '_snap_recv', 0)
+    last_tick_ts = "-"
+    if drop_data and len(drop_data) > 0:
+        # Try to get timestamp from first snapshot
+        try:
+            first_snap = list(getattr(engine, 'drop_snapshot_store', {}).values())[0]
+            ts = first_snap.get('ts')
+            if ts:
+                last_tick_ts = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M:%S")
+        except (IndexError, KeyError, TypeError):
+            pass
+
+    title = f"📉 Top Drops (Trigger: {drop_trigger_pct:.1f}%) • rx={snap_rx} • ts={last_tick_ts}"
     return Panel(table, title=title, border_style="cyan", expand=True)
 
 
@@ -402,7 +415,7 @@ def run_dashboard(engine, portfolio, config_module):
 
                     # Update UI components
                     layout["header"].update(make_header_panel(config_data))
-                    layout["side"].update(make_drop_panel(drop_data, config_data))
+                    layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
                     layout["footer"].update(make_footer_panel(last_event))
 
