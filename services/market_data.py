@@ -949,6 +949,61 @@ class MarketDataProvider:
         """Clear all cached data"""
         self.ticker_cache.clear()
 
+    def start(self):
+        """Start market data polling loop in background thread"""
+        if hasattr(self, '_running') and self._running:
+            logger.warning("Market data loop already running")
+            return
+
+        self._running = True
+        self._thread = None
+
+        import threading
+        self._thread = threading.Thread(target=self._loop, name="MarketDataLoop", daemon=True)
+        self._thread.start()
+
+        logger.info("MARKET_DATA_LOOP_STARTED", extra={"event_type": "MARKET_DATA_LOOP_STARTED"})
+
+    def stop(self):
+        """Stop market data polling loop"""
+        self._running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+        logger.info("Market data loop stopped")
+
+    def _loop(self):
+        """Market data polling loop - fetches and publishes snapshots"""
+        import config
+        poll_ms = getattr(config, "MD_POLL_MS", 1000)
+        poll_s = poll_ms / 1000.0
+
+        logger.info(f"Market data loop started with poll interval {poll_ms}ms")
+
+        # Get symbols from config or use defaults
+        symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
+        if not symbols:
+            symbols = ["BTC/USDT", "ETH/USDT"]  # Fallback
+
+        while self._running:
+            try:
+                # Fetch all market snapshots
+                snaps = self.update_market_data(symbols)
+
+                # Log telemetry (sample 10%)
+                if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:
+                    try:
+                        self.telemetry.write("market", {"count": len(snaps), "success": sum(snaps.values())})
+                    except Exception:
+                        pass
+
+                time.sleep(poll_s)
+
+            except Exception as e:
+                logger.error(f"Market data loop error: {e}", exc_info=True)
+                time.sleep(poll_s)
+
+        logger.info("Market data loop ended")
+
 
 # Utility functions for backwards compatibility
 def fetch_ticker_cached(exchange_or_provider, symbol: str) -> Dict[str, Any]:

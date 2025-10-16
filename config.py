@@ -101,7 +101,9 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 POLL_MS = 300  # Market data poll interval in milliseconds
+MD_POLL_MS = 1000  # Market data polling interval (1 second for responsive drops)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
+WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
 PERSIST_WINDOWS = True  # Persist rolling windows to disk
 WINDOW_STORE = "state/drop_windows"  # Window persistence directory
 USE_NEW_PIPELINE = True  # Use new snapshot-based pipeline architecture
@@ -551,6 +553,9 @@ topcoins_keys = [
     'MINAUSDT', 'PENDLEUSDT', 'ORDIUSDT', 'RONUSDT', 'SNXUSDT', 'COMPUSDT',
     'ZECUSDT', 'JTOUSDT', 'GRASSUSDT', 'DYDXUSDT', 'ARUSDT'
 ]
+
+# Convert to CCXT format (with slash) for market data loop
+TOPCOINS_SYMBOLS = [key.replace('USDT', '/USDT') for key in topcoins_keys]
 
 # =============================================================================
 # 16. MARKET DATA & RETENTION

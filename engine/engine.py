@@ -377,6 +377,15 @@ class TradingEngine:
             return
 
         logger.info("Starting Trading Engine...")
+
+        # Start market data loop
+        if hasattr(self, 'market_data') and hasattr(self.market_data, 'start'):
+            try:
+                self.market_data.start()
+                logger.info("Market data loop started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start market data loop: {e}")
+
         self.running = True
         self.main_thread = threading.Thread(target=self._main_loop, daemon=False, name="TradingEngine-Main")
         self.main_thread.start()
