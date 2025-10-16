@@ -122,6 +122,15 @@ ROUTER_MIN_NOTIONAL = 5.0  # Minimum order notional in quote currency
 USE_RECONCILER = True  # Enable reconciler for position lifecycle management
 TAKER_FEE_RATE = 0.001  # Default taker fee (0.1%) if not provided by exchange per-trade
 
+# Exit Engine - Prioritized Exit Rules (NEW - Signal-Based Exit Flow)
+EXIT_HARD_SL_PCT = 2.0  # Max loss before forced exit (%)
+EXIT_HARD_TP_PCT = 3.0  # Target profit (%)
+EXIT_TRAILING_ENABLE = True  # Enable trailing stop loss
+EXIT_TRAILING_PCT = 1.0  # Drawdown from peak/trough (%)
+EXIT_MAX_HOLD_S = 3600 * 24  # 24h max hold time in seconds
+EXIT_SL_MARKET = True  # Stop loss as market order
+EXIT_TP_MARKET = True  # Take profit as market order
+
 # =============================================================================
 # 4. POSITION MANAGEMENT
 # =============================================================================

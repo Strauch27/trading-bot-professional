@@ -8,6 +8,44 @@ from typing import Dict, List, Tuple, Optional, Any
 from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal
+from dataclasses import dataclass, field
+
+# =================================================================================
+# Position Data Model
+# =================================================================================
+
+@dataclass
+class Position:
+    """
+    Position tracking with lifecycle states and PnL.
+
+    States:
+        NEW: Position created, awaiting first fill
+        OPEN: Position has fills, actively held
+        PARTIAL_EXIT: Position being reduced
+        CLOSED: Position fully closed (qty = 0)
+
+    Attributes:
+        symbol: Trading pair
+        state: Current lifecycle state
+        qty: Net quantity (>0 long, <0 short, =0 closed)
+        avg_price: Weighted average entry price
+        realized_pnl: Realized profit/loss from closed portions
+        fees_paid: Total fees paid (in quote currency)
+        opened_ts: Timestamp when position opened
+        closed_ts: Timestamp when position closed (None if open)
+        meta: Additional metadata dict
+    """
+    symbol: str
+    state: str  # NEW|OPEN|PARTIAL_EXIT|CLOSED
+    qty: float  # net qty (>0 long, <0 short)
+    avg_price: float
+    realized_pnl: float
+    fees_paid: float
+    opened_ts: float
+    closed_ts: Optional[float] = None
+    meta: dict = field(default_factory=dict)
+
 
 # =================================================================================
 # Thread Safety Decorator
@@ -220,7 +258,13 @@ class PortfolioManager:
         # Budget reservation for atomic operations
         self.reserved_budget: float = 0.0
         self.active_reservations: Dict[str, Dict] = {}  # symbol -> {amount, timestamp, order_info}
-        
+
+        # Position Lifecycle & PnL Management (NEW - Reconciliation System)
+        self.positions: Dict[str, Position] = {}  # symbol -> Position
+        self.last_prices: Dict[str, float] = {}  # symbol -> last_price for marking
+        self.fee_rate: float = getattr(__import__('config'), 'TAKER_FEE_RATE', 0.001)
+        self.events: List[dict] = []  # Position events for audit trail
+
         # Initialize state (includes dust ledger)
         self.load_state()
         
@@ -1015,12 +1059,17 @@ class PortfolioManager:
         except Exception as e:
             logger.error(f"Error releasing budget for {symbol}: {e}")
 
-    def apply_fills(self, symbol: str, trades: list) -> None:
+    def apply_fills(self, symbol: str, trades: list) -> dict:
         """
-        Apply exchange fills to portfolio (reconciliation).
+        Apply exchange fills to portfolio using Position lifecycle.
 
         Converts reservations into actual positions with accurate
-        prices and fees from exchange trades.
+        prices, fees, and PnL tracking. Updates position state machine.
+
+        Position State Transitions:
+        - NEW → OPEN (first fills)
+        - OPEN → PARTIAL_EXIT (position being reduced)
+        - any → CLOSED (qty = 0)
 
         Args:
             symbol: Trading pair
@@ -1030,78 +1079,135 @@ class PortfolioManager:
                 - cost: Notional (price * amount)
                 - fee: Fee dict with cost and currency
                 - side: "buy" or "sell"
+
+        Returns:
+            Summary dict with qty_delta, notional, fees, state
         """
         try:
             if not trades:
                 logger.warning(f"apply_fills called with no trades for {symbol}")
-                return
+                return {}
+
+            # Get or create position
+            pos = self.positions.get(symbol)
+            if pos is None:
+                pos = Position(
+                    symbol=symbol,
+                    state="NEW",
+                    qty=0.0,
+                    avg_price=0.0,
+                    realized_pnl=0.0,
+                    fees_paid=0.0,
+                    opened_ts=time.time()
+                )
+                self.positions[symbol] = pos
 
             # Aggregate trade data
-            total_qty = sum(float(t.get("amount", 0)) for t in trades)
-            total_cost = sum(float(t.get("cost", 0)) for t in trades)
-            total_fee_quote = 0.0
+            tot_qty, notional, fees = 0.0, 0.0, 0.0
 
-            # Calculate weighted average price
-            avg_price = total_cost / total_qty if total_qty > 0 else 0.0
+            for t in trades:
+                q = float(t.get("amount", 0))
+                px = float(t.get("price", 0))
+                f = float((t.get("fee") or {}).get("cost") or 0.0)
+                side = t.get("side", "buy")
 
-            # Aggregate fees
-            for trade in trades:
-                fee_dict = trade.get("fee", {})
-                fee_cost = float(fee_dict.get("cost", 0))
-                fee_currency = fee_dict.get("currency", "")
+                # Fee conversion if needed
+                fee_curr = (t.get("fee") or {}).get("currency", "")
+                if fee_curr != "USDT" and f > 0:
+                    f = f * px  # Convert base fee to quote
 
-                # Convert fee to quote currency if needed
-                if fee_currency == "USDT":
-                    total_fee_quote += fee_cost
-                elif fee_cost > 0:
-                    # If fee is in base currency, convert to quote
-                    # fee_quote = fee_base * price
-                    total_fee_quote += fee_cost * avg_price
+                signed = q if side == "buy" else -q
 
-            side = trades[0].get("side", "buy")
+                # Update avg_price (only for net additions)
+                if (pos.qty >= 0 and signed > 0) or (pos.qty <= 0 and signed < 0):
+                    # Adding to position (long or short)
+                    if abs(pos.qty) > 0:
+                        pos.avg_price = (
+                            abs(pos.qty) * pos.avg_price + abs(signed) * px
+                        ) / (abs(pos.qty) + abs(signed))
+                    else:
+                        pos.avg_price = px
+                else:
+                    # Reducing position → calculate realized PnL
+                    reduced = min(abs(pos.qty), abs(signed))
+                    if reduced > 0:
+                        pnl_unit = (px - pos.avg_price) * (1 if pos.qty > 0 else -1)
+                        pos.realized_pnl += pnl_unit * reduced
 
-            if side == "buy":
-                # Buy fill: add to held assets
-                fee_per_unit = total_fee_quote / total_qty if total_qty > 0 else 0.0
+                pos.qty += signed
+                tot_qty += signed
+                notional += q * px
+                fees += f if f > 0 else q * px * self.fee_rate
 
+            pos.fees_paid += fees
+
+            # State transitions
+            if pos.qty == 0:
+                pos.state = "CLOSED"
+                pos.closed_ts = time.time()
+            elif pos.state == "NEW" and pos.qty != 0:
+                pos.state = "OPEN"
+            elif pos.state == "OPEN" and self._is_reducing(trades):
+                pos.state = "PARTIAL_EXIT"
+
+            # Release reservation (budget now committed)
+            if symbol in self.reserved_quote:
+                self.reserved_quote.pop(symbol, None)
+            if symbol in self.active_reservations:
+                del self.active_reservations[symbol]
+
+            # Emit position event
+            self._emit_event({
+                "type": "position_update",
+                "symbol": symbol,
+                "qty": pos.qty,
+                "avg": pos.avg_price,
+                "fees": pos.fees_paid,
+                "state": pos.state,
+                "timestamp": time.time()
+            })
+
+            # Legacy: also update held_assets for backwards compatibility
+            if pos.qty > 0:
                 self.add_held_asset(symbol, {
-                    "amount": total_qty,
-                    "entry_price": avg_price,
-                    "buy_price": avg_price,
-                    "buy_fee_quote_per_unit": fee_per_unit,
-                    "first_fill_ts": time.time()
+                    "amount": pos.qty,
+                    "entry_price": pos.avg_price,
+                    "buy_price": pos.avg_price,
+                    "buy_fee_quote_per_unit": pos.fees_paid / pos.qty if pos.qty > 0 else 0.0,
+                    "first_fill_ts": pos.opened_ts
                 })
-
-                # Commit reserved budget (convert reservation → spent)
-                self.commit_budget(total_cost + total_fee_quote, symbol=symbol)
-
-                logger.info(
-                    f"Applied {len(trades)} buy fills for {symbol}: "
-                    f"{total_qty:.8f} @ {avg_price:.8f} (cost: {total_cost:.2f} + fees: {total_fee_quote:.4f})"
-                )
-
-            else:  # sell
-                # Sell fill: remove from held assets
+            elif pos.state == "CLOSED":
                 self.remove_held_asset(symbol)
 
-                # Add proceeds to budget
-                net_proceeds = total_cost - total_fee_quote
-                self.my_budget += net_proceeds
+            logger.info(
+                f"Applied {len(trades)} fills for {symbol}: "
+                f"qty={pos.qty:.8f}, avg={pos.avg_price:.8f}, "
+                f"state={pos.state}, fees={fees:.4f}"
+            )
 
-                # Remove sell reservation
-                if symbol in self.active_reservations:
-                    del self.active_reservations[symbol]
-
-                logger.info(
-                    f"Applied {len(trades)} sell fills for {symbol}: "
-                    f"{total_qty:.8f} @ {avg_price:.8f} (proceeds: {net_proceeds:.2f})"
-                )
-
-            # Persist state
-            self.save_state()
+            return {
+                "qty_delta": tot_qty,
+                "notional": notional,
+                "fees": fees,
+                "state": pos.state
+            }
 
         except Exception as e:
             logger.error(f"Error applying fills for {symbol}: {e}", exc_info=True)
+            return {}
+
+    def _is_reducing(self, trades: List[dict]) -> bool:
+        """
+        Check if trades contain both buy and sell sides (position reduction).
+
+        Args:
+            trades: List of trade dicts
+
+        Returns:
+            True if trades contain mixed sides
+        """
+        sides = set(t.get("side") for t in trades)
+        return ("buy" in sides and "sell" in sides)
 
     def last_price(self, symbol: str) -> Optional[float]:
         """
@@ -1142,3 +1248,88 @@ class PortfolioManager:
         except Exception as e:
             logger.debug(f"Could not get last price for {symbol}: {e}")
             return None
+
+    # ==================================================================================
+    # Position Lifecycle & PnL Management (NEW - Reconciliation System)
+    # ==================================================================================
+
+    def mark_price(self, symbol: str, last: float) -> None:
+        """
+        Mark position with current market price for valuation.
+
+        Used by engine to update position valuations from market snapshots.
+
+        Args:
+            symbol: Trading pair
+            last: Current market price
+        """
+        self.last_prices[symbol] = last
+
+    def unrealized_pnl(self, symbol: str) -> float:
+        """
+        Calculate unrealized PnL for a position.
+
+        Args:
+            symbol: Trading pair
+
+        Returns:
+            Unrealized PnL in quote currency (positive = profit, negative = loss)
+        """
+        pos = self.positions.get(symbol)
+        last = self.last_prices.get(symbol)
+
+        if not pos or last is None or pos.qty == 0:
+            return 0.0
+
+        direction = 1 if pos.qty > 0 else -1
+        return (last - pos.avg_price) * abs(pos.qty) * direction
+
+    def position_view(self, symbol: str) -> dict:
+        """
+        Get consolidated position view for UI/monitoring.
+
+        Provides single source of truth for position state, PnL, and fees.
+
+        Args:
+            symbol: Trading pair
+
+        Returns:
+            Dict with:
+                - qty: Current quantity
+                - avg: Average entry price
+                - state: Position state (NEW/OPEN/PARTIAL_EXIT/CLOSED)
+                - upnl: Unrealized PnL
+                - rpnl: Realized PnL
+                - fees: Total fees paid
+        """
+        pos = self.positions.get(symbol)
+
+        if not pos:
+            return {
+                "qty": 0.0,
+                "avg": 0.0,
+                "state": "NONE",
+                "upnl": 0.0,
+                "rpnl": 0.0,
+                "fees": 0.0
+            }
+
+        upnl = self.unrealized_pnl(symbol)
+
+        return {
+            "qty": pos.qty,
+            "avg": pos.avg_price,
+            "state": pos.state,
+            "upnl": upnl,
+            "rpnl": pos.realized_pnl,
+            "fees": pos.fees_paid
+        }
+
+    def _emit_event(self, ev: dict) -> None:
+        """
+        Emit position event for audit trail.
+
+        Args:
+            ev: Event dict to append to events list
+        """
+        self.events.append(ev)

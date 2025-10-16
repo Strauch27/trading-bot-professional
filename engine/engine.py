@@ -69,6 +69,15 @@ from .position_manager import PositionManager
 from .exit_handler import ExitHandler
 from .engine_config import EngineConfig
 
+# NEW: Order Router & Reconciliation System
+from services.order_router import OrderRouter, RouterConfig
+from services.reconciler import Reconciler
+from interfaces.exchange_wrapper import ExchangeWrapper
+from telemetry.jsonl_writer import JsonlWriter
+
+# NEW: Exit Engine for Prioritized Exit Rules
+from .exit_engine import ExitEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -266,6 +275,56 @@ class TradingEngine:
             portfolio_manager=self.portfolio
         )
 
+        # NEW: Order Router & Reconciliation System
+        logger.info("Initializing Order Router and Reconciliation System...")
+
+        # Exchange Wrapper for Idempotency
+        self.exchange_wrapper = ExchangeWrapper(exchange)
+
+        # Telemetry for Order/Reconciliation Events
+        self.order_telemetry = JsonlWriter()
+
+        # Router Configuration
+        router_config = RouterConfig(
+            max_retries=getattr(config, 'ROUTER_MAX_RETRIES', 3),
+            retry_backoff_ms=getattr(config, 'ROUTER_BACKOFF_MS', 400),
+            tif=getattr(config, 'ROUTER_TIF', 'IOC'),
+            slippage_bps=getattr(config, 'ROUTER_SLIPPAGE_BPS', 20),
+            min_notional=getattr(config, 'ROUTER_MIN_NOTIONAL', 5.0)
+        )
+
+        # Order Router with FSM Execution
+        self.order_router = OrderRouter(
+            exchange_wrapper=self.exchange_wrapper,
+            portfolio=self.portfolio,
+            telemetry=self.order_telemetry,
+            config=router_config,
+            event_bus=self.event_bus
+        )
+
+        # Reconciler for Exchange-Truth Position Management
+        if getattr(config, 'USE_RECONCILER', True):
+            self.reconciler = Reconciler(
+                exchange=self.exchange_wrapper,
+                portfolio=self.portfolio,
+                telemetry=self.order_telemetry
+            )
+        else:
+            self.reconciler = None
+
+        # Subscribe to order events
+        self.event_bus.subscribe("order.intent", self._on_order_intent)
+        if self.reconciler:
+            self.event_bus.subscribe("order.filled", self._on_order_filled)
+
+        # Exit Engine with Prioritized Rules
+        self.exit_engine = ExitEngine(self, config)
+
+        # Snapshots storage for exit engine
+        self.snapshots: Dict[str, Dict] = {}  # symbol -> snapshot
+
+        logger.info("Order Router and Reconciliation System initialized")
+
         # Legacy Services - functionality moved to other services
         self.buy_service = None
         self.sell_service = None
@@ -387,7 +446,10 @@ class TradingEngine:
                     # 2. Process Exit Signals (every 1s) - Delegated to ExitHandler
                     if cycle_start - self.last_exit_processing > 1.0:
                         co.beat("before_exit_signals")
+                        # Legacy exit handler
                         self.exit_handler.process_exit_signals()
+                        # NEW: FSM-based exit scanning via ExitEngine
+                        self._maybe_scan_exits()
                         co.beat("after_exit_signals")
                         self.last_exit_processing = cycle_start
 
@@ -574,6 +636,8 @@ class TradingEngine:
         Updates drop_snapshot_store with latest versioned MarketSnapshots (v:1)
         for Dashboard/UI and BuyDecision consumption.
 
+        NEW: Also updates self.snapshots for ExitEngine and marks portfolio prices.
+
         MarketSnapshot format:
         {
           "v": 1,
@@ -596,7 +660,16 @@ class TradingEngine:
 
                     symbol = snap.get("symbol")
                     if symbol:
+                        # Store for Dashboard/UI
                         self.drop_snapshot_store[symbol] = snap
+
+                        # NEW: Store for ExitEngine
+                        self.snapshots[symbol] = snap
+
+                        # NEW: Mark portfolio price for PnL calculation
+                        last_price = snap.get("price", {}).get("last")
+                        if last_price:
+                            self.portfolio.mark_price(symbol, last_price)
 
             # Debug log (sample every 20th emission)
             if len(snapshots) > 0 and len(self.drop_snapshot_store) % 20 == 0:
@@ -608,9 +681,105 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"Market snapshot callback error: {e}")
 
+    def _on_order_intent(self, intent_data: Dict):
+        """
+        Handle order.intent events from decision layer.
+
+        Routes intent to OrderRouter for FSM-based execution.
+        This is the entry point for all order placements (buy and exit).
+
+        Args:
+            intent_data: Intent dict from assembler (entry or exit)
+        """
+        try:
+            logger.debug(f"Order intent received: {intent_data.get('intent_id')}")
+            self.order_router.handle_intent(intent_data)
+        except Exception as e:
+            logger.error(f"Order intent handler error: {e}", exc_info=True)
+
+    def _on_order_filled(self, event_data: Dict):
+        """
+        Handle order.filled events from OrderRouter.
+
+        Triggers reconciliation to convert reservations into positions
+        using actual exchange fills.
+
+        Args:
+            event_data: Event payload with symbol and order_id
+        """
+        try:
+            symbol = event_data.get("symbol")
+            order_id = event_data.get("order_id")
+
+            if not symbol or not order_id:
+                logger.warning(f"Invalid order.filled event: {event_data}")
+                return
+
+            # Reconcile order to update position with exchange truth
+            if self.reconciler:
+                summary = self.reconciler.reconcile_order(symbol, order_id)
+
+                if summary:
+                    logger.info(
+                        f"Position reconciled: {symbol} - "
+                        f"state={summary.get('state')}, "
+                        f"qty_delta={summary.get('qty_delta')}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Order filled event handler error: {e}", exc_info=True)
+
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price via Market Data Service"""
         return self.market_data.get_price(symbol)
+
+    def _maybe_scan_exits(self):
+        """
+        Scan all open positions for exit signals via ExitEngine.
+
+        For each position:
+        1. Check exit rules via ExitEngine (HARD_SL > HARD_TP > TRAIL_SL > TIME_EXIT)
+        2. Generate exit signal if rule triggered
+        3. Build ExitIntent with deterministic intent_id
+        4. Route to OrderRouter for execution via order.intent event
+
+        This is the CORE of the exit flow - runs every main loop iteration.
+        """
+        try:
+            # Iterate over all open positions
+            for symbol in list(self.portfolio.positions.keys()):
+                pos = self.portfolio.positions.get(symbol)
+
+                # Skip positions with no qty (closed)
+                if not pos or pos.qty == 0:
+                    continue
+
+                # Evaluate exit rules (prioritized)
+                exit_signal = self.exit_engine.choose(symbol)
+
+                if exit_signal:
+                    # Log exit signal
+                    logger.info(
+                        f"Exit signal: {symbol} - "
+                        f"rule={exit_signal.get('rule_code')}, "
+                        f"reason={exit_signal.get('reason')}"
+                    )
+
+                    # Assemble ExitIntent with deterministic intent_id
+                    from decision.exit_assembler import assemble as assemble_exit_intent
+                    exit_intent = assemble_exit_intent(exit_signal)
+
+                    if exit_intent:
+                        # Publish order.intent event for OrderRouter
+                        self.event_bus.publish("order.intent", exit_intent.__dict__)
+
+                        logger.info(
+                            f"Exit intent published: {exit_intent.intent_id} - "
+                            f"{symbol} {exit_intent.side} {exit_intent.qty}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Exit scan error: {e}", exc_info=True)
 
     # =================================================================
     # BUY OPPORTUNITY EVALUATION - Delegated to Handler
