@@ -39,5 +39,5 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # Use double quotes for strings
 quote-style = "double"
 
-# Indent with 4 spaces
-indent-width = 4
+# Indent with spaces (not tabs)
+indent-style = "space"
