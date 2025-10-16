@@ -925,3 +925,220 @@ class PortfolioManager:
         pending = float(open_buy.get("quote") or open_buy.get("quote_amount", 0.0))
         
         return held_cost + reserved + pending
+
+    # ==================================================================================
+    # OrderRouter Integration - Reserve/Release/Reconcile API
+    # ==================================================================================
+
+    def reserve(self, symbol: str, side: str, qty: float, price: float) -> bool:
+        """
+        Reserve budget for OrderRouter before placing order.
+
+        This wraps the existing reserve_budget() method with the API
+        that OrderRouter expects.
+
+        Args:
+            symbol: Trading pair
+            side: "buy" or "sell"
+            qty: Quantity to trade
+            price: Price for notional calculation
+
+        Returns:
+            True if reservation successful, False if insufficient budget
+        """
+        try:
+            notional = qty * price
+
+            if side == "buy":
+                # Buy: reserve quote currency (USDT)
+                self.reserve_budget(notional, symbol=symbol, order_info={
+                    "side": side,
+                    "qty": qty,
+                    "price": price
+                })
+                return True
+
+            else:  # sell
+                # Sell: check if we have enough base currency
+                base_currency = symbol.split("/")[0]
+                available = self.get_balance(base_currency)
+
+                if available >= qty:
+                    # Reserve by tracking (no actual USDT reservation needed)
+                    # Just track in active_reservations
+                    if symbol not in self.active_reservations:
+                        self.active_reservations[symbol] = {
+                            "amount": qty,
+                            "timestamp": time.time(),
+                            "order_info": {"side": "sell", "qty": qty, "price": price}
+                        }
+                    return True
+                else:
+                    logger.warning(
+                        f"Insufficient {base_currency} for sell: need {qty}, have {available}"
+                    )
+                    return False
+
+        except ValueError as e:
+            # reserve_budget raises ValueError if insufficient
+            logger.warning(f"Budget reservation failed for {symbol}: {e}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Unexpected error in reserve(): {e}")
+            return False
+
+    def release(self, symbol: str, side: str, qty: float, price: float) -> None:
+        """
+        Release reserved budget (on order failure or partial fill).
+
+        This wraps the existing release_budget() method.
+
+        Args:
+            symbol: Trading pair
+            side: "buy" or "sell"
+            qty: Quantity to release
+            price: Price used for notional calculation
+        """
+        try:
+            notional = qty * price
+
+            if side == "buy":
+                # Release reserved quote currency
+                self.release_budget(notional, symbol=symbol, reason="order_router_release")
+
+            else:  # sell
+                # Remove sell reservation tracking
+                if symbol in self.active_reservations:
+                    del self.active_reservations[symbol]
+
+        except Exception as e:
+            logger.error(f"Error releasing budget for {symbol}: {e}")
+
+    def apply_fills(self, symbol: str, trades: list) -> None:
+        """
+        Apply exchange fills to portfolio (reconciliation).
+
+        Converts reservations into actual positions with accurate
+        prices and fees from exchange trades.
+
+        Args:
+            symbol: Trading pair
+            trades: List of trade dicts from exchange with:
+                - price: Execution price
+                - amount: Filled quantity
+                - cost: Notional (price * amount)
+                - fee: Fee dict with cost and currency
+                - side: "buy" or "sell"
+        """
+        try:
+            if not trades:
+                logger.warning(f"apply_fills called with no trades for {symbol}")
+                return
+
+            # Aggregate trade data
+            total_qty = sum(float(t.get("amount", 0)) for t in trades)
+            total_cost = sum(float(t.get("cost", 0)) for t in trades)
+            total_fee_quote = 0.0
+
+            # Calculate weighted average price
+            avg_price = total_cost / total_qty if total_qty > 0 else 0.0
+
+            # Aggregate fees
+            for trade in trades:
+                fee_dict = trade.get("fee", {})
+                fee_cost = float(fee_dict.get("cost", 0))
+                fee_currency = fee_dict.get("currency", "")
+
+                # Convert fee to quote currency if needed
+                if fee_currency == "USDT":
+                    total_fee_quote += fee_cost
+                elif fee_cost > 0:
+                    # If fee is in base currency, convert to quote
+                    # fee_quote = fee_base * price
+                    total_fee_quote += fee_cost * avg_price
+
+            side = trades[0].get("side", "buy")
+
+            if side == "buy":
+                # Buy fill: add to held assets
+                fee_per_unit = total_fee_quote / total_qty if total_qty > 0 else 0.0
+
+                self.add_held_asset(symbol, {
+                    "amount": total_qty,
+                    "entry_price": avg_price,
+                    "buy_price": avg_price,
+                    "buy_fee_quote_per_unit": fee_per_unit,
+                    "first_fill_ts": time.time()
+                })
+
+                # Commit reserved budget (convert reservation → spent)
+                self.commit_budget(total_cost + total_fee_quote, symbol=symbol)
+
+                logger.info(
+                    f"Applied {len(trades)} buy fills for {symbol}: "
+                    f"{total_qty:.8f} @ {avg_price:.8f} (cost: {total_cost:.2f} + fees: {total_fee_quote:.4f})"
+                )
+
+            else:  # sell
+                # Sell fill: remove from held assets
+                self.remove_held_asset(symbol)
+
+                # Add proceeds to budget
+                net_proceeds = total_cost - total_fee_quote
+                self.my_budget += net_proceeds
+
+                # Remove sell reservation
+                if symbol in self.active_reservations:
+                    del self.active_reservations[symbol]
+
+                logger.info(
+                    f"Applied {len(trades)} sell fills for {symbol}: "
+                    f"{total_qty:.8f} @ {avg_price:.8f} (proceeds: {net_proceeds:.2f})"
+                )
+
+            # Persist state
+            self.save_state()
+
+        except Exception as e:
+            logger.error(f"Error applying fills for {symbol}: {e}", exc_info=True)
+
+    def last_price(self, symbol: str) -> Optional[float]:
+        """
+        Get last known price for symbol.
+
+        Used by OrderRouter for slippage guard and budget calculations.
+
+        Args:
+            symbol: Trading pair
+
+        Returns:
+            Last price or None if not available
+        """
+        try:
+            # Try to get from held assets (entry price)
+            if symbol in self.held_assets:
+                asset = self.held_assets[symbol]
+                entry_price = asset.get("entry_price") or asset.get("buy_price")
+                if entry_price and entry_price > 0:
+                    return float(entry_price)
+
+            # Try to get from open buy orders
+            if symbol in self.open_buy_orders:
+                order = self.open_buy_orders[symbol]
+                order_price = order.get("price")
+                if order_price and order_price > 0:
+                    return float(order_price)
+
+            # Fallback: fetch from exchange
+            if self.exchange:
+                ticker = self.exchange.fetch_ticker(symbol)
+                last = ticker.get("last")
+                if last and last > 0:
+                    return float(last)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Could not get last price for {symbol}: {e}")
+            return None

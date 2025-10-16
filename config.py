@@ -111,6 +111,13 @@ ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run tes
 MAX_SPREAD_BPS = 12  # Maximum spread in basis points (disabled if guards off)
 MIN_DEPTH_USD = 200  # Minimum order book depth in USD (disabled if guards off)
 
+# Order Router - FSM Execution (NEW - Decision/Execution Separation)
+ROUTER_MAX_RETRIES = 3  # Maximum retry attempts for failed orders
+ROUTER_BACKOFF_MS = 400  # Initial backoff in milliseconds (exponential)
+ROUTER_TIF = "IOC"  # Time in force: "IOC" (Immediate or Cancel) or "GTC" (Good Till Cancel)
+ROUTER_SLIPPAGE_BPS = 20  # Maximum allowed slippage in basis points
+ROUTER_MIN_NOTIONAL = 5.0  # Minimum order notional in quote currency
+
 # =============================================================================
 # 4. POSITION MANAGEMENT
 # =============================================================================
