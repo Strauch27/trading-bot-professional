@@ -76,16 +76,16 @@ class BuyDecisionHandler:
         try:
             trace_step("decision_started", symbol=symbol, price=current_price, decision_id=decision_id)
 
-            # 0. Update Rolling Window FIRST (before guards, always!)
-            # CRITICAL: This must run BEFORE any early returns from guards
-            trace_step("update_drop_window", symbol=symbol, price=current_price)
-            if symbol not in self.engine.rolling_windows:
-                from signals.rolling_window import RollingWindow
-                window_len = getattr(config, 'DROP_TRIGGER_LOOKBACK_SECONDS', 60)
-                self.engine.rolling_windows[symbol] = RollingWindow(window_len)
-
-            # signals.RollingWindow API = push(price)
-            self.engine.rolling_windows[symbol].push(current_price)
+            # 0. NEW PIPELINE: Read drop data from MarketSnapshot store
+            # RollingWindows are now updated centrally in MarketDataService
+            snapshot = self.engine.drop_snapshot_store.get(symbol)
+            if snapshot:
+                drop_pct = snapshot.get('windows', {}).get('drop_pct')
+                peak = snapshot.get('windows', {}).get('peak')
+                trace_step("snapshot_read", symbol=symbol, drop_pct=drop_pct, peak=peak,
+                          snapshot_ts=snapshot.get('ts'))
+            else:
+                trace_step("no_snapshot", symbol=symbol, info="No snapshot in store yet")
 
             # 1. Update price data in buy signal service
             trace_step("update_buy_signal_service", symbol=symbol, price=current_price)
@@ -269,16 +269,20 @@ class BuyDecisionHandler:
 
             # Phase 1: Log structured drop_trigger_eval event
             with Trace(decision_id=decision_id):
-                # Get anchor price from rolling window
+                # Get peak (anchor) price from MarketSnapshot
                 anchor_price = None
-                if symbol in self.engine.rolling_windows:
-                    anchor_price = self.engine.rolling_windows[symbol].get_window_start_price()
+                if snapshot:
+                    anchor_price = snapshot.get('windows', {}).get('peak')
+
+                # Fallback to context if snapshot not available
+                if anchor_price is None:
+                    anchor_price = context.get('anchor')
 
                 log_event(
                     DECISION_LOG(),
                     "drop_trigger_eval",
                     symbol=symbol,
-                    anchor=anchor_price or context.get('anchor'),
+                    anchor=anchor_price,
                     current_price=current_price,
                     drop_pct=context.get('drop_pct', 0),
                     threshold=getattr(config, 'DROP_TRIGGER_VALUE', 0.96) * 100 - 100,  # Convert to pct

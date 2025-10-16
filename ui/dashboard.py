@@ -140,15 +140,27 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
 
             for symbol, snap in drop_snapshot_store.items():
                 try:
-                    drop_pct = snap.get('drop_pct')
+                    # Validate snapshot version
+                    if snap.get('v') != 1:
+                        logger.debug(f"Skipping snapshot for {symbol}: unknown version {snap.get('v')}")
+                        continue
+
+                    # Read from MarketSnapshot structure
+                    windows = snap.get('windows', {})
+                    drop_pct = windows.get('drop_pct')
+
                     if drop_pct is None:
                         continue
+
+                    price_data = snap.get('price', {})
+                    current_price = price_data.get('last', 0)
+                    anchor = windows.get('peak', 0)
 
                     drops.append({
                         'symbol': symbol,
                         'drop_pct': drop_pct,
-                        'current_price': snap.get('current', 0),
-                        'anchor': snap.get('peak', 0),
+                        'current_price': current_price,
+                        'anchor': anchor,
                     })
                 except Exception as e:
                     logger.debug(f"Error processing snapshot for {symbol}: {e}")

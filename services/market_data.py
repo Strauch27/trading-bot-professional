@@ -29,6 +29,13 @@ from services.time_utils import (
 )
 from services.md_audit import MarketDataAuditor
 
+# Import new pipeline components
+from core.price_cache import PriceCache
+from core.rolling_windows import RollingWindowManager
+from features.engine import compute as compute_features
+from market.snapshot_builder import build as build_snapshot
+from telemetry.jsonl_writer import JsonlWriter
+
 # Import from market_data submodule
 import sys
 import os
@@ -358,32 +365,33 @@ class MarketDataProvider:
                 enabled=True
             )
 
-        # Drop Tracking (Long-term solution: RollingWindowManager)
+        # New Pipeline Components
         self.enable_drop_tracking = enable_drop_tracking
-        self.rw_manager = None
         self.event_bus = event_bus
-        self.last_snapshot_emit_ms = 0
-        self.snapshot_interval_ms = 500  # Default, can be overridden from config
+        self.price_cache = None
+        self.rw_manager = None
+        self.telemetry = None
 
         if self.enable_drop_tracking:
-            # Import config and RollingWindowManager
+            # Import config for pipeline settings
             import config
-            from core.rolling_windows import RollingWindowManager
 
-            lookback_s = getattr(config, 'DROP_LOOKBACK_SECONDS', 300)
-            persist = getattr(config, 'DROP_PERSIST_WINDOWS', True)
-            base_path = getattr(config, 'DROP_STORAGE_PATH', 'state/drop_windows')
-            self.snapshot_interval_ms = getattr(config, 'DROP_SNAPSHOT_INTERVAL_MS', 500)
+            lookback_s = getattr(config, 'WINDOW_LOOKBACK_S', 300)
+            persist = getattr(config, 'PERSIST_WINDOWS', True)
+            base_path = getattr(config, 'WINDOW_STORE', 'state/drop_windows')
 
+            # Initialize pipeline components
+            self.price_cache = PriceCache(seconds=lookback_s)
             self.rw_manager = RollingWindowManager(
                 lookback_s=lookback_s,
                 persist=persist,
                 base_path=base_path
             )
+            self.telemetry = JsonlWriter(base="telemetry")
 
             logger.info(
-                f"Drop tracking enabled: lookback={lookback_s}s, "
-                f"persist={persist}, snapshot_interval={self.snapshot_interval_ms}ms"
+                f"Snapshot pipeline enabled: lookback={lookback_s}s, "
+                f"persist={persist}, base_path={base_path}"
             )
 
     def get_ticker(self, symbol: str, use_cache: bool = True) -> Optional[TickerData]:
@@ -773,61 +781,19 @@ class MarketDataProvider:
 
         return results
 
-    def _maybe_emit_drop_snapshots(self, now: float):
-        """
-        Emit drop snapshots periodically via event bus.
-
-        Args:
-            now: Current timestamp
-        """
-        if not self.enable_drop_tracking or not self.rw_manager or not self.event_bus:
-            return
-
-        # Check if it's time to emit snapshots
-        ms = math.floor(now * 1000)
-        if ms - self.last_snapshot_emit_ms < self.snapshot_interval_ms:
-            return
-
-        self.last_snapshot_emit_ms = ms
-
-        # Collect all current prices from cache
-        prices = {}
-        with self._lock:
-            # Get all symbols in ticker cache
-            for symbol_key in self.ticker_cache._cache.keys():
-                ticker_result = self.ticker_cache.get_ticker(symbol_key)
-                if ticker_result:
-                    ticker, status = ticker_result
-                    # Accept both HIT and STALE for snapshots
-                    if ticker and ticker.last > 0:
-                        prices[symbol_key] = ticker.last
-
-        # Generate snapshots
-        snaps = self.rw_manager.get_all_snapshots(prices, now)
-
-        if snaps:
-            # Publish to event bus
-            self.event_bus.publish("drop.snapshots", snaps)
-
-            # Update statistics
-            self._statistics['drop_snapshots_emitted'] += 1
-
-            # Optional: Persist windows
-            if self.rw_manager.persist:
-                try:
-                    self.rw_manager.persist_all()
-                except Exception as e:
-                    logger.debug(f"Failed to persist rolling windows: {e}")
-
-            # Audit log (sample every 10th emission)
-            if self._statistics['drop_snapshots_emitted'] % 10 == 0:
-                logger.debug(
-                    f"Emitted drop snapshots: {len(snaps)} symbols, "
-                    f"total emissions: {self._statistics['drop_snapshots_emitted']}"
-                )
-
     def update_market_data(self, symbols: List[str]) -> Dict[str, bool]:
-        """Update market data for multiple symbols with drop tracking"""
+        """
+        Update market data for multiple symbols with new snapshot pipeline.
+
+        Pipeline flow:
+        1. Fetch tickers (normalize)
+        2. Update PriceCache
+        3. Update RollingWindows
+        4. Compute features
+        5. Build MarketSnapshots
+        6. Publish via EventBus
+        7. Log to JSONL
+        """
         from services.shutdown_coordinator import get_shutdown_coordinator
         co = get_shutdown_coordinator()
 
@@ -835,32 +801,121 @@ class MarketDataProvider:
         now = time.time()
         results = {}
 
+        # Check if new pipeline is enabled
+        import config
+        use_new_pipeline = getattr(config, 'USE_NEW_PIPELINE', False)
+
+        if not use_new_pipeline or not self.enable_drop_tracking:
+            # Fallback to legacy behavior
+            for symbol in symbols:
+                try:
+                    ticker = self.get_ticker(symbol, use_cache=False)
+                    results[symbol] = ticker is not None
+
+                    if ticker and self.enable_drop_tracking and self.rw_manager:
+                        try:
+                            self.rw_manager.update(symbol, now, ticker.last)
+                        except Exception as e:
+                            logger.debug(f"Failed to update rolling window for {symbol}: {e}")
+
+                except Exception as e:
+                    logger.error(f"Market data update failed for {symbol}: {e}")
+                    results[symbol] = False
+
+            co.beat("md_update_end")
+            return results
+
+        # New Pipeline: Fetch all tickers first
+        tickers = {}
         for symbol in symbols:
             try:
-                # Update ticker
                 ticker = self.get_ticker(symbol, use_cache=False)
-                results[symbol] = ticker is not None
-
-                # Update rolling window for drop tracking
-                if ticker and self.enable_drop_tracking and self.rw_manager:
-                    try:
-                        self.rw_manager.update(symbol, now, ticker.last)
-                    except Exception as e:
-                        logger.debug(f"Failed to update rolling window for {symbol}: {e}")
-
-                # Optionally fetch latest OHLCV
-                if ticker:
-                    self.fetch_ohlcv(symbol, '1m', limit=1, store=True)
-
+                if ticker and ticker.last > 0:
+                    tickers[symbol] = ticker
+                    results[symbol] = True
+                else:
+                    results[symbol] = False
             except Exception as e:
-                logger.error(f"Market data update failed for {symbol}: {e}")
+                logger.debug(f"Failed to fetch ticker for {symbol}: {e}")
                 results[symbol] = False
 
-        # Emit drop snapshots periodically
-        self._maybe_emit_drop_snapshots(now)
+        # Update PriceCache with all current prices
+        if self.price_cache:
+            price_dict = {sym: t.last for sym, t in tickers.items()}
+            self.price_cache.update(price_dict, now)
+
+        # Update RollingWindows and build snapshots
+        snapshots = []
+        for symbol, ticker in tickers.items():
+            try:
+                # Update rolling window
+                if self.rw_manager:
+                    self.rw_manager.update(symbol, now, ticker.last)
+
+                    # Get window state (peak/trough)
+                    window = self.rw_manager.windows.get(symbol)
+                    if window:
+                        peak = window.max_val if window.max_val != float('-inf') else None
+                        trough = window.min_val if window.min_val != float('inf') else None
+
+                        windows_dict = {
+                            "peak": peak,
+                            "trough": trough
+                        }
+                    else:
+                        windows_dict = {"peak": None, "trough": None}
+                else:
+                    windows_dict = {"peak": None, "trough": None}
+
+                # Compute features from price cache observations
+                features_dict = {}
+                if self.price_cache:
+                    obs = self.price_cache.buffers.get(symbol, [])
+                    if obs:
+                        features_dict = compute_features(obs)
+
+                # Build MarketSnapshot
+                snapshot = build_snapshot(
+                    symbol=symbol,
+                    ts=now,
+                    last=ticker.last,
+                    bid=ticker.bid,
+                    ask=ticker.ask,
+                    windows=windows_dict,
+                    features=features_dict,
+                    spread_bps=ticker.spread_bps
+                )
+
+                snapshots.append(snapshot)
+
+            except Exception as e:
+                logger.debug(f"Failed to build snapshot for {symbol}: {e}")
+
+        # Publish all snapshots via EventBus
+        if snapshots and self.event_bus:
+            try:
+                self.event_bus.publish("market.snapshots", snapshots)
+                self._statistics['drop_snapshots_emitted'] += 1
+            except Exception as e:
+                logger.debug(f"Failed to publish snapshots: {e}")
+
+        # Log to JSONL telemetry (sample 10%)
+        if self.telemetry and snapshots and self._statistics['drop_snapshots_emitted'] % 10 == 0:
+            try:
+                for snap in snapshots:
+                    self.telemetry.write("market_snapshot", snap)
+            except Exception:
+                pass  # Silent fail for telemetry
+
+        # Persist windows periodically
+        if self.rw_manager and self.rw_manager.persist and self._statistics['drop_snapshots_emitted'] % 20 == 0:
+            try:
+                self.rw_manager.persist_all()
+            except Exception as e:
+                logger.debug(f"Failed to persist windows: {e}")
 
         co.beat("md_update_end")
-        logger.info(f"HEARTBEAT - Market data update completed for {len(symbols)} symbols, {sum(results.values())} successful",
+        logger.info(f"HEARTBEAT - Market data update completed: {len(symbols)} symbols, {sum(results.values())} successful, {len(snapshots)} snapshots",
                    extra={"event_type": "HEARTBEAT"})
         return results
 

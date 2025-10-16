@@ -190,8 +190,8 @@ class TradingEngine:
             event_bus=self.event_bus
         )
 
-        # Subscribe to drop snapshots
-        self.event_bus.subscribe("drop.snapshots", self._on_drop_snapshots)
+        # Subscribe to market snapshots (new pipeline)
+        self.event_bus.subscribe("market.snapshots", self._on_drop_snapshots)
 
         # Drop 2: Signal Management
         self.signal_manager = SignalManager()
@@ -569,13 +569,31 @@ class TradingEngine:
 
     def _on_drop_snapshots(self, snapshots: list[Dict]):
         """
-        Callback for drop snapshot events from MarketDataService.
+        Callback for market snapshot events from MarketDataService.
 
-        Updates drop_snapshot_store with latest snapshots for Dashboard/UI consumption.
+        Updates drop_snapshot_store with latest versioned MarketSnapshots (v:1)
+        for Dashboard/UI and BuyDecision consumption.
+
+        MarketSnapshot format:
+        {
+          "v": 1,
+          "ts": timestamp,
+          "symbol": "BTC/USDT",
+          "price": {"last": ..., "bid": ..., "ask": ..., "mid": ...},
+          "windows": {"peak": ..., "trough": ..., "drop_pct": ..., "rise_pct": ...},
+          "features": {"atr": ...},
+          "state": {"trend": ..., "vol_regime": ..., "liq_grade": ...},
+          "flags": {"anomaly": ..., "stale": ...}
+        }
         """
         try:
             with self._lock:
                 for snap in snapshots:
+                    # Validate snapshot version
+                    if snap.get("v") != 1:
+                        logger.warning(f"Unknown snapshot version: {snap.get('v')}")
+                        continue
+
                     symbol = snap.get("symbol")
                     if symbol:
                         self.drop_snapshot_store[symbol] = snap
@@ -583,12 +601,12 @@ class TradingEngine:
             # Debug log (sample every 20th emission)
             if len(snapshots) > 0 and len(self.drop_snapshot_store) % 20 == 0:
                 logger.debug(
-                    f"Drop snapshot store updated: {len(snapshots)} snapshots, "
+                    f"Market snapshot store updated: {len(snapshots)} snapshots, "
                     f"total tracked: {len(self.drop_snapshot_store)}"
                 )
 
         except Exception as e:
-            logger.error(f"Drop snapshot callback error: {e}")
+            logger.error(f"Market snapshot callback error: {e}")
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price via Market Data Service"""

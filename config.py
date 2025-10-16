@@ -99,6 +99,18 @@ DROP_SNAPSHOT_INTERVAL_MS = 500  # Snapshot-Events alle 500ms
 DROP_PERSIST_WINDOWS = True  # Persistiere RollingWindows zwischen Restarts
 DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
+# Pipeline Architecture (NEW - Unified Market Data Pipeline)
+POLL_MS = 300  # Market data poll interval in milliseconds
+WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
+PERSIST_WINDOWS = True  # Persist rolling windows to disk
+WINDOW_STORE = "state/drop_windows"  # Window persistence directory
+USE_NEW_PIPELINE = True  # Use new snapshot-based pipeline architecture
+ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run testing)
+
+# Guards - Market Quality (NEW - Simplified)
+MAX_SPREAD_BPS = 12  # Maximum spread in basis points (disabled if guards off)
+MIN_DEPTH_USD = 200  # Minimum order book depth in USD (disabled if guards off)
+
 # =============================================================================
 # 4. POSITION MANAGEMENT
 # =============================================================================

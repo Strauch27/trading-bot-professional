@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Rolling Window Manager for Drop Tracking
+Rolling Window Manager for Drop/Rise Tracking
 
-Centralized management of rolling price windows for drop detection.
+Centralized management of rolling price windows for drop/rise detection.
 Designed to be updated in the market data pipeline, independent of buy flow.
+
+New Features:
+- Tracks both peak (max) and trough (min)
+- Computes both drop_pct and rise_pct
+- Simplified API for snapshot builder
 """
 
 import os
@@ -18,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 class RollingWindow:
     """
-    Rolling window that tracks prices over a time period and computes peak.
+    Rolling window that tracks prices over a time period.
 
-    Efficiently maintains the maximum value and trims old entries.
+    Efficiently maintains max/min values and trims old entries.
     """
 
-    def __init__(self, lookback_s: int):
+    def __init__(self, lookback_s: int) -> None:
         """
         Initialize rolling window.
 
@@ -33,31 +38,30 @@ class RollingWindow:
         self.lookback_s = lookback_s
         self.q: Deque[Tuple[float, float]] = deque()  # (timestamp, price)
         self.max_val: float = float("-inf")  # Peak price in window
+        self.min_val: float = float("inf")   # Trough price in window
 
-    def _trim(self, now_ts: float) -> bool:
+    def _trim(self, now_ts: float) -> None:
         """
         Remove old entries outside the lookback window.
 
         Args:
             now_ts: Current timestamp
-
-        Returns:
-            True if any entries were removed
         """
         lb = now_ts - self.lookback_s
-        popped = False
+        popped_max = popped_min = False
 
         while self.q and self.q[0][0] < lb:
-            t, v = self.q.popleft()
-            popped = True
+            _, v = self.q.popleft()
+            popped_max |= (v == self.max_val)
+            popped_min |= (v == self.min_val)
 
-            # If we removed the max value, recompute max
-            if v == self.max_val:
-                self.max_val = max((x[1] for x in self.q), default=float("-inf"))
+        # Recompute extrema if they were removed
+        if popped_max:
+            self.max_val = max((v for _, v in self.q), default=float("-inf"))
+        if popped_min:
+            self.min_val = min((v for _, v in self.q), default=float("inf"))
 
-        return popped
-
-    def add(self, ts: float, price: float):
+    def add(self, ts: float, price: float) -> None:
         """
         Add a price observation to the window.
 
@@ -67,9 +71,11 @@ class RollingWindow:
         """
         self.q.append((ts, price))
 
-        # Update max if this is a new peak
+        # Update extrema
         if price > self.max_val:
             self.max_val = price
+        if price < self.min_val:
+            self.min_val = price
 
         # Trim old entries
         self._trim(ts)
@@ -83,6 +89,15 @@ class RollingWindow:
         """
         return None if self.max_val == float("-inf") else self.max_val
 
+    def trough(self) -> Optional[float]:
+        """
+        Get the trough (minimum) price in the window.
+
+        Returns:
+            Trough price or None if window is empty
+        """
+        return None if self.min_val == float("inf") else self.min_val
+
     def drop_pct(self, price: float) -> Optional[float]:
         """
         Calculate drop percentage from peak to current price.
@@ -91,59 +106,34 @@ class RollingWindow:
             price: Current price
 
         Returns:
-            Drop percentage (negative value) or None if no peak
+            Drop percentage or None if no peak
         """
         p = self.peak()
         if p is None or p <= 0:
             return None
         return (price - p) / p * 100.0
 
-    def snapshot(self, symbol: str, current_price: float, ts: float) -> Dict:
+    def rise_pct(self, price: float) -> Optional[float]:
         """
-        Create a snapshot of current drop state.
+        Calculate rise percentage from trough to current price.
 
         Args:
-            symbol: Trading symbol
-            current_price: Current price
-            ts: Current timestamp
+            price: Current price
 
         Returns:
-            Snapshot dict with ts, symbol, current, peak, drop_pct
+            Rise percentage or None if no trough
         """
-        peak = self.peak()
-        drop = None if peak in (None, 0.0) else (current_price - peak) / peak * 100.0
-
-        return {
-            "ts": ts,
-            "symbol": symbol,
-            "current": current_price,
-            "peak": peak,
-            "drop_pct": drop
-        }
-
-    def to_json(self) -> Dict:
-        """Serialize window to JSON for persistence."""
-        return {
-            "lookback_s": self.lookback_s,
-            "data": list(self.q)
-        }
-
-    @staticmethod
-    def from_json(obj: Dict) -> 'RollingWindow':
-        """Deserialize window from JSON."""
-        rw = RollingWindow(obj["lookback_s"])
-        for t, v in obj["data"]:
-            rw.q.append((t, v))
-            if v > rw.max_val:
-                rw.max_val = v
-        return rw
+        t = self.trough()
+        if t is None or t <= 0:
+            return None
+        return (price - t) / t * 100.0
 
 
 class RollingWindowManager:
     """
     Manages rolling windows for multiple symbols with optional persistence.
 
-    This is the central component for drop tracking, designed to be integrated
+    This is the central component for drop/rise tracking, designed to be integrated
     into the market data pipeline for guaranteed updates independent of buy flow.
     """
 
@@ -152,7 +142,7 @@ class RollingWindowManager:
         lookback_s: int,
         persist: bool = False,
         base_path: str = "state/drop_windows"
-    ):
+    ) -> None:
         """
         Initialize manager.
 
@@ -172,98 +162,66 @@ class RollingWindowManager:
         else:
             logger.info(f"RollingWindowManager initialized (no persistence)")
 
-    def _path(self, symbol: str) -> str:
+    def _path(self, sym: str) -> str:
         """Get file path for symbol's persisted window."""
-        return os.path.join(self.base_path, f"{symbol}.json")
+        return os.path.join(self.base_path, f"{sym}.json")
 
-    def ensure(self, symbol: str) -> RollingWindow:
+    def ensure(self, sym: str) -> RollingWindow:
         """
         Ensure a rolling window exists for the symbol.
 
-        If persistence is enabled and a file exists, loads from disk.
-        Otherwise creates a new window.
-
         Args:
-            symbol: Trading symbol
+            sym: Trading symbol
 
         Returns:
             RollingWindow for the symbol
         """
-        if symbol not in self.windows:
-            rw = None
+        rw = self.windows.get(sym)
+        if rw is None:
+            rw = RollingWindow(self.lookback_s)
+            self.windows[sym] = rw
+        return rw
 
-            # Try to load from persistence
-            if self.persist:
-                try:
-                    with open(self._path(symbol), "r") as f:
-                        rw = RollingWindow.from_json(json.load(f))
-                    logger.debug(f"Loaded persisted window for {symbol}")
-                except FileNotFoundError:
-                    pass  # Expected for new symbols
-                except Exception as e:
-                    logger.warning(f"Failed to load persisted window for {symbol}: {e}")
-
-            # Create new window if not loaded
-            if rw is None:
-                rw = RollingWindow(self.lookback_s)
-
-            self.windows[symbol] = rw
-
-        return self.windows[symbol]
-
-    def update(self, symbol: str, ts: float, price: float):
+    def update(self, sym: str, ts: float, price: float) -> None:
         """
         Update the rolling window for a symbol with a new price.
 
         Args:
-            symbol: Trading symbol
+            sym: Trading symbol
             ts: Timestamp
             price: Price value
         """
-        rw = self.ensure(symbol)
-        rw.add(ts, price)
+        self.ensure(sym).add(ts, price)
 
-    def snapshot(self, symbol: str, price: float, ts: float) -> Dict:
+    def view(self, sym: str) -> Dict[str, Optional[float]]:
         """
-        Get a drop snapshot for a symbol.
+        Get view of window extrema for symbol.
 
         Args:
-            symbol: Trading symbol
-            price: Current price
-            ts: Current timestamp
+            sym: Trading symbol
 
         Returns:
-            Snapshot dict
+            Dict with peak and trough values
         """
-        rw = self.ensure(symbol)
-        return rw.snapshot(symbol, price, ts)
+        rw = self.ensure(sym)
+        return {"peak": rw.peak(), "trough": rw.trough()}
 
-    def persist_all(self):
+    def persist_all(self) -> None:
         """Persist all windows to disk (if persistence enabled)."""
         if not self.persist:
             return
 
         for sym, rw in self.windows.items():
             try:
+                data = {
+                    "lookback_s": rw.lookback_s,
+                    "data": list(rw.q)
+                }
                 with open(self._path(sym), "w") as f:
-                    json.dump(rw.to_json(), f)
+                    json.dump(data, f)
             except Exception as e:
                 logger.warning(f"Failed to persist window for {sym}: {e}")
 
-    def get_all_snapshots(self, prices: Dict[str, float], ts: float) -> list[Dict]:
-        """
-        Get drop snapshots for all symbols with prices.
-
-        Args:
-            prices: Dict mapping symbol to current price
-            ts: Current timestamp
-
-        Returns:
-            List of snapshot dicts
-        """
-        snapshots = []
-        for symbol, price in prices.items():
-            snap = self.snapshot(symbol, price, ts)
-            if snap["drop_pct"] is not None:
-                snapshots.append(snap)
-        return snapshots
+    def clear(self) -> None:
+        """Clear all windows (useful for testing)."""
+        self.windows.clear()
