@@ -66,7 +66,8 @@ class OrderRouter:
         exchange_wrapper,
         portfolio,
         telemetry,
-        config: RouterConfig
+        config: RouterConfig,
+        event_bus=None
     ):
         """
         Initialize order router.
@@ -76,11 +77,13 @@ class OrderRouter:
             portfolio: Portfolio instance for reservations and reconciliation
             telemetry: JsonlWriter instance for audit logging
             config: RouterConfig with execution parameters
+            event_bus: Optional EventBus for publishing order.filled events
         """
         self.ex = exchange_wrapper
         self.pf = portfolio
         self.tl = telemetry
         self.cfg = config
+        self.event_bus = event_bus
 
         # Idempotency: track seen intent IDs
         self._seen: set = set()
@@ -255,44 +258,27 @@ class OrderRouter:
             # Limit order
             return self.ex.create_limit_order(symbol, side, qty, limit_px, params=params)
 
-    def _reconcile(
-        self,
-        symbol: str,
-        order_id: str
-    ) -> None:
+    def _publish_filled(self, symbol: str, order_id: str) -> None:
         """
-        Reconcile position with exchange fills.
+        Publish order.filled event for reconciler to handle.
 
-        Fetches all trades for the order and applies them to portfolio.
-        This converts reservations into actual positions with accurate prices and fees.
+        Separates order execution from reconciliation by publishing
+        an event that the Reconciler will handle.
 
         Args:
             symbol: Trading pair
             order_id: Exchange order ID
         """
-        try:
-            trades = self.ex.fetch_order_trades(symbol, order_id)
-
-            if not trades:
-                logger.warning(f"No trades found for order {order_id}")
-                return
-
-            # Apply fills to portfolio
-            self.pf.apply_fills(symbol, trades)
-
-            # Audit log
-            self.tl.write("order_audit", {
-                "symbol": symbol,
-                "order_id": order_id,
-                "state": "RECONCILED",
-                "fills_count": len(trades),
-                "timestamp": time.time()
-            })
-
-            logger.info(f"Reconciled {len(trades)} fills for order {order_id}")
-
-        except Exception as e:
-            logger.error(f"Reconciliation failed for {order_id}: {e}")
+        if self.event_bus:
+            try:
+                self.event_bus.publish("order.filled", {
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "timestamp": time.time()
+                })
+                logger.debug(f"Published order.filled event for {order_id}")
+            except Exception as e:
+                logger.error(f"Failed to publish order.filled event: {e}")
 
     def handle_intent(self, intent: Dict[str, Any]) -> None:
         """
@@ -428,8 +414,8 @@ class OrderRouter:
 
                     logger.info(f"Order filled: {order_id} ({filled_qty} {symbol})")
 
-                    # Reconcile with exchange
-                    self._reconcile(symbol, order_id)
+                    # Publish filled event for reconciliation
+                    self._publish_filled(symbol, order_id)
                     return
 
                 elif status["status"] == "canceled":
@@ -480,7 +466,7 @@ class OrderRouter:
         # Final state: FAILED or PARTIAL_SUCCESS
         if filled_qty > 0:
             # Partial success - some fills occurred
-            self._reconcile(symbol, order_id)
+            self._publish_filled(symbol, order_id)
 
         # Release unfilled budget
         unfilled_qty = qty - filled_qty

@@ -118,6 +118,10 @@ ROUTER_TIF = "IOC"  # Time in force: "IOC" (Immediate or Cancel) or "GTC" (Good 
 ROUTER_SLIPPAGE_BPS = 20  # Maximum allowed slippage in basis points
 ROUTER_MIN_NOTIONAL = 5.0  # Minimum order notional in quote currency
 
+# Reconciliation & Position Lifecycle (NEW - Exchange-Truth-Based Position Management)
+USE_RECONCILER = True  # Enable reconciler for position lifecycle management
+TAKER_FEE_RATE = 0.001  # Default taker fee (0.1%) if not provided by exchange per-trade
+
 # =============================================================================
 # 4. POSITION MANAGEMENT
 # =============================================================================
