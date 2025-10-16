@@ -367,7 +367,9 @@ class MarketDataProvider:
 
         # New Pipeline Components
         self.enable_drop_tracking = enable_drop_tracking
-        self.event_bus = event_bus
+        # Use get_event_bus() as fallback if no event_bus provided
+        from core.events import get_event_bus as _get_event_bus
+        self.event_bus = event_bus or _get_event_bus()
         self.price_cache = None
         self.rw_manager = None
         self.telemetry = None
@@ -988,6 +990,12 @@ class MarketDataProvider:
             try:
                 # Fetch all market snapshots
                 snaps = self.update_market_data(symbols)
+
+                # Log visible poll tick
+                if snaps:
+                    logger.debug(f"MD_POLL tick published count={len(snaps)}")
+                else:
+                    logger.warning("MD_POLL tick produced 0 snapshots")
 
                 # Log telemetry (sample 10%)
                 if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:

@@ -168,6 +168,7 @@ class TradingEngine:
         self.last_market_update = 0
         self.last_position_check = 0
         self.last_exit_processing = 0
+        self._md_started = False  # Track market data loop state
 
         logger.info("Trading Engine initialized with service composition")
 
@@ -378,13 +379,15 @@ class TradingEngine:
 
         logger.info("Starting Trading Engine...")
 
-        # Start market data loop
-        if hasattr(self, 'market_data') and hasattr(self.market_data, 'start'):
-            try:
-                self.market_data.start()
-                logger.info("Market data loop started successfully")
-            except Exception as e:
-                logger.error(f"Failed to start market data loop: {e}")
+        # Start market data loop (only once)
+        if not self._md_started:
+            if hasattr(self, 'market_data') and hasattr(self.market_data, 'start'):
+                try:
+                    self.market_data.start()
+                    self._md_started = True
+                    logger.info("Market data loop started successfully")
+                except Exception as e:
+                    logger.error(f"Failed to start market data loop: {e}")
 
         self.running = True
         self.main_thread = threading.Thread(target=self._main_loop, daemon=False, name="TradingEngine-Main")
