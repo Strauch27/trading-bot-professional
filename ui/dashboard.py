@@ -539,8 +539,8 @@ def run_dashboard(engine, portfolio, config_module):
         )
 
     layout["main"].split_row(
-        Layout(name="side", ratio=1),
-        Layout(name="body", ratio=2)
+        Layout(name="side", ratio=3),
+        Layout(name="body", ratio=1)
     )
 
     start_time = time.time()
