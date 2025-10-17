@@ -403,13 +403,14 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
 
 
 def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
-    """Create the top drops panel (V9_3: with anchor and spread columns)."""
+    """Create the top drops panel (V9_3: with current price, anchor and spread columns)."""
     table = Table(expand=True, show_header=True)
     table.add_column("#", style="dim", justify="right", width=3)
     table.add_column("Symbol", style="bold", width=10)
+    table.add_column("Last", justify="right", width=11)
     table.add_column("Drop %", justify="right", width=8)
     table.add_column("Spread %", justify="right", width=8)
-    table.add_column("Anchor", justify="right", width=10)
+    table.add_column("Anchor", justify="right", width=11)
     table.add_column("To Trig", justify="right", width=8)
 
     drop_trigger_pct = config_data.get('DT', 0)
@@ -419,12 +420,13 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
 
     if not top_drops:
         msg = "Keine Daten. Prüfe Market-Data-Loop. Siehe Logs: MARKET_DATA_THREAD_STARTED / MD_LOOP_CFG / MD_THREAD_STATUS."
-        table.add_row("—", msg, "—", "—", "—", "—")
+        table.add_row("—", msg, "—", "—", "—", "—", "—")
     else:
         for i, drop in enumerate(top_drops, 1):
             distance = drop['drop_pct'] - drop_trigger_pct
             anchor = drop.get('anchor', 0)
             spread_pct = drop.get('spread_pct')
+            current_price = drop.get('current_price', 0)
 
             # Color based on distance to trigger
             style = "white"
@@ -442,9 +444,10 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
             table.add_row(
                 str(i),
                 drop['symbol'],
+                f"${current_price:.6f}" if current_price else "—",
                 f"{drop['drop_pct']:.2f}%",
                 spread_str,
-                f"{anchor:.6f}" if anchor else "—",
+                f"${anchor:.6f}" if anchor else "—",
                 Text(f"{distance:+.2f}%", style=style)
             )
 
