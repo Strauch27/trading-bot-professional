@@ -103,7 +103,7 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 POLL_MS = 300  # Market data poll interval in milliseconds
-MD_POLL_MS = 1000  # Market data polling interval (1 second for responsive drops)
+MD_POLL_MS = 30000  # Market data polling interval (30 seconds)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
 PERSIST_WINDOWS = True  # Persist rolling windows to disk
