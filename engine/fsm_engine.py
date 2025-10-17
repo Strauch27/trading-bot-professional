@@ -138,11 +138,17 @@ class FSMTradingEngine:
         self.order_cache = OrderCache(default_ttl=30.0, max_size=500)
         self.order_service = OrderService(self.exchange_adapter, self.order_cache)
 
-        # Market Data Service
+        # EventBus (for market snapshot distribution)
+        from core.events import get_event_bus
+        self.event_bus = get_event_bus()
+
+        # Market Data Service (with EventBus for snapshot publishing)
         self.market_data = MarketDataProvider(
             self.exchange_adapter,
             ticker_cache_ttl=getattr(config, 'TICKER_CACHE_TTL', 5.0),
-            max_cache_size=1000
+            max_cache_size=1000,
+            enable_drop_tracking=True,
+            event_bus=self.event_bus
         )
 
         # Buy Signal Service
@@ -715,6 +721,10 @@ class FSMTradingEngine:
 
         logger.info("Starting FSM Trading Engine...")
         self.running = True
+
+        # Start market data loop for snapshot generation
+        self.market_data.start()
+
         self.main_thread = threading.Thread(target=self._main_loop, daemon=False, name="FSM-Engine-Main")
         self.main_thread.start()
         logger.info("FSM Trading Engine started")

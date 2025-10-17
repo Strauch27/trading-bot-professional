@@ -1179,6 +1179,15 @@ class MarketDataProvider:
         from services.shutdown_coordinator import get_shutdown_coordinator
         co = get_shutdown_coordinator()
 
+        # ULTRA DEBUG: Entry logging
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - update_market_data() ENTRY symbols={len(symbols)}\n")
+                f.flush()
+        except:
+            pass
+
         co.beat("md_update_start")
         now = time.time()
         results = {}
@@ -1187,7 +1196,23 @@ class MarketDataProvider:
         import config
         use_new_pipeline = getattr(config, 'USE_NEW_PIPELINE', False)
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  use_new_pipeline={use_new_pipeline}\n")
+                f.flush()
+        except:
+            pass
+
         if not use_new_pipeline or not self.enable_drop_tracking:
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/update_market_data.txt", "a") as f:
+                    f.write(f"  Using LEGACY pipeline\n")
+                    f.flush()
+            except:
+                pass
+
             # Fallback to legacy behavior
             for symbol in symbols:
                 try:
@@ -1207,12 +1232,30 @@ class MarketDataProvider:
             co.beat("md_update_end")
             return results
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Using NEW pipeline, fetching {len(symbols)} tickers...\n")
+                f.flush()
+        except:
+            pass
+
         # New Pipeline: Fetch all tickers first
         tickers = {}
         persist_ticks = getattr(config, 'PERSIST_TICKS', True)
 
-        for symbol in symbols:
+        fetch_start = time.time()
+        for idx, symbol in enumerate(symbols):
             try:
+                # ULTRA DEBUG: Log every 10th symbol
+                if idx % 10 == 0:
+                    try:
+                        with open("/tmp/update_market_data.txt", "a") as f:
+                            f.write(f"  Fetching ticker {idx+1}/{len(symbols)}: {symbol}\n")
+                            f.flush()
+                    except:
+                        pass
+
                 ticker = self.get_ticker(symbol, use_cache=False)
                 if ticker and ticker.last > 0:
                     tickers[symbol] = ticker
@@ -1249,10 +1292,43 @@ class MarketDataProvider:
                 logger.debug(f"Failed to fetch ticker for {symbol}: {e}")
                 results[symbol] = False
 
+        fetch_duration = time.time() - fetch_start
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Tickers fetched: {len(tickers)}/{len(symbols)} in {fetch_duration:.2f}s\n")
+                f.flush()
+        except:
+            pass
+
         # Update PriceCache with all current prices
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Updating PriceCache...\n")
+                f.flush()
+        except:
+            pass
+
         if self.price_cache:
             price_dict = {sym: t.last for sym, t in tickers.items()}
             self.price_cache.update(price_dict, now)
+
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  PriceCache updated\n")
+                f.flush()
+        except:
+            pass
+
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Building snapshots for {len(tickers)} symbols...\n")
+                f.flush()
+        except:
+            pass
 
         # Update RollingWindows and build snapshots
         snapshots = []
@@ -1316,14 +1392,45 @@ class MarketDataProvider:
             except Exception as e:
                 logger.debug(f"Failed to build snapshot for {symbol}: {e}")
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Snapshots built: {len(snapshots)}\n")
+                f.flush()
+        except:
+            pass
+
         # Publish all snapshots via EventBus
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Publishing {len(snapshots)} snapshots to EventBus...\n")
+                f.flush()
+        except:
+            pass
+
         if snapshots and self.event_bus:
             try:
                 logger.debug("PUBLISHING_SNAPSHOTS", extra={"n": len(snapshots)})
                 self.event_bus.publish("market.snapshots", snapshots)
                 self._statistics['drop_snapshots_emitted'] += 1
+
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/update_market_data.txt", "a") as f:
+                        f.write(f"  EventBus publish SUCCESS\n")
+                        f.flush()
+                except:
+                    pass
             except Exception as e:
                 logger.debug(f"Failed to publish snapshots: {e}")
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/update_market_data.txt", "a") as f:
+                        f.write(f"  EventBus publish FAILED: {e}\n")
+                        f.flush()
+                except:
+                    pass
 
         # V9_3 Phase 4: Persist snapshots to JSONL
         if snapshots and self.snapshot_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
@@ -1389,6 +1496,15 @@ class MarketDataProvider:
                         logger.debug(f"Failed to persist anchors (JSONL): {e}")
 
         co.beat("md_update_end")
+
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  update_market_data() COMPLETE\n")
+                f.flush()
+        except:
+            pass
+
         logger.info(f"HEARTBEAT - Market data update completed: {len(symbols)} symbols, {sum(results.values())} successful, {len(snapshots)} snapshots",
                    extra={"event_type": "HEARTBEAT"})
         return results
@@ -1619,17 +1735,26 @@ class MarketDataProvider:
             while self._running:
                 try:
                     loop_counter += 1
-                    # ULTRA DEBUG (first 3 loops only)
-                    if loop_counter <= 3:
+                    # ULTRA DEBUG (extended to first 10 loops)
+                    if loop_counter <= 10:
                         try:
                             with open("/tmp/market_data_loop.txt", "a") as f:
-                                f.write(f"  Loop iteration #{loop_counter}\n")
+                                f.write(f"  Loop iteration #{loop_counter} - Calling update_market_data()...\n")
                                 f.flush()
                         except:
                             pass
 
                     # Fetch all market snapshots (returns Dict[str, bool] indicating success per symbol)
                     results = self.update_market_data(symbols)
+
+                    # ULTRA DEBUG (extended to first 10 loops)
+                    if loop_counter <= 10:
+                        try:
+                            with open("/tmp/market_data_loop.txt", "a") as f:
+                                f.write(f"  Loop iteration #{loop_counter} - update_market_data() RETURNED\n")
+                                f.flush()
+                        except:
+                            pass
                     success_count = sum(1 for v in results.values() if v)
 
                     # DEBUG_DROPS: Detailed logging
