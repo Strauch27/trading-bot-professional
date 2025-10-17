@@ -17,7 +17,8 @@ def build(
     ask: float,
     windows: Dict[str, Optional[float]],
     features: Dict[str, Optional[float]],
-    spread_bps: float
+    spread_bps: float,
+    spread_pct: float = 0.0
 ) -> Dict:
     """
     Build a versioned MarketSnapshot.
@@ -31,6 +32,7 @@ def build(
         windows: Dict with peak/trough from RollingWindowManager
         features: Dict with computed features
         spread_bps: Bid-ask spread in basis points
+        spread_pct: Bid-ask spread in percent
 
     Returns:
         Versioned MarketSnapshot dict
@@ -67,6 +69,7 @@ def build(
         },
         "liquidity": {
             "spread_bps": spread_bps,
+            "spread_pct": spread_pct,
             "depth_usd": None,  # Can be populated if orderbook depth is available
             "imbalance": None   # Can be computed from bid/ask depth
         },

@@ -76,6 +76,15 @@ class TickerData:
         return 0.0
 
     @property
+    def spread_pct(self) -> float:
+        """Spread in percent"""
+        if self.bid > 0 and self.ask > 0:
+            mid = (self.bid + self.ask) / 2.0
+            if mid > 0:
+                return ((self.ask - self.bid) / mid) * 100.0
+        return 0.0
+
+    @property
     def mid_price(self) -> float:
         """Mid price between bid and ask"""
         return (self.bid + self.ask) / 2
@@ -1298,7 +1307,8 @@ class MarketDataProvider:
                     ask=ticker.ask,
                     windows=windows_dict,
                     features=features_dict,
-                    spread_bps=ticker.spread_bps
+                    spread_bps=ticker.spread_bps,
+                    spread_pct=ticker.spread_pct
                 )
 
                 snapshots.append(snapshot)
