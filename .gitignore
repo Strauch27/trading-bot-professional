@@ -23,6 +23,7 @@ ENV/
 *.swo
 *~
 .DS_Store
+.claude/settings.local.json
 
 # Trading Bot Runtime Files
 sessions/
@@ -31,10 +32,12 @@ logs/
 *.jsonl
 
 # State Files (können lokal wiederhergestellt werden)
+state/
 held_assets.json
 open_buy_orders.json
 drop_anchors.json
 trade_history.csv
+*.pid
 
 # Reports & Snapshots
 reports/
@@ -48,6 +51,7 @@ backup_legacy/
 
 # Testing
 .pytest_cache/
+.hypothesis/
 .coverage
 htmlcov/
 .tox/
