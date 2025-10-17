@@ -83,7 +83,7 @@ DROP_TRIGGER_LOOKBACK_MIN = 5  # Rolling-High window (minutes) for Mode 2/3
 LOOKBACK_S = 120  # 2min Lookback-Fenster
 MODE = 4  # Mode 4: Drop-Trigger ohne Impuls
 CONFIRM_TICKS = 0  # Sofort scharf
-HYSTERESIS_BPS = 0  # Kein Hysteresis-Puffer
+HYSTERESIS_BPS = 5  # Hysteresis-Puffer (5 BPS)
 DEBOUNCE_S = 3  # Minimale Entprellung
 USE_IOC_FOR_MODE2 = True
 USE_ROBUST_MARKET_FETCH = True
@@ -103,13 +103,34 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 POLL_MS = 300  # Market data poll interval in milliseconds
-MD_POLL_MS = 30000  # Market data polling interval (30 seconds)
+MD_POLL_MS = 1500  # Market data polling interval (1.5 seconds - balanced for 91 symbols)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
 PERSIST_WINDOWS = True  # Persist rolling windows to disk
 WINDOW_STORE = "state/drop_windows"  # Window persistence directory
 USE_NEW_PIPELINE = True  # Use new snapshot-based pipeline architecture
 ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run testing)
+
+# Batch Polling & Rate Limiting (Market Data Pipeline)
+MD_USE_WEBSOCKET = False  # True = WebSocket primary, False = HTTP Polling
+MD_BATCH_POLLING = True  # Enable batch-based polling for HTTP mode
+MD_BATCH_SIZE = 13  # 91 symbols → 7 batches (13 symbols per batch)
+MD_BATCH_INTERVAL_MS = 1000  # 1 batch per second
+MD_CACHE_TTL_MS = 2500  # Soft-TTL for ticker cache (ms)
+MD_JITTER_MS = 150  # Random jitter to spread request spikes (ms)
+
+# Rate Limiting (Token Bucket)
+RATE_LIMIT_ENABLED = True  # Enable API rate limiting
+RATE_LIMIT_RPM_CAP = 800  # Hard cap: 800 requests per minute
+RATE_LIMIT_BURST = 25  # Token bucket burst capacity
+
+# Optional: Hot/Cold Adaptive Polling
+ADAPTIVE_HOT_PERCENT = 20  # Top 20% volatility symbols polled more frequently
+HOT_INTERVAL_MS = 1000  # Hot symbols: 1 second
+COLD_INTERVAL_MS = 5000  # Cold symbols: 5 seconds
+
+# WebSocket Fallback (when MD_USE_WEBSOCKET=True)
+MD_WS_FALLBACK_INTERVAL_MS = 10000  # HTTP fallback interval when WebSocket fails
 
 # Debug Drops - Detailed Logging for Drop% Debugging
 DEBUG_DROPS = True  # Enable detailed drop% debug logging with counters and watchdog

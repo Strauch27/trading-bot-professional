@@ -373,7 +373,25 @@ class MarketDataProvider:
 
         # Rate limiting (token bucket for API limits)
         self.enable_rate_limiting = enable_rate_limiting
-        self.rate_limiter = get_rate_limiter() if enable_rate_limiting else None
+        if enable_rate_limiting:
+            import config
+            # Convert RPM to req/s for token bucket
+            rpm_cap = getattr(config, 'RATE_LIMIT_RPM_CAP', 800)
+            burst = getattr(config, 'RATE_LIMIT_BURST', 25)
+            refill_rate = rpm_cap / 60.0  # Convert RPM to req/s
+
+            self.rate_limiter = get_rate_limiter(
+                public_capacity=burst,
+                public_rate=refill_rate,
+                private_capacity=burst // 2,  # Private endpoints: half of public
+                private_rate=refill_rate / 2.0
+            )
+            logger.info(
+                f"Rate limiter initialized: rpm_cap={rpm_cap}, burst={burst}, "
+                f"refill_rate={refill_rate:.2f} req/s"
+            )
+        else:
+            self.rate_limiter = None
 
         # Audit logger (optional)
         self.auditor = None
@@ -458,6 +476,15 @@ class MarketDataProvider:
                     f"ticks={persist_ticks}, snapshots={persist_snapshots}, "
                     f"windows=True, anchors=True (max_mb={max_file_mb})"
                 )
+        else:
+            # Default values when drop tracking is disabled (prevent AttributeError in _loop())
+            self.lookback_s = 0
+            self.persist = False
+            self.base_path = ""
+            self.tick_writers = {}
+            self.snapshot_writer = None
+            self.windows_writer = None
+            self.anchors_writer = None
 
             logger.info(
                 f"Snapshot pipeline enabled: lookback={lookback_s}s, "
@@ -1213,10 +1240,23 @@ class MarketDataProvider:
             except:
                 pass
 
-            # Fallback to legacy behavior
-            for symbol in symbols:
+            # Fallback to legacy behavior (PARALLEL)
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def fetch_legacy_ticker(symbol):
+                """Fetch ticker for legacy pipeline"""
                 try:
-                    ticker = self.get_ticker(symbol, use_cache=False)
+                    ticker = self.get_ticker(symbol, use_cache=False)  # Force fresh
+                    return (symbol, ticker, None)
+                except Exception as e:
+                    return (symbol, None, str(e))
+
+            max_workers = min(32, len(symbols) or 1)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(fetch_legacy_ticker, sym): sym for sym in symbols}
+
+                for future in as_completed(futures):
+                    symbol, ticker, error = future.result()
                     results[symbol] = ticker is not None
 
                     if ticker and self.enable_drop_tracking and self.rw_manager:
@@ -1224,10 +1264,8 @@ class MarketDataProvider:
                             self.rw_manager.update(symbol, now, ticker.last)
                         except Exception as e:
                             logger.debug(f"Failed to update rolling window for {symbol}: {e}")
-
-                except Exception as e:
-                    logger.error(f"Market data update failed for {symbol}: {e}")
-                    results[symbol] = False
+                    elif error:
+                        logger.debug(f"Market data update failed for {symbol}: {error}")
 
             co.beat("md_update_end")
             return results
@@ -1240,23 +1278,31 @@ class MarketDataProvider:
         except:
             pass
 
-        # New Pipeline: Fetch all tickers first
+        # New Pipeline: Fetch all tickers first (PARALLEL for speed)
         tickers = {}
         persist_ticks = getattr(config, 'PERSIST_TICKS', True)
 
         fetch_start = time.time()
-        for idx, symbol in enumerate(symbols):
-            try:
-                # ULTRA DEBUG: Log every 10th symbol
-                if idx % 10 == 0:
-                    try:
-                        with open("/tmp/update_market_data.txt", "a") as f:
-                            f.write(f"  Fetching ticker {idx+1}/{len(symbols)}: {symbol}\n")
-                            f.flush()
-                    except:
-                        pass
 
-                ticker = self.get_ticker(symbol, use_cache=False)
+        # Parallel ticker fetching with ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def fetch_single_ticker(symbol):
+            """Fetch single ticker with error handling"""
+            try:
+                ticker = self.get_ticker(symbol, use_cache=False)  # Force fresh fetch with rate-limiting
+                return (symbol, ticker, None)
+            except Exception as e:
+                return (symbol, None, str(e))
+
+        # Parallel fetch: max 32 concurrent threads
+        max_workers = min(32, len(symbols) or 1)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_single_ticker, sym): sym for sym in symbols}
+
+            for future in as_completed(futures):
+                symbol, ticker, error = future.result()
+
                 if ticker and ticker.last > 0:
                     tickers[symbol] = ticker
                     results[symbol] = True
@@ -1288,9 +1334,8 @@ class MarketDataProvider:
                             logger.debug(f"Failed to persist tick for {symbol}: {e}")
                 else:
                     results[symbol] = False
-            except Exception as e:
-                logger.debug(f"Failed to fetch ticker for {symbol}: {e}")
-                results[symbol] = False
+                    if error:
+                        logger.debug(f"Failed to fetch ticker for {symbol}: {error}")
 
         fetch_duration = time.time() - fetch_start
         # ULTRA DEBUG
@@ -1731,31 +1776,82 @@ class MarketDataProvider:
             except:
                 pass
 
+            # Batch polling logic
+            batch_polling = getattr(config, 'MD_BATCH_POLLING', False)
+            batch_size = getattr(config, 'MD_BATCH_SIZE', 13)
+            batch_interval_ms = getattr(config, 'MD_BATCH_INTERVAL_MS', 1000)
+            jitter_ms = getattr(config, 'MD_JITTER_MS', 150)
+
+            # Split symbols into batches if batch polling enabled
+            if batch_polling and batch_size > 0:
+                symbol_batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
+                logger.info(
+                    f"MD_BATCH_POLLING enabled: {len(symbols)} symbols → {len(symbol_batches)} batches "
+                    f"(size={batch_size}, interval={batch_interval_ms}ms)"
+                )
+            else:
+                # Legacy mode: all symbols in one batch
+                symbol_batches = [symbols]
+                logger.info(f"MD_BATCH_POLLING disabled: fetching all {len(symbols)} symbols sequentially")
+
             loop_counter = 0
             while self._running:
                 try:
                     loop_counter += 1
-                    # ULTRA DEBUG (extended to first 10 loops)
-                    if loop_counter <= 10:
-                        try:
-                            with open("/tmp/market_data_loop.txt", "a") as f:
-                                f.write(f"  Loop iteration #{loop_counter} - Calling update_market_data()...\n")
-                                f.flush()
-                        except:
-                            pass
-
-                    # Fetch all market snapshots (returns Dict[str, bool] indicating success per symbol)
-                    results = self.update_market_data(symbols)
+                    cycle_start = time.time()
 
                     # ULTRA DEBUG (extended to first 10 loops)
                     if loop_counter <= 10:
                         try:
                             with open("/tmp/market_data_loop.txt", "a") as f:
-                                f.write(f"  Loop iteration #{loop_counter} - update_market_data() RETURNED\n")
+                                f.write(f"  Loop iteration #{loop_counter} - Processing {len(symbol_batches)} batches...\n")
                                 f.flush()
                         except:
                             pass
-                    success_count = sum(1 for v in results.values() if v)
+
+                    # Process each batch with interval
+                    all_results = {}
+                    for batch_idx, batch_symbols in enumerate(symbol_batches):
+                        batch_start = time.time()
+
+                        # Add random jitter to spread requests
+                        if jitter_ms > 0 and batch_idx > 0:
+                            import random
+                            jitter = random.randint(0, jitter_ms) / 1000.0
+                            time.sleep(jitter)
+
+                        # Fetch batch (returns Dict[str, bool] indicating success per symbol)
+                        batch_results = self.update_market_data(batch_symbols)
+                        all_results.update(batch_results)
+
+                        batch_duration = time.time() - batch_start
+                        batch_success = sum(1 for v in batch_results.values() if v)
+
+                        # Log batch progress
+                        if debug_drops and loop_counter <= 10:
+                            logger.debug(
+                                f"MD_BATCH batch={batch_idx+1}/{len(symbol_batches)} "
+                                f"symbols={len(batch_symbols)} success={batch_success} "
+                                f"duration={batch_duration*1000:.0f}ms"
+                            )
+
+                        # Sleep between batches (except after last batch)
+                        if batch_idx < len(symbol_batches) - 1:
+                            batch_sleep = (batch_interval_ms / 1000.0) - batch_duration
+                            if batch_sleep > 0:
+                                time.sleep(batch_sleep)
+
+                    # ULTRA DEBUG (extended to first 10 loops)
+                    if loop_counter <= 10:
+                        try:
+                            with open("/tmp/market_data_loop.txt", "a") as f:
+                                f.write(f"  Loop iteration #{loop_counter} - All batches processed\n")
+                                f.flush()
+                        except:
+                            pass
+
+                    success_count = sum(1 for v in all_results.values() if v)
+                    cycle_duration = time.time() - cycle_start
 
                     # DEBUG_DROPS: Detailed logging
                     if debug_drops:
@@ -1771,6 +1867,7 @@ class MarketDataProvider:
                         if success_count > 0:
                             logger.debug(
                                 f"MD_POLL published count={success_count}/{len(symbols)} "
+                                f"batches={len(symbol_batches)} duration={cycle_duration:.2f}s "
                                 f"first={first_sym} last={first_price:.8f if first_price else -1}"
                             )
                         else:
@@ -1780,18 +1877,35 @@ class MarketDataProvider:
                     else:
                         # Normal logging (less verbose)
                         if success_count > 0:
-                            logger.debug(f"MD_POLL tick published count={success_count}/{len(symbols)}")
+                            logger.debug(
+                                f"MD_POLL tick published count={success_count}/{len(symbols)} "
+                                f"batches={len(symbol_batches)} duration={cycle_duration:.2f}s"
+                            )
                         else:
                             logger.warning("MD_POLL tick produced 0 snapshots")
 
                     # Log telemetry (sample 10%)
                     if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:
                         try:
-                            self.telemetry.write("market", {"count": success_count, "total": len(symbols)})
+                            self.telemetry.write("market", {
+                                "count": success_count,
+                                "total": len(symbols),
+                                "batches": len(symbol_batches),
+                                "cycle_duration_s": cycle_duration
+                            })
                         except Exception:
                             pass
 
-                    time.sleep(poll_s)
+                    # Sleep until next poll cycle (adjust for time already spent)
+                    remaining_sleep = poll_s - cycle_duration
+                    if remaining_sleep > 0:
+                        time.sleep(remaining_sleep)
+                    elif remaining_sleep < -1.0:
+                        # Warn if cycle took significantly longer than poll interval
+                        logger.warning(
+                            f"MD_POLL cycle overrun: {cycle_duration:.2f}s > {poll_s:.2f}s "
+                            f"(overrun={abs(remaining_sleep):.2f}s)"
+                        )
 
                 except Exception as e:
                     logger.error(f"Market data loop error: {e}", exc_info=True)
