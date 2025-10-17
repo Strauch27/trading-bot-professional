@@ -539,7 +539,7 @@ def run_dashboard(engine, portfolio, config_module):
         )
 
     layout["main"].split_row(
-        Layout(name="side", ratio=3),
+        Layout(name="side", ratio=1),
         Layout(name="body", ratio=1)
     )
 
