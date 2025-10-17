@@ -38,10 +38,15 @@ def build(
     # Calculate mid price
     mid = (bid + ask) / 2 if (bid and ask and bid > 0 and ask > 0) else last
 
-    # Calculate drop_pct from peak
+    # V9_3: Calculate drop_pct from anchor (not peak)
+    anchor = windows.get("anchor")
     peak = windows.get("peak")
     drop_pct = None
-    if peak is not None and peak > 0:
+    if anchor is not None and anchor > 0:
+        # V9_3 formula: drop_pct = 100.0 * (last / anchor - 1.0)
+        drop_pct = (last - anchor) / anchor * 100.0
+    elif peak is not None and peak > 0:
+        # Fallback to peak if anchor not available
         drop_pct = (last - peak) / peak * 100.0
 
     # Calculate rise_pct from trough
@@ -66,6 +71,7 @@ def build(
             "imbalance": None   # Can be computed from bid/ask depth
         },
         "windows": {
+            "anchor": anchor,  # V9_3: Price reference for drop trigger
             "peak": peak,
             "trough": trough,
             "drop_pct": drop_pct,

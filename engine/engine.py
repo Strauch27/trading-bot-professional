@@ -374,20 +374,64 @@ class TradingEngine:
 
     def start(self):
         """Start the trading engine"""
+        # ULTRA DEBUG: Write to file to prove this is called
+        try:
+            with open("/tmp/engine_start_called.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - TradingEngine.start() ENTRY\n")
+                f.flush()
+        except:
+            pass
+
         print("[TRADING_ENGINE] start() called")  # DEBUG: Direct console output
+        logger.info("=== ENGINE.START() CALLED ===")
+
         if self.running:
             logger.warning("Engine already running")
             return
 
         print("[TRADING_ENGINE] Starting Trading Engine...")  # DEBUG: Direct console output
-        logger.info("Starting Trading Engine...")
+        logger.info("=== ENGINE.START() - Setting up market data ===")
 
         # Start market data loop (only once)
+        # ULTRA DEBUG: Write to file
+        try:
+            with open("/tmp/engine_start_called.txt", "a") as f:
+                f.write(f"  _md_started={self._md_started}, has market_data={hasattr(self, 'market_data')}\n")
+                f.flush()
+        except:
+            pass
+
+        logger.info(f"=== ENGINE.START() - _md_started={self._md_started}, has market_data={hasattr(self, 'market_data')} ===")
         if not self._md_started:
             if hasattr(self, 'market_data') and hasattr(self.market_data, 'start'):
                 try:
+                    # ULTRA DEBUG: Write before market_data.start()
+                    try:
+                        with open("/tmp/engine_start_called.txt", "a") as f:
+                            f.write(f"  Calling market_data.start()...\n")
+                            f.flush()
+                    except:
+                        pass
+
                     self.market_data.start()
                     self._md_started = True
+
+                    # ULTRA DEBUG: Write after market_data.start()
+                    try:
+                        with open("/tmp/engine_start_called.txt", "a") as f:
+                            f.write(f"  market_data.start() completed\n")
+                            f.flush()
+                    except:
+                        pass
+
+                    # Thread-Liveness prüfen
+                    t = getattr(self.market_data, "_thread", None)
+                    alive = t.is_alive() if t else None
+                    logger.info("MD_THREAD_STATUS", extra={"is_alive": alive})
+                    if not alive:
+                        logger.error("MARKET_DATA_THREAD_NOT_ALIVE")
+
                     logger.info("Market data loop started successfully")
                 except Exception as e:
                     logger.error(f"Failed to start market data loop: {e}")
@@ -395,6 +439,10 @@ class TradingEngine:
         self.running = True
         self.main_thread = threading.Thread(target=self._main_loop, daemon=False, name="TradingEngine-Main")
         self.main_thread.start()
+
+        # Optional: Start UI fallback feed
+        self._start_ui_fallback_feed()
+
         logger.info("Trading Engine initialized successfully")
 
         # DEBUG_DROPS: Watchdog - check if snapshots arrive within 5s
@@ -704,6 +752,8 @@ class TradingEngine:
                     update_snapshot_debug(symbol, last_price)
 
             with self._lock:
+                before = len(self.drop_snapshot_store)
+
                 for snap in snapshots:
                     # Validate snapshot version
                     if snap.get("v") != 1:
@@ -722,6 +772,9 @@ class TradingEngine:
                         last_price = snap.get("price", {}).get("last")
                         if last_price:
                             self.portfolio.mark_price(symbol, last_price)
+
+                after = len(self.drop_snapshot_store)
+                logger.debug("ON_SNAPSHOTS", extra={"recv": len(snapshots), "store_before": before, "store_after": after})
 
             # Debug log (sample every 20th emission)
             if len(snapshots) > 0 and len(self.drop_snapshot_store) % 20 == 0:
@@ -1054,3 +1107,76 @@ class TradingEngine:
     def is_running(self) -> bool:
         """Check if engine is running"""
         return self.running
+
+    def _start_ui_fallback_feed(self):
+        """
+        Optional UI fallback feed - polls tickers directly when snapshot bus fails.
+
+        This is a diagnostic tool to verify the UI can display drops even when
+        the snapshot pipeline has issues. Activate via config.UI_FALLBACK_FEED = True
+        """
+        if not getattr(config, "UI_FALLBACK_FEED", False):
+            return
+
+        if getattr(self, "_ui_fallback_thread", None):
+            return
+
+        import threading
+        import time
+
+        symbols = getattr(config, "UI_FALLBACK_SYMBOLS", ["BTC/USDT", "ETH/USDT"])
+        peaks = {}
+
+        def run():
+            logger.info("UI_FALLBACK_FEED_STARTED", extra={"symbols": symbols})
+            while self.running:
+                try:
+                    snaps = []
+                    for s in symbols:
+                        try:
+                            tkr = self.exchange_adapter.fetch_ticker(s)
+                            last = float(tkr.get("last") or tkr.get("close") or 0.0)
+                            if last <= 0:
+                                continue
+
+                            # Track peak
+                            p = peaks.get(s, last)
+                            p = max(p, last)
+                            peaks[s] = p
+
+                            # Calculate drop
+                            drop_pct = (last / p - 1.0) * 100.0
+
+                            # Build snapshot-like dict
+                            snaps.append({
+                                "v": 1,
+                                "symbol": s,
+                                "ts": time.time(),
+                                "price": {"last": last, "bid": 0, "ask": 0, "mid": last},
+                                "windows": {"peak": p, "trough": None, "drop_pct": drop_pct},
+                                "features": {},
+                                "state": {},
+                                "flags": {}
+                            })
+                        except Exception as e:
+                            logger.debug(f"UI fallback fetch error for {s}: {e}")
+
+                    if snaps:
+                        # Feed into drop_snapshot_store directly
+                        with self._lock:
+                            for snap in snaps:
+                                symbol = snap.get("symbol")
+                                if symbol:
+                                    self.drop_snapshot_store[symbol] = snap
+
+                        logger.debug(f"UI_FALLBACK_FEED fed {len(snaps)} snapshots")
+
+                except Exception as e:
+                    logger.exception("UI_FALLBACK_FEED_ERR")
+
+                time.sleep(1.5)
+
+        th = threading.Thread(target=run, daemon=True, name="UIFallbackFeed")
+        th.start()
+        self._ui_fallback_thread = th
+        logger.info("UI Fallback Feed started", extra={"symbols": symbols})

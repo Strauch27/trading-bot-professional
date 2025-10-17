@@ -71,10 +71,15 @@ ATR_TP_MULTIPLIER = 1.6
 ATR_MIN_SAMPLES = 15
 
 # =============================================================================
-# 3. ENTRY STRATEGIE
+# 3. ENTRY STRATEGIE (V9_3-Compatible Anchor-based Drop Trigger)
 # =============================================================================
 
-DROP_TRIGGER_VALUE = 0.980  # -2.0% Drop → Kaufsignal
+# V9_3 Drop Trigger Settings
+DROP_TRIGGER_VALUE = 0.985  # Trigger at -1.5% drop from anchor (0.985 = ~-1.5%)
+DROP_TRIGGER_MODE = 4  # 1=Session-High, 2=Rolling-High, 3=Hybrid, 4=Persistent (recommended)
+DROP_TRIGGER_LOOKBACK_MIN = 5  # Rolling-High window (minutes) for Mode 2/3
+
+# Legacy settings (kept for compatibility)
 LOOKBACK_S = 120  # 2min Lookback-Fenster
 MODE = 4  # Mode 4: Drop-Trigger ohne Impuls
 CONFIRM_TICKS = 0  # Sofort scharf
@@ -83,15 +88,12 @@ DEBOUNCE_S = 3  # Minimale Entprellung
 USE_IOC_FOR_MODE2 = True
 USE_ROBUST_MARKET_FETCH = True
 
-DROP_TRIGGER_MODE = 4  # Reset nach jedem Trade (empfohlen)
-DROP_TRIGGER_LOOKBACK_MIN = 2  # Zeitfenster für Mode 2/3
-
-# Drop Anchor System
-USE_DROP_ANCHOR = True  # Hochpunkte dauerhaft speichern
-ANCHOR_UPDATES_WHEN_FLAT = True  # Anker folgt Hochs auch ohne Position
-ANCHOR_STALE_MINUTES = 60  # Anker älter als 60 Min neu initialisieren
-ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT = 5.0  # Max 5% über Peak erlaubt
-ANCHOR_MAX_START_DROP_PCT = 6.0  # Zu Beginn max. 6% Drop erlaubt
+# V9_3 Anchor System (Mode 4 Clamps & Guards)
+USE_DROP_ANCHOR = True  # Enable anchor persistence (required for Mode 4)
+ANCHOR_UPDATES_WHEN_FLAT = True  # Update anchor even when no position held
+ANCHOR_STALE_MINUTES = 60  # Stale-Reset: Reset anchor if older than 60 min
+ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT = 0.5  # Over-Peak-Clamp: max 0.5% above session peak
+ANCHOR_MAX_START_DROP_PCT = 8.0  # Start-Drop-Clamp: anchor not >8% below start price
 
 # Drop Tracking (Long-term solution: RollingWindowManager)
 DROP_LOOKBACK_SECONDS = 300  # 5 min Lookback für Drop-Peak-Tracking
@@ -111,6 +113,22 @@ ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run tes
 
 # Debug Drops - Detailed Logging for Drop% Debugging
 DEBUG_DROPS = True  # Enable detailed drop% debug logging with counters and watchdog
+
+# UI Fallback Feed - Direct ticker polling for Dashboard when snapshot bus fails
+UI_FALLBACK_FEED = True  # TEMPORARY WORKAROUND: Enable direct polling fallback until market_data.start() issue is fixed
+UI_FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]  # Symbols for fallback feed
+
+# V9_3 Persistence - 4-Stream JSONL (Ticks, Snapshots, Windows, Anchors)
+SNAPSHOT_MIN_PERIOD_MS = 500  # Minimum time between snapshots (ms)
+MAX_FILE_MB = 50  # JSONL rotation threshold (MB)
+PERSIST_TICKS = True  # Enable per-symbol tick persistence
+PERSIST_SNAPSHOTS = True  # Enable snapshot stream persistence
+
+# V9_3 Feature Flags (for rollback capability)
+FEATURE_ANCHOR_ENABLED = True  # Enable anchor-based drop trigger system
+FEATURE_PERSIST_STREAMS = True  # Enable 4-stream JSONL persistence
+FEATURE_WARMSTART_TICKS = True  # Enable warm-start from persisted ticks
+FEATURE_RETRY_BACKOFF = True  # Enable exponential backoff for failed tickers
 
 # Guards - Market Quality (NEW - Simplified)
 MAX_SPREAD_BPS = 12  # Maximum spread in basis points (disabled if guards off)
@@ -186,9 +204,10 @@ MODEL_DIR = "models"
 # 6. ORDER EXECUTION
 # =============================================================================
 
-# Buy Execution
-BUY_MODE = "PREDICTIVE"  # "PREDICTIVE", "ESCALATION" oder "CLASSIC"
-PREDICTIVE_BUY_ZONE_BPS = 3  # 0.03% über Marktpreis
+# Buy Execution (V9_3-Compatible)
+BUY_MODE = "PREDICTIVE"  # "RAW" = direct trigger, "PREDICTIVE" = buy zone (stricter)
+PREDICTIVE_BUY_ZONE_PCT = 0.995  # 99.5% of trigger price (buy below trigger, V9_3)
+PREDICTIVE_BUY_ZONE_BPS = 3  # Legacy: 0.03% über Marktpreis
 PREDICTIVE_BUY_ZONE_CAP_BPS = 15  # Phase 7: Max Cap für Repricing
 USE_PREDICTIVE_BUYS = True
 BUY_LIMIT_PREMIUM_BPS = 8
@@ -532,7 +551,7 @@ FEE_RT = FEE_RATE
 RUN_ID = run_id
 RUN_TIMESTAMP_UTC = run_timestamp_utc
 RUN_TIMESTAMP_LOCAL = run_timestamp
-PREDICTIVE_BUY_ZONE_PCT = 1.0 + (PREDICTIVE_BUY_ZONE_BPS / 10_000.0)
+# Note: PREDICTIVE_BUY_ZONE_PCT is set manually in Section 6 (V9_3 mode)
 
 # =============================================================================
 # 15. WATCHLIST

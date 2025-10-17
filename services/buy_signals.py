@@ -110,88 +110,6 @@ class BuySignalService:
         while history and history[0][0] < cutoff_time:
             history.popleft()
 
-    def _calculate_anchor_price(self, symbol: str, current_price: float) -> Optional[float]:
-        """
-        Calculate anchor price based on configured mode.
-
-        Args:
-            symbol: Trading symbol
-            current_price: Current market price
-
-        Returns:
-            Anchor price or None if insufficient data
-        """
-        with self._lock:
-            if symbol not in self._price_history:
-                logger.warning(f"No price history for {symbol}")
-                return None
-
-            history = self._price_history[symbol]
-            if not history:
-                return None
-
-            prices = [price for _, price in history]
-
-            if self.drop_trigger_mode == 1:
-                # Mode 1: Session-Peak (highest since bot start)
-                anchor = self._session_peaks.get(symbol, current_price)
-
-            elif self.drop_trigger_mode == 2:
-                # Mode 2: Rolling-Window-Peak (last X minutes)
-                lookback = min(self.drop_trigger_lookback_min, len(prices))
-                if lookback > 0:
-                    anchor = max(prices[-lookback:])
-                else:
-                    anchor = current_price
-
-            elif self.drop_trigger_mode == 3:
-                # Mode 3: Max of Session-Peak and Rolling-Window-Peak
-                session_peak = self._session_peaks.get(symbol, current_price)
-
-                lookback = min(self.drop_trigger_lookback_min, len(prices))
-                rolling_peak = max(prices[-lookback:]) if lookback > 0 else current_price
-
-                anchor = max(session_peak, rolling_peak)
-
-            elif self.drop_trigger_mode == 4:
-                # Mode 4: Persistent anchor with clamps and reset after trades
-                anchor = self._get_persistent_anchor(symbol, current_price, prices)
-
-            else:
-                logger.error(f"Invalid drop_trigger_mode: {self.drop_trigger_mode}")
-                return None
-
-            return anchor
-
-    def _get_persistent_anchor(self, symbol: str, current_price: float, prices: List[float]) -> float:
-        """
-        Get persistent anchor for Mode 4 with trade-based reset logic.
-        """
-        current_time = datetime.utcnow()
-
-        # Check if we have a persistent anchor
-        if symbol in self._persistent_anchors:
-            anchor_price, anchor_time = self._persistent_anchors[symbol]
-
-            # Check if anchor needs reset due to completed trade
-            last_close = self._last_trade_close.get(symbol)
-            if last_close and last_close > anchor_time:
-                # Reset anchor after trade completion
-                logger.info(f"Resetting persistent anchor for {symbol} after trade completion")
-                anchor_price = max(prices) if prices else current_price
-                self._persistent_anchors[symbol] = (anchor_price, current_time)
-            else:
-                # Update anchor if current price is higher
-                if current_price > anchor_price:
-                    anchor_price = current_price
-                    self._persistent_anchors[symbol] = (anchor_price, current_time)
-        else:
-            # Initialize persistent anchor
-            anchor_price = max(prices) if prices else current_price
-            self._persistent_anchors[symbol] = (anchor_price, current_time)
-
-        return anchor_price
-
     def on_trade_completed(self, symbol: str) -> None:
         """
         Notify service of completed trade for Mode 4 anchor reset.
@@ -203,29 +121,50 @@ class BuySignalService:
             self._last_trade_close[symbol] = datetime.utcnow()
             logger.debug(f"Trade completion recorded for {symbol}")
 
-    def evaluate_buy_signal(self, symbol: str, current_price: float) -> Tuple[bool, Dict[str, Any]]:
+    def evaluate_buy_signal(self, symbol: str, current_price: float,
+                           drop_snapshot_store=None) -> Tuple[bool, Dict[str, Any]]:
         """
-        Evaluate if symbol meets buy trigger criteria.
+        Evaluate if symbol meets buy trigger criteria (V9_3).
 
         Args:
             symbol: Trading symbol
             current_price: Current market price
+            drop_snapshot_store: Snapshot store with V9_3 anchor data (required)
 
         Returns:
             Tuple of (buy_triggered, context_data)
         """
         with self._lock:
             try:
-                # Calculate anchor price
-                anchor = self._calculate_anchor_price(symbol, current_price)
-                if anchor is None or anchor <= 0:
-                    return False, {"error": "No valid anchor price"}
+                # V9_3: Read anchor from MarketSnapshot (required)
+                if not drop_snapshot_store:
+                    return False, {"error": "Snapshot store required for V9_3"}
 
-                # Calculate trigger price
+                snapshot = drop_snapshot_store.get(symbol)
+                if not snapshot:
+                    return False, {"error": f"No snapshot found for {symbol}"}
+
+                anchor = snapshot.get('windows', {}).get('anchor')
+                if not anchor or anchor <= 0:
+                    return False, {"error": "No valid anchor in snapshot"}
+
+                # V9_3: Calculate trigger price
                 trigger_price = anchor * self.drop_trigger_value
 
-                # Check if trigger is hit
-                buy_triggered = current_price <= trigger_price
+                # V9_3: Apply BUY_MODE logic
+                import config
+                buy_mode = getattr(config, "BUY_MODE", "PREDICTIVE")
+
+                if buy_mode == "PREDICTIVE":
+                    # PREDICTIVE mode: Buy zone threshold (stricter)
+                    predictive_pct = getattr(config, "PREDICTIVE_BUY_ZONE_PCT", 0.995)
+                    threshold = trigger_price * predictive_pct
+                    buy_triggered = current_price <= threshold
+                    threshold_used = threshold
+                else:
+                    # RAW mode: Direct trigger
+                    buy_triggered = current_price <= trigger_price
+                    threshold_used = trigger_price
 
                 # Calculate metrics
                 drop_ratio = (current_price / anchor) - 1.0  # Negative = drop
@@ -239,6 +178,8 @@ class BuySignalService:
                     "current_price": current_price,
                     "anchor": anchor,
                     "trigger_price": trigger_price,
+                    "threshold": threshold_used,
+                    "buy_mode": buy_mode,
                     "drop_pct": drop_pct,
                     "restweg_bps": restweg_bps,
                     "mode": self.drop_trigger_mode,
@@ -252,8 +193,8 @@ class BuySignalService:
                     self._log_trigger_audit(symbol, context)
 
                 if buy_triggered:
-                    logger.info(f"BUY TRIGGER HIT: {symbol} at {current_price:.6f} "
-                               f"(drop: {drop_pct:.2f}%, anchor: {anchor:.6f})")
+                    logger.info(f"BUY TRIGGER HIT ({buy_mode}): {symbol} at {current_price:.6f} "
+                               f"(drop: {drop_pct:.2f}%, anchor: {anchor:.6f}, threshold: {threshold_used:.6f})")
 
                 return buy_triggered, context
 
@@ -262,17 +203,8 @@ class BuySignalService:
                 return False, {"error": str(e)}
 
     def _log_trigger_audit(self, symbol: str, context: Dict[str, Any]) -> None:
-        """Log detailed trigger audit information."""
+        """Log detailed trigger audit information (V9_3)."""
         try:
-            # Get additional price history metrics
-            history = self._price_history.get(symbol, deque())
-            prices = [price for _, price in history]
-
-            # Calculate session and rolling peaks for comparison
-            session_peak = max(prices) if prices else None
-            lookback = min(self.drop_trigger_lookback_min, len(prices))
-            rolling_peak = max(prices[-lookback:]) if lookback > 0 and prices else None
-
             # Create timestamp rounded to minute for easier analysis
             ts_minute = datetime.utcnow().replace(second=0, microsecond=0).isoformat() + "Z"
 
@@ -281,10 +213,7 @@ class BuySignalService:
                 "symbol": symbol,
                 "timestamp": ts_minute,
                 "mode": context["mode"],
-                "lookback_min": context["lookback_min"],
                 "anchor": context["anchor"],
-                "session_peak": session_peak,
-                "rolling_peak": rolling_peak,
                 "current_price": context["current_price"],
                 "trigger_value": context["trigger_value"],
                 "trigger_price": context["trigger_price"],
@@ -298,12 +227,13 @@ class BuySignalService:
         except Exception as e:
             logger.warning(f"Audit logging failed for {symbol}: {e}")
 
-    def get_top_drops(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_top_drops(self, limit: int = 10, drop_snapshot_store=None) -> List[Dict[str, Any]]:
         """
-        Get symbols with biggest drops since their anchors.
+        Get symbols with biggest drops since their anchors (V9_3).
 
         Args:
             limit: Maximum number of symbols to return
+            drop_snapshot_store: Snapshot store with V9_3 anchor data (required)
 
         Returns:
             List of drop data sorted by drop percentage
@@ -311,15 +241,21 @@ class BuySignalService:
         with self._lock:
             drops = []
 
-            for symbol in self._price_history:
-                if not self._price_history[symbol]:
+            if not drop_snapshot_store:
+                logger.warning("get_top_drops requires snapshot store for V9_3")
+                return drops
+
+            # Iterate over snapshots instead of price history
+            for symbol, snapshot in drop_snapshot_store.items():
+                if not snapshot:
                     continue
 
-                # Get current price
-                _, current_price = self._price_history[symbol][-1]
+                # Get price and anchor from snapshot
+                current_price = snapshot.get('price', {}).get('last')
+                anchor = snapshot.get('windows', {}).get('anchor')
 
-                # Calculate anchor
-                anchor = self._calculate_anchor_price(symbol, current_price)
+                if not current_price or current_price <= 0:
+                    continue
                 if not anchor or anchor <= 0:
                     continue
 

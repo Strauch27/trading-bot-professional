@@ -249,9 +249,11 @@ class BuyDecisionHandler:
                     )
                 return None
 
-            # 5c. Evaluate buy signal with DROP_TRIGGER logic
+            # 5c. Evaluate buy signal with DROP_TRIGGER logic (V9_3)
             trace_step("evaluate_buy_signal_start", symbol=symbol)
-            buy_triggered, context = self.engine.buy_signal_service.evaluate_buy_signal(symbol, current_price)
+            buy_triggered, context = self.engine.buy_signal_service.evaluate_buy_signal(
+                symbol, current_price, drop_snapshot_store=self.engine.drop_snapshot_store
+            )
             trace_step("evaluate_buy_signal_result", symbol=symbol, triggered=buy_triggered, context=context)
 
             # Console output for debugging buy signals

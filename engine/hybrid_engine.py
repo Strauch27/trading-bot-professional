@@ -121,12 +121,38 @@ class HybridEngine:
 
     def start(self):
         """Start active engines based on mode."""
+        # ULTRA VERBOSE DEBUG - Multiple output channels
+        import sys
+        sys.stdout.write(f"\n[HYBRID_ENGINE.START] ENTRY - mode={self.mode}\n")
+        sys.stdout.flush()
+
         print(f"[HYBRID_ENGINE] Starting Hybrid Engine (mode={self.mode})...")  # DEBUG: Direct console output
+        logger.info(f"=== HYBRID_ENGINE.START() ENTRY === mode={self.mode}")
         logger.info(f"Starting Hybrid Engine (mode={self.mode})...")
 
+        # Check condition
+        has_legacy = self.legacy_engine is not None
+        mode_check = self.mode in ["legacy", "both"]
+        logger.info(f"=== HYBRID_ENGINE.START() - mode_check={mode_check}, has_legacy={has_legacy} ===")
+        sys.stdout.write(f"[HYBRID_ENGINE.START] Checks: mode_check={mode_check}, has_legacy={has_legacy}\n")
+        sys.stdout.flush()
+
         if self.mode in ["legacy", "both"] and self.legacy_engine:
-            logger.info("Starting Legacy Engine...")
+            logger.info("=== HYBRID_ENGINE.START() - Calling legacy_engine.start() ===")
+            sys.stdout.write("[HYBRID_ENGINE.START] Calling legacy_engine.start()\n")
+            sys.stdout.flush()
             self.legacy_engine.start()
+
+            # Check MD thread liveness
+            try:
+                if hasattr(self.legacy_engine, 'market_data'):
+                    t = getattr(self.legacy_engine.market_data, "_thread", None)
+                    alive = t.is_alive() if t else None
+                    logger.info("MD_THREAD_STATUS", extra={"is_alive": alive})
+                    if not alive:
+                        logger.error("MARKET_DATA_THREAD_NOT_ALIVE")
+            except Exception as e:
+                logger.exception("MD_THREAD_STATUS_CHECK_FAIL")
 
         if self.mode in ["fsm", "both"] and self.fsm_engine:
             logger.info("Starting FSM Engine...")
@@ -380,6 +406,36 @@ class HybridEngine:
             return self.fsm_engine.drop_snapshot_store
 
         return {}
+
+    @property
+    def market_data(self):
+        """
+        Get market_data from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, 'market_data'):
+            return self.legacy_engine.market_data
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'market_data'):
+            return self.fsm_engine.market_data
+
+        return None
+
+    @property
+    def event_bus(self):
+        """
+        Get event_bus from active engine.
+
+        Dashboard compatibility: Delegates to internal engine.
+        """
+        if self.legacy_engine and hasattr(self.legacy_engine, 'event_bus'):
+            return self.legacy_engine.event_bus
+
+        if self.fsm_engine and hasattr(self.fsm_engine, 'event_bus'):
+            return self.fsm_engine.event_bus
+
+        return None
 
     @property
     def _snap_recv(self) -> int:

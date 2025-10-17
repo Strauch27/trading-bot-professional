@@ -17,6 +17,7 @@ from threading import RLock
 from dataclasses import dataclass, asdict
 from collections import defaultdict, deque
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # Import new services
 from services.cache_ttl import TTLCache, CacheCoordinator
@@ -34,7 +35,11 @@ from core.price_cache import PriceCache
 from core.rolling_windows import RollingWindowManager
 from features.engine import compute as compute_features
 from market.snapshot_builder import build as build_snapshot
+from market.anchor_manager import AnchorManager
 from telemetry.jsonl_writer import JsonlWriter
+
+# Import V9_3 persistence (Phase 4)
+from persistence.jsonl import RotatingJSONLWriter
 
 # Import from market_data submodule
 import sys
@@ -349,6 +354,10 @@ class MarketDataProvider:
             'drop_snapshots_emitted': 0
         }
 
+        # V9_3: Per-symbol retry state tracking (Phase 3)
+        # {symbol: {"attempts": int, "next_retry": float, "last_error": str}}
+        self._retry_state: Dict[str, Dict[str, Any]] = {}
+
         # Request coalescing (prevents duplicate API calls)
         self.enable_coalescing = enable_coalescing
         self.coalescing_cache = get_coalescing_cache() if enable_coalescing else None
@@ -372,6 +381,7 @@ class MarketDataProvider:
         self.event_bus = event_bus or _get_event_bus()
         self.price_cache = None
         self.rw_manager = None
+        self.anchor_manager = None
         self.telemetry = None
 
         if self.enable_drop_tracking:
@@ -382,6 +392,11 @@ class MarketDataProvider:
             persist = getattr(config, 'PERSIST_WINDOWS', True)
             base_path = getattr(config, 'WINDOW_STORE', 'state/drop_windows')
 
+            # Store config values as instance attributes for _loop()
+            self.lookback_s = lookback_s
+            self.persist = persist
+            self.base_path = base_path
+
             # Initialize pipeline components
             self.price_cache = PriceCache(seconds=lookback_s)
             self.rw_manager = RollingWindowManager(
@@ -389,7 +404,51 @@ class MarketDataProvider:
                 persist=persist,
                 base_path=base_path
             )
+            self.anchor_manager = AnchorManager(base_path=f"{base_path}/anchors")
             self.telemetry = JsonlWriter(base="telemetry")
+
+            # V9_3: 4-Stream JSONL Writers (Phase 4)
+            self.tick_writers: Dict[str, RotatingJSONLWriter] = {}  # Per-symbol tick persistence
+            self.snapshot_writer: Optional[RotatingJSONLWriter] = None
+            self.windows_writer: Optional[RotatingJSONLWriter] = None
+            self.anchors_writer: Optional[RotatingJSONLWriter] = None
+
+            # Initialize writers based on feature flags
+            persist_ticks = getattr(config, 'PERSIST_TICKS', True)
+            persist_snapshots = getattr(config, 'PERSIST_SNAPSHOTS', True)
+            max_file_mb = getattr(config, 'MAX_FILE_MB', 50)
+
+            if persist and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                # Snapshot stream (all symbols)
+                if persist_snapshots:
+                    self.snapshot_writer = RotatingJSONLWriter(
+                        base_dir=f"{base_path}/snapshots",
+                        prefix="snapshots",
+                        max_mb=max_file_mb
+                    )
+                    logger.debug("Snapshot stream writer initialized")
+
+                # Windows stream
+                self.windows_writer = RotatingJSONLWriter(
+                    base_dir=f"{base_path}/windows",
+                    prefix="windows",
+                    max_mb=max_file_mb
+                )
+                logger.debug("Windows stream writer initialized")
+
+                # Anchors stream
+                self.anchors_writer = RotatingJSONLWriter(
+                    base_dir=f"{base_path}/anchors",
+                    prefix="anchors",
+                    max_mb=max_file_mb
+                )
+                logger.debug("Anchors stream writer initialized")
+
+                logger.info(
+                    f"4-Stream JSONL persistence enabled: "
+                    f"ticks={persist_ticks}, snapshots={persist_snapshots}, "
+                    f"windows=True, anchors=True (max_mb={max_file_mb})"
+                )
 
             logger.info(
                 f"Snapshot pipeline enabled: lookback={lookback_s}s, "
@@ -588,6 +647,204 @@ class MarketDataProvider:
         ticker = self.get_ticker(symbol)
         return ticker.spread_bps if ticker else None
 
+    def _validate_ticker(self, ticker: Optional[TickerData], symbol: str, now: float) -> Tuple[bool, Optional[str]]:
+        """
+        Validate ticker data quality (V9_3 Phase 3).
+
+        Guards:
+        1. Ticker exists
+        2. last > 0
+        3. last is not NaN
+        4. Timestamp fresh (≤ 2 × POLL_MS)
+
+        Args:
+            ticker: Ticker data to validate
+            symbol: Trading symbol
+            now: Current timestamp
+
+        Returns:
+            Tuple of (is_valid, error_reason)
+        """
+        if not ticker:
+            return False, "ticker_none"
+
+        # Guard 1: last > 0
+        if not ticker.last or ticker.last <= 0:
+            return False, "invalid_last"
+
+        # Guard 2: last is not NaN
+        if math.isnan(ticker.last):
+            return False, "nan_price"
+
+        # Guard 3: Timestamp freshness
+        import config
+        poll_ms = getattr(config, "POLL_MS", 300)
+        max_age_ms = 2 * poll_ms
+
+        if ticker.timestamp:
+            age_ms = (now - ticker.timestamp / 1000.0) * 1000
+            if age_ms > max_age_ms:
+                return False, "stale_timestamp"
+
+        return True, None
+
+    def _calculate_spread(self, ticker: TickerData) -> Tuple[float, float]:
+        """
+        Calculate bid-ask spread with fallback (V9_3 Phase 3).
+
+        Args:
+            ticker: Ticker data
+
+        Returns:
+            Tuple of (spread_bps, spread_pct)
+            Falls back to (0.0, 0.0) if bid/ask unavailable
+        """
+        if not ticker.bid or not ticker.ask or ticker.bid <= 0 or ticker.ask <= 0:
+            # Fallback: No spread (use last price)
+            return 0.0, 0.0
+
+        mid = (ticker.bid + ticker.ask) / 2.0
+        if mid <= 0:
+            return 0.0, 0.0
+
+        spread = ticker.ask - ticker.bid
+        spread_bps = (spread / mid) * 10000.0
+        spread_pct = (spread / mid) * 100.0
+
+        return spread_bps, spread_pct
+
+    def get_ticker_with_retry(
+        self,
+        symbol: str,
+        max_attempts: int = 5,
+        base_backoff_s: float = 1.0
+    ) -> Optional[TickerData]:
+        """
+        Get ticker with exponential backoff retry (V9_3 Phase 3).
+
+        Retry strategy:
+        - Attempt 1: Immediate
+        - Attempt 2: 1s backoff
+        - Attempt 3: 2s backoff
+        - Attempt 4: 4s backoff
+        - Attempt 5: 8s backoff
+        - Max backoff: 16s
+
+        Args:
+            symbol: Trading symbol
+            max_attempts: Maximum retry attempts (default: 5)
+            base_backoff_s: Base backoff in seconds (default: 1.0)
+
+        Returns:
+            TickerData or None if all attempts failed
+        """
+        import config
+        now = time.time()
+
+        # Check if symbol is in backoff period
+        with self._lock:
+            if symbol in self._retry_state:
+                retry_info = self._retry_state[symbol]
+                next_retry = retry_info.get("next_retry", 0.0)
+
+                if now < next_retry:
+                    # Still in backoff period - skip
+                    logger.debug(f"Symbol {symbol} in backoff period (retry in {next_retry - now:.1f}s)")
+                    return None
+
+        # Attempt fetch with retry logic
+        for attempt in range(max_attempts):
+            try:
+                ticker = self.get_ticker(symbol, use_cache=False)
+
+                # Validate ticker
+                is_valid, error = self._validate_ticker(ticker, symbol, now)
+
+                if is_valid and ticker:
+                    # Success - clear retry state
+                    with self._lock:
+                        if symbol in self._retry_state:
+                            del self._retry_state[symbol]
+
+                    # Feature flag check
+                    if not getattr(config, "FEATURE_RETRY_BACKOFF", True):
+                        return ticker
+
+                    return ticker
+
+                # Validation failed - log and retry
+                if attempt < max_attempts - 1:
+                    backoff = base_backoff_s * (2 ** attempt)
+                    backoff = min(backoff, 16.0)  # Cap at 16s
+
+                    logger.debug(
+                        f"Ticker validation failed for {symbol}: {error}, "
+                        f"retry {attempt + 1}/{max_attempts} in {backoff:.1f}s"
+                    )
+
+                    time.sleep(backoff)
+                else:
+                    # Final attempt failed
+                    logger.warning(
+                        f"Ticker validation failed for {symbol} after {max_attempts} attempts: {error}",
+                        extra={
+                            'event_type': 'TICKER_VALIDATION_FAILED',
+                            'symbol': symbol,
+                            'attempts': max_attempts,
+                            'error': error or "unknown"
+                        }
+                    )
+
+                    # Update retry state
+                    with self._lock:
+                        next_backoff = base_backoff_s * (2 ** max_attempts)
+                        next_backoff = min(next_backoff, 16.0)
+
+                        self._retry_state[symbol] = {
+                            "attempts": max_attempts,
+                            "next_retry": now + next_backoff,
+                            "last_error": error or "unknown"
+                        }
+
+                    return None
+
+            except Exception as e:
+                if attempt < max_attempts - 1:
+                    backoff = base_backoff_s * (2 ** attempt)
+                    backoff = min(backoff, 16.0)
+
+                    logger.debug(
+                        f"Ticker fetch error for {symbol}: {e}, "
+                        f"retry {attempt + 1}/{max_attempts} in {backoff:.1f}s"
+                    )
+
+                    time.sleep(backoff)
+                else:
+                    logger.error(
+                        f"Ticker fetch failed for {symbol} after {max_attempts} attempts: {e}",
+                        extra={
+                            'event_type': 'TICKER_FETCH_FAILED',
+                            'symbol': symbol,
+                            'attempts': max_attempts,
+                            'error': str(e)
+                        }
+                    )
+
+                    # Update retry state
+                    with self._lock:
+                        next_backoff = base_backoff_s * (2 ** max_attempts)
+                        next_backoff = min(next_backoff, 16.0)
+
+                        self._retry_state[symbol] = {
+                            "attempts": max_attempts,
+                            "next_retry": now + next_backoff,
+                            "last_error": str(e)
+                        }
+
+                    return None
+
+        return None
+
     def get_top5_depth(self, symbol: str, levels: int = 5) -> Tuple[float, float]:
         """
         Get cumulative notional depth for top N levels (Phase 7).
@@ -783,6 +1040,120 @@ class MarketDataProvider:
 
         return results
 
+    def _warm_start(self, symbols: List[str], max_ticks: int = 300) -> Dict[str, int]:
+        """
+        Warm-start from persisted ticks (V9_3 Phase 5).
+
+        Loads last N ticks per symbol from JSONL and replays them into:
+        - PriceCache
+        - RollingWindows
+        - AnchorManager
+
+        This restores the market data state after restart.
+
+        Args:
+            symbols: List of symbols to warm-start
+            max_ticks: Maximum ticks to load per symbol (default: 300)
+
+        Returns:
+            Dict mapping symbols to number of ticks loaded
+        """
+        import config
+        from persistence.jsonl import read_jsonl_tail
+
+        if not getattr(config, 'FEATURE_WARMSTART_TICKS', True):
+            logger.info("Warm-start disabled by feature flag")
+            return {}
+
+        logger.info(f"Starting warm-start for {len(symbols)} symbols (max_ticks={max_ticks})")
+
+        results = {}
+        total_ticks = 0
+
+        # Load persisted rolling windows first (V9_3: symbol-by-symbol)
+        if self.rw_manager:
+            for symbol in symbols:
+                try:
+                    self.rw_manager.load(symbol)
+                except Exception as e:
+                    logger.debug(f"Failed to load rolling window for {symbol}: {e}")
+
+        # Load last N ticks from JSONL per symbol
+        for symbol in symbols:
+            try:
+                # Build tick file path
+                symbol_safe = symbol.replace('/', '_')
+                tick_file = Path(f"{self.base_path}/ticks/tick_{symbol_safe}")
+
+                # Find latest tick file (today or yesterday)
+                today = datetime.now().strftime("%Y%m%d")
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+
+                tick_path = None
+                for date_str in [today, yesterday]:
+                    candidate = Path(f"{tick_file}_{date_str}.jsonl")
+                    if candidate.exists():
+                        tick_path = candidate
+                        break
+
+                if not tick_path or not tick_path.exists():
+                    logger.debug(f"No tick file found for {symbol}")
+                    results[symbol] = 0
+                    continue
+
+                # Load last N ticks
+                ticks = read_jsonl_tail(str(tick_path), n=max_ticks)
+
+                if not ticks:
+                    results[symbol] = 0
+                    continue
+
+                # Replay ticks into PriceCache and RollingWindows
+                for tick in ticks:
+                    ts = tick.get('ts')
+                    last = tick.get('last')
+
+                    if not ts or not last or last <= 0:
+                        continue
+
+                    # Update PriceCache
+                    if self.price_cache:
+                        self.price_cache.update({symbol: last}, ts)
+
+                    # Update RollingWindows
+                    if self.rw_manager:
+                        self.rw_manager.update(symbol, ts, last)
+
+                    # Update AnchorManager
+                    if self.anchor_manager:
+                        self.anchor_manager.note_price(symbol, last, ts)
+
+                results[symbol] = len(ticks)
+                total_ticks += len(ticks)
+
+                logger.debug(f"Warm-start: {symbol} loaded {len(ticks)} ticks")
+
+            except Exception as e:
+                logger.warning(f"Warm-start failed for {symbol}: {e}")
+                results[symbol] = 0
+
+        success_symbols = sum(1 for v in results.values() if v > 0)
+
+        logger.info(
+            f"Warm-start complete: {len(symbols)} symbols, "
+            f"{total_ticks} total ticks, "
+            f"{success_symbols} successful",
+            extra={
+                'event_type': 'WARMSTART_COMPLETE',
+                'symbols_total': len(symbols),
+                'symbols_success': success_symbols,
+                'ticks_loaded': total_ticks,
+                'max_ticks_per_symbol': max_ticks
+            }
+        )
+
+        return results
+
     def update_market_data(self, symbols: List[str]) -> Dict[str, bool]:
         """
         Update market data for multiple symbols with new snapshot pipeline.
@@ -829,12 +1200,40 @@ class MarketDataProvider:
 
         # New Pipeline: Fetch all tickers first
         tickers = {}
+        persist_ticks = getattr(config, 'PERSIST_TICKS', True)
+
         for symbol in symbols:
             try:
                 ticker = self.get_ticker(symbol, use_cache=False)
                 if ticker and ticker.last > 0:
                     tickers[symbol] = ticker
                     results[symbol] = True
+
+                    # V9_3 Phase 4: Persist tick data per symbol
+                    if persist_ticks and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                        try:
+                            # Get or create tick writer for this symbol
+                            if symbol not in self.tick_writers:
+                                symbol_safe = symbol.replace('/', '_')
+                                self.tick_writers[symbol] = RotatingJSONLWriter(
+                                    base_dir=f"{self.base_path}/ticks",
+                                    prefix=f"tick_{symbol_safe}",
+                                    max_mb=getattr(config, 'MAX_FILE_MB', 50)
+                                )
+
+                            # Write tick
+                            tick_obj = {
+                                "ts": now,
+                                "symbol": symbol,
+                                "last": ticker.last,
+                                "bid": ticker.bid,
+                                "ask": ticker.ask,
+                                "volume": ticker.volume,
+                                "spread_bps": ticker.spread_bps
+                            }
+                            self.tick_writers[symbol].append(tick_obj)
+                        except Exception as e:
+                            logger.debug(f"Failed to persist tick for {symbol}: {e}")
                 else:
                     results[symbol] = False
             except Exception as e:
@@ -851,6 +1250,7 @@ class MarketDataProvider:
         for symbol, ticker in tickers.items():
             try:
                 # Update rolling window
+                rolling_peak = None
                 if self.rw_manager:
                     self.rw_manager.update(symbol, now, ticker.last)
 
@@ -859,6 +1259,7 @@ class MarketDataProvider:
                     if window:
                         peak = window.max_val if window.max_val != float('-inf') else None
                         trough = window.min_val if window.min_val != float('inf') else None
+                        rolling_peak = peak
 
                         windows_dict = {
                             "peak": peak,
@@ -868,6 +1269,18 @@ class MarketDataProvider:
                         windows_dict = {"peak": None, "trough": None}
                 else:
                     windows_dict = {"peak": None, "trough": None}
+
+                # Update anchor (V9_3)
+                anchor = None
+                if self.anchor_manager:
+                    self.anchor_manager.note_price(symbol, ticker.last, now)
+                    anchor = self.anchor_manager.compute_anchor(
+                        symbol=symbol,
+                        last=ticker.last,
+                        now=now,
+                        rolling_peak=rolling_peak or ticker.last
+                    )
+                    windows_dict["anchor"] = anchor
 
                 # Compute features from price cache observations
                 features_dict = {}
@@ -896,10 +1309,19 @@ class MarketDataProvider:
         # Publish all snapshots via EventBus
         if snapshots and self.event_bus:
             try:
+                logger.debug("PUBLISHING_SNAPSHOTS", extra={"n": len(snapshots)})
                 self.event_bus.publish("market.snapshots", snapshots)
                 self._statistics['drop_snapshots_emitted'] += 1
             except Exception as e:
                 logger.debug(f"Failed to publish snapshots: {e}")
+
+        # V9_3 Phase 4: Persist snapshots to JSONL
+        if snapshots and self.snapshot_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+            try:
+                for snapshot in snapshots:
+                    self.snapshot_writer.append(snapshot)
+            except Exception as e:
+                logger.debug(f"Failed to persist snapshots: {e}")
 
         # Log to JSONL telemetry (sample 10%)
         if self.telemetry and snapshots and self._statistics['drop_snapshots_emitted'] % 10 == 0:
@@ -909,12 +1331,52 @@ class MarketDataProvider:
             except Exception:
                 pass  # Silent fail for telemetry
 
-        # Persist windows periodically
-        if self.rw_manager and self.rw_manager.persist and self._statistics['drop_snapshots_emitted'] % 20 == 0:
-            try:
-                self.rw_manager.persist_all()
-            except Exception as e:
-                logger.debug(f"Failed to persist windows: {e}")
+        # V9_3 Phase 4: Persist windows and anchors periodically
+        if self._statistics['drop_snapshots_emitted'] % 20 == 0:
+            # Persist rolling windows (legacy + JSONL)
+            if self.rw_manager and self.rw_manager.persist:
+                try:
+                    self.rw_manager.persist_all()  # Legacy persistence
+                except Exception as e:
+                    logger.debug(f"Failed to persist windows (legacy): {e}")
+
+                # V9_3: JSONL persistence for windows
+                if self.windows_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                    try:
+                        for symbol, window in self.rw_manager.windows.items():
+                            window_obj = {
+                                "ts": now,
+                                "symbol": symbol,
+                                "peak": window.max_val if window.max_val != float('-inf') else None,
+                                "trough": window.min_val if window.min_val != float('inf') else None,
+                                "lookback_s": window.lookback_s
+                            }
+                            self.windows_writer.append(window_obj)
+                    except Exception as e:
+                        logger.debug(f"Failed to persist windows (JSONL): {e}")
+
+            # Persist anchors (legacy + JSONL)
+            if self.anchor_manager:
+                try:
+                    self.anchor_manager.save()  # Legacy JSON persistence
+                except Exception as e:
+                    logger.debug(f"Failed to persist anchors (legacy): {e}")
+
+                # V9_3: JSONL persistence for anchors
+                if self.anchors_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                    try:
+                        for symbol, anchor_data in self.anchor_manager._anchors.items():
+                            anchor_obj = {
+                                "ts": now,
+                                "symbol": symbol,
+                                "anchor": anchor_data.get("anchor"),
+                                "anchor_ts": anchor_data.get("ts"),
+                                "session_peak": self.anchor_manager.get_session_peak(symbol),
+                                "session_start": self.anchor_manager.get_session_start(symbol)
+                            }
+                            self.anchors_writer.append(anchor_obj)
+                    except Exception as e:
+                        logger.debug(f"Failed to persist anchors (JSONL): {e}")
 
         co.beat("md_update_end")
         logger.info(f"HEARTBEAT - Market data update completed: {len(symbols)} symbols, {sum(results.values())} successful, {len(snapshots)} snapshots",
@@ -953,8 +1415,24 @@ class MarketDataProvider:
 
     def start(self):
         """Start market data polling loop in background thread"""
+        # ULTRA DEBUG: Write to file
+        try:
+            with open("/tmp/market_data_start.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - MarketDataProvider.start() ENTRY\n")
+                f.flush()
+        except:
+            pass
+
         if hasattr(self, '_running') and self._running:
             logger.warning("Market data loop already running")
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_start.txt", "a") as f:
+                    f.write(f"  Already running, returning early\n")
+                    f.flush()
+            except:
+                pass
             return
 
         self._running = True
@@ -963,6 +1441,17 @@ class MarketDataProvider:
         import threading
         self._thread = threading.Thread(target=self._loop, name="MarketDataLoop", daemon=True)
         self._thread.start()
+
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/market_data_start.txt", "a") as f:
+                f.write(f"  Thread started, thread={self._thread}, is_alive={self._thread.is_alive() if self._thread else False}\n")
+                f.flush()
+        except:
+            pass
+
+        # Log thread start with explicit event
+        logger.info("MARKET_DATA_THREAD_STARTED", extra={"event_type":"MARKET_DATA_LOOP_STARTED"})
 
         # Get symbols and poll_ms for debug logging
         import config
@@ -983,71 +1472,204 @@ class MarketDataProvider:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5.0)
+
+        # V9_3: Save rolling windows per symbol (defensive)
+        if self.rw_manager and self.rw_manager.persist:
+            try:
+                import config
+                symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
+                for symbol in symbols:
+                    try:
+                        self.rw_manager.save(symbol)
+                    except Exception as e:
+                        logger.debug(f"Failed to save rolling window for {symbol}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to save rolling windows on shutdown: {e}")
+
+        # Persist anchor state before shutdown
+        if self.anchor_manager:
+            try:
+                self.anchor_manager.save()
+            except Exception as e:
+                logger.warning(f"Failed to save anchors on shutdown: {e}")
+
         logger.info("Market data loop stopped")
 
     def _loop(self):
         """Market data polling loop - fetches and publishes snapshots"""
+        # ULTRA DEBUG: Write to file
+        try:
+            with open("/tmp/market_data_loop.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - _loop() ENTRY\n")
+                f.flush()
+        except:
+            pass
+
         import config
-        poll_ms = getattr(config, "MD_POLL_MS", 1000)
-        poll_s = poll_ms / 1000.0
-        debug_drops = getattr(config, "DEBUG_DROPS", False)
+        import traceback
+        from pathlib import Path
 
-        logger.info(f"Market data loop started with poll interval {poll_ms}ms")
-
-        # Get symbols from config or use defaults
-        symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
-        if not symbols:
-            symbols = ["BTC/USDT", "ETH/USDT"]  # Fallback
-
-        logger.info(f"MD_LOOP symbols_count={len(symbols)} first_5={symbols[:5] if symbols else []}")
-
-        while self._running:
+        try:
+            # ULTRA DEBUG
             try:
-                # Fetch all market snapshots (returns Dict[str, bool] indicating success per symbol)
-                results = self.update_market_data(symbols)
-                success_count = sum(1 for v in results.values() if v)
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  Inside try block\n")
+                    f.flush()
+            except:
+                pass
 
-                # DEBUG_DROPS: Detailed logging
-                if debug_drops:
-                    # Get first symbol price for sample logging
-                    first_sym = symbols[0] if symbols else None
-                    first_price = None
-                    if first_sym:
-                        cache_result = self.ticker_cache.get_ticker(first_sym)
-                        if cache_result:
-                            ticker, _ = cache_result
-                            first_price = ticker.last
-
-                    if success_count > 0:
-                        logger.debug(
-                            f"MD_POLL published count={success_count}/{len(symbols)} "
-                            f"first={first_sym} last={first_price:.8f if first_price else -1}"
-                        )
-                    else:
-                        logger.warning(
-                            f"MD_POLL produced 0 snapshots; symbols={symbols[:5] if symbols else []}"
-                        )
-                else:
-                    # Normal logging (less verbose)
-                    if success_count > 0:
-                        logger.debug(f"MD_POLL tick published count={success_count}/{len(symbols)}")
-                    else:
-                        logger.warning("MD_POLL tick produced 0 snapshots")
-
-                # Log telemetry (sample 10%)
-                if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:
-                    try:
-                        self.telemetry.write("market", {"count": success_count, "total": len(symbols)})
-                    except Exception:
-                        pass
-
-                time.sleep(poll_s)
-
+            # ULTRA DEBUG - Test 1
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  Test 1: About to check self.persist\n")
+                    f.flush()
+                    persist_value = self.persist
+                    f.write(f"  Test 2: self.persist={persist_value}\n")
+                    f.flush()
             except Exception as e:
-                logger.error(f"Market data loop error: {e}", exc_info=True)
-                time.sleep(poll_s)
+                try:
+                    with open("/tmp/market_data_loop.txt", "a") as f:
+                        f.write(f"  ERROR accessing self.persist: {e}\n")
+                        f.flush()
+                except:
+                    pass
+            # Pfade vorbereiten (falls Persistenz aktiviert)
+            if self.persist:
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/market_data_loop.txt", "a") as f:
+                        f.write(f"  Creating paths...\n")
+                        f.flush()
+                except:
+                    pass
+                Path(self.base_path).mkdir(parents=True, exist_ok=True)
+                Path(f"{self.base_path}/snapshots").mkdir(parents=True, exist_ok=True)
+                Path(f"{self.base_path}/drop_windows").mkdir(parents=True, exist_ok=True)
+                logger.info("SNAPSHOT_PIPELINE_ENABLED",
+                           extra={"lookback": self.lookback_s, "persist": self.persist, "base": self.base_path})
 
-        logger.info("Market data loop ended")
+            poll_ms = getattr(config, "MD_POLL_MS", 1000)
+            poll_s = poll_ms / 1000.0
+            debug_drops = getattr(config, "DEBUG_DROPS", False)
+
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  poll_ms={poll_ms}, debug_drops={debug_drops}\n")
+                    f.flush()
+            except:
+                pass
+
+            logger.info(f"Market data loop started with poll interval {poll_ms}ms")
+
+            # Get symbols from config or use defaults
+            symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
+
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  symbols_count={len(symbols)}\n")
+                    f.flush()
+            except:
+                pass
+
+            # Log configuration
+            logger.info("MD_LOOP_CFG", extra={"symbols_count": len(symbols), "first5": symbols[:5], "poll_ms": poll_ms})
+
+            if not symbols:
+                logger.error("NO_SYMBOLS_FOR_MD_LOOP")
+                symbols = ["BTC/USDT", "ETH/USDT"]  # Fallback
+
+            logger.info(f"MD_LOOP symbols_count={len(symbols)} first_5={symbols[:5] if symbols else []}")
+
+            # V9_3 Phase 5: Warm-start from persisted ticks
+            if self.enable_drop_tracking and getattr(config, 'FEATURE_WARMSTART_TICKS', True):
+                try:
+                    logger.info("Starting warm-start from persisted ticks...")
+                    warmstart_results = self._warm_start(symbols, max_ticks=300)
+                    success_count = sum(1 for v in warmstart_results.values() if v > 0)
+                    total_ticks = sum(warmstart_results.values())
+                    logger.info(
+                        f"Warm-start complete: {success_count}/{len(symbols)} symbols, "
+                        f"{total_ticks} ticks loaded"
+                    )
+                except Exception as e:
+                    logger.warning(f"Warm-start failed: {e}", exc_info=True)
+
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  Entering while loop (_running={self._running})\n")
+                    f.flush()
+            except:
+                pass
+
+            loop_counter = 0
+            while self._running:
+                try:
+                    loop_counter += 1
+                    # ULTRA DEBUG (first 3 loops only)
+                    if loop_counter <= 3:
+                        try:
+                            with open("/tmp/market_data_loop.txt", "a") as f:
+                                f.write(f"  Loop iteration #{loop_counter}\n")
+                                f.flush()
+                        except:
+                            pass
+
+                    # Fetch all market snapshots (returns Dict[str, bool] indicating success per symbol)
+                    results = self.update_market_data(symbols)
+                    success_count = sum(1 for v in results.values() if v)
+
+                    # DEBUG_DROPS: Detailed logging
+                    if debug_drops:
+                        # Get first symbol price for sample logging
+                        first_sym = symbols[0] if symbols else None
+                        first_price = None
+                        if first_sym:
+                            cache_result = self.ticker_cache.get_ticker(first_sym)
+                            if cache_result:
+                                ticker, _ = cache_result
+                                first_price = ticker.last
+
+                        if success_count > 0:
+                            logger.debug(
+                                f"MD_POLL published count={success_count}/{len(symbols)} "
+                                f"first={first_sym} last={first_price:.8f if first_price else -1}"
+                            )
+                        else:
+                            logger.warning(
+                                f"MD_POLL produced 0 snapshots; symbols={symbols[:5] if symbols else []}"
+                            )
+                    else:
+                        # Normal logging (less verbose)
+                        if success_count > 0:
+                            logger.debug(f"MD_POLL tick published count={success_count}/{len(symbols)}")
+                        else:
+                            logger.warning("MD_POLL tick produced 0 snapshots")
+
+                    # Log telemetry (sample 10%)
+                    if self.telemetry and self._statistics.get('drop_snapshots_emitted', 0) % 10 == 0:
+                        try:
+                            self.telemetry.write("market", {"count": success_count, "total": len(symbols)})
+                        except Exception:
+                            pass
+
+                    time.sleep(poll_s)
+
+                except Exception as e:
+                    logger.error(f"Market data loop error: {e}", exc_info=True)
+                    time.sleep(poll_s)
+
+        except Exception as e:
+            logger.exception("MD_LOOP_FATAL")
+            logger.error(str(e))
+            logger.error(traceback.format_exc())
+            self._running = False
+            return
+        finally:
+            logger.info("Market data loop ended")
 
 
 # Utility functions for backwards compatibility

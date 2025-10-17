@@ -95,22 +95,32 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
         List of log lines (may be fewer than n_lines if file is short)
     """
     try:
-        # Try multiple log locations
+        # Get current working directory
+        import os
+        cwd = os.getcwd()
+
+        # Try multiple log locations (absolute paths)
         log_patterns = [
-            "logs/trading_bot_*.log",           # Legacy location
-            "sessions/*/logs/*.log",            # New session-based location
-            "sessions/*/*.log",                 # Alternative session location
+            os.path.join(cwd, "logs/trading_bot_*.log"),           # Legacy location
+            os.path.join(cwd, "sessions/*/logs/*.log"),            # New session-based location
+            os.path.join(cwd, "sessions/*/*.log"),                 # Alternative session location
+            "/tmp/bot_*.log",                                      # Temporary logs
         ]
 
         log_files = []
         for pattern in log_patterns:
-            log_files.extend(glob.glob(pattern))
+            found = glob.glob(pattern)
+            log_files.extend(found)
 
         if not log_files:
-            return ["No log files found - checked:",
-                    "  logs/trading_bot_*.log",
-                    "  sessions/*/logs/*.log",
-                    "  sessions/*/*.log"]
+            return [
+                f"No log files found in {cwd}",
+                "Checked patterns:",
+                f"  {cwd}/logs/trading_bot_*.log",
+                f"  {cwd}/sessions/*/logs/*.log",
+                f"  {cwd}/sessions/*/*.log",
+                "  /tmp/bot_*.log"
+            ]
 
         # Get most recent log file
         latest_log = max(log_files, key=lambda p: Path(p).stat().st_mtime)
@@ -118,10 +128,13 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
         # Read last N lines
         with open(latest_log, 'r', encoding='utf-8', errors='ignore') as f:
             lines = deque(f, maxlen=n_lines)
-            return list(lines)
+            result = [f"📄 {latest_log} (last {n_lines} lines):"]
+            result.extend(list(lines))
+            return result
 
     except Exception as e:
-        return [f"Error reading logs: {e}"]
+        import traceback
+        return [f"Error reading logs: {e}", traceback.format_exc()]
 
 
 def get_config_data(config_module, start_time: float) -> Dict[str, Any]:
@@ -209,13 +222,19 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
 
                     price_data = snap.get('price', {})
                     current_price = price_data.get('last', 0)
-                    anchor = windows.get('peak', 0)
+                    # V9_3: Read anchor from snapshot (fallback to peak for compatibility)
+                    anchor = windows.get('anchor') or windows.get('peak', 0)
+
+                    # V9_3: Read spread from liquidity data
+                    liquidity = snap.get('liquidity', {})
+                    spread_pct = liquidity.get('spread_pct')
 
                     drops.append({
                         'symbol': symbol,
                         'drop_pct': drop_pct,
                         'current_price': current_price,
                         'anchor': anchor,
+                        'spread_pct': spread_pct,
                     })
                 except Exception as e:
                     logger.debug(f"Error processing snapshot for {symbol}: {e}")
@@ -269,13 +288,33 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
                         'drop_pct': drop_pct,
                         'current_price': current_price,
                         'anchor': anchor,
+                        'spread_pct': None,  # Spread not available in legacy fallback
                     })
                 except Exception as e:
                     logger.debug(f"Error calculating drop for {symbol}: {e}")
                     continue
 
-        # Sort by drop % (most negative first)
-        drops.sort(key=lambda x: x['drop_pct'])
+        # Custom sorting: BTC first, then biggest losers
+        # 1. Extract BTC/USDT if present
+        btc_drop = None
+        other_drops = []
+
+        for drop in drops:
+            if drop['symbol'] == 'BTC/USDT':
+                btc_drop = drop
+            else:
+                other_drops.append(drop)
+
+        # 2. Sort other drops by drop % (most negative first = biggest losers)
+        other_drops.sort(key=lambda x: x['drop_pct'])
+
+        # 3. Combine: BTC first (if available), then biggest losers
+        sorted_drops = []
+        if btc_drop:
+            sorted_drops.append(btc_drop)
+        sorted_drops.extend(other_drops)
+
+        drops = sorted_drops
 
     except Exception as e:
         logger.error(f"Error getting drop data: {e}")
@@ -364,11 +403,13 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
 
 
 def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
-    """Create the top drops panel."""
+    """Create the top drops panel (V9_3: with anchor and spread columns)."""
     table = Table(expand=True, show_header=True)
     table.add_column("#", style="dim", justify="right", width=3)
-    table.add_column("Symbol", style="bold", width=12)
+    table.add_column("Symbol", style="bold", width=10)
     table.add_column("Drop %", justify="right", width=8)
+    table.add_column("Spread %", justify="right", width=8)
+    table.add_column("Anchor", justify="right", width=10)
     table.add_column("To Trig", justify="right", width=8)
 
     drop_trigger_pct = config_data.get('DT', 0)
@@ -377,10 +418,13 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
     top_drops = drop_data[:10]
 
     if not top_drops:
-        table.add_row("—", "No data", "—", "—")
+        msg = "Keine Daten. Prüfe Market-Data-Loop. Siehe Logs: MARKET_DATA_THREAD_STARTED / MD_LOOP_CFG / MD_THREAD_STATUS."
+        table.add_row("—", msg, "—", "—", "—", "—")
     else:
         for i, drop in enumerate(top_drops, 1):
             distance = drop['drop_pct'] - drop_trigger_pct
+            anchor = drop.get('anchor', 0)
+            spread_pct = drop.get('spread_pct')
 
             # Color based on distance to trigger
             style = "white"
@@ -389,10 +433,18 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
             elif distance < 0.5:
                 style = "bold yellow"
 
+            # Format spread percentage
+            if spread_pct is not None:
+                spread_str = f"{spread_pct:.3f}%"
+            else:
+                spread_str = "—"
+
             table.add_row(
                 str(i),
                 drop['symbol'],
                 f"{drop['drop_pct']:.2f}%",
+                spread_str,
+                f"{anchor:.6f}" if anchor else "—",
                 Text(f"{distance:+.2f}%", style=style)
             )
 

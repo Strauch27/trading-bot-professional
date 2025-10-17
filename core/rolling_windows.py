@@ -206,21 +206,91 @@ class RollingWindowManager:
         rw = self.ensure(sym)
         return {"peak": rw.peak(), "trough": rw.trough()}
 
-    def persist_all(self) -> None:
-        """Persist all windows to disk (if persistence enabled)."""
+    def save(self, symbol: str) -> None:
+        """
+        Save rolling window for a single symbol (atomic write).
+
+        Args:
+            symbol: Trading symbol to save
+        """
         if not self.persist:
             return
 
-        for sym, rw in self.windows.items():
-            try:
-                data = {
-                    "lookback_s": rw.lookback_s,
-                    "data": list(rw.q)
-                }
-                with open(self._path(sym), "w") as f:
-                    json.dump(data, f)
-            except Exception as e:
-                logger.warning(f"Failed to persist window for {sym}: {e}")
+        rw = self.windows.get(symbol)
+        if not rw:
+            return
+
+        try:
+            path = self._path(symbol)
+            tmp_path = f"{path}.tmp"
+
+            data = {
+                "lookback_s": rw.lookback_s,
+                "data": list(rw.q)
+            }
+
+            # Atomic write: write to .tmp, then rename
+            with open(tmp_path, "w") as f:
+                json.dump(data, f)
+
+            os.replace(tmp_path, path)
+
+        except Exception as e:
+            logger.warning(f"Failed to save window for {symbol}: {e}")
+
+    def load(self, symbol: str) -> None:
+        """
+        Load rolling window for a single symbol.
+
+        Args:
+            symbol: Trading symbol to load
+        """
+        if not self.persist:
+            return
+
+        path = self._path(symbol)
+        if not os.path.exists(path):
+            return
+
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+
+            # Create RollingWindow and restore data
+            rw = RollingWindow(self.lookback_s)
+            window_data = data.get('data', [])
+
+            # Filter out stale entries (older than lookback)
+            now = time.time()
+            lb = now - self.lookback_s
+
+            for ts, price in window_data:
+                if ts >= lb:  # Only load entries within lookback window
+                    rw.q.append((ts, price))
+                    # Update extrema
+                    if price > rw.max_val:
+                        rw.max_val = price
+                    if price < rw.min_val:
+                        rw.min_val = price
+
+            if len(rw.q) > 0:
+                self.windows[symbol] = rw
+                logger.debug(f"Loaded rolling window for {symbol}: {len(rw.q)} entries")
+
+        except Exception as e:
+            logger.warning(f"Failed to load window for {symbol}: {e}")
+
+    def persist_all(self) -> None:
+        """
+        Persist all windows to disk (if persistence enabled).
+
+        Note: For production use, prefer save(symbol) for better error isolation.
+        """
+        if not self.persist:
+            return
+
+        for sym in self.windows.keys():
+            self.save(sym)
 
     def clear(self) -> None:
         """Clear all windows (useful for testing)."""
