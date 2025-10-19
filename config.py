@@ -608,6 +608,15 @@ TOPCOINS_SYMBOLS = [key.replace('USDT', '/USDT') for key in topcoins_keys]
 # 16. MARKET DATA & RETENTION
 # =============================================================================
 
+# Intervall für Marktdaten-Updates in der Engine-Hauptschleife
+# Empfehlung: 15–30s für stabile Last, 5s für maximale Reaktionsfähigkeit
+MD_UPDATE_INTERVAL_S = 30.0
+
+# Ticker-Cache TTL (Sekunden) – wie lange ein frisch geholter Ticker
+# als gültig im Cache gilt (für ad‑hoc Abrufe außerhalb des Batch-Updates)
+# Typisch: 5–10s. Kleinere Werte = aktueller, größere = weniger API-Last.
+TICKER_CACHE_TTL = 5.0
+
 MARKET_DATA_FLUSH_INTERVAL_S = 5
 RETENTION = {
     "ticks_days": 60, "quotes_days": 60, "orderbook_days": 60,
@@ -723,6 +732,10 @@ def validate_config():
             problems.append("TRAILING_TP_UNDER_HIGH_BP muss kleiner als die TP-Breite sein")
     if MARKET_DATA_FLUSH_INTERVAL_S <= 0:
         problems.append("MARKET_DATA_FLUSH_INTERVAL_S muss > 0 sein")
+    if MD_UPDATE_INTERVAL_S <= 0:
+        problems.append("MD_UPDATE_INTERVAL_S muss > 0 sein")
+    if TICKER_CACHE_TTL <= 0:
+        problems.append("TICKER_CACHE_TTL muss > 0 sein")
     if any(v <= 0 for v in RETENTION.values()):
         problems.append("RETENTION Werte mussen > 0 sein")
     if USE_SMA_GUARD and SMA_GUARD_MIN_RATIO >= 1.0:
@@ -869,7 +882,9 @@ buy_order_timeout_minutes = BUY_ORDER_TIMEOUT_MINUTES
 buy_order_cancel_threshold_pct = BUY_ORDER_CANCEL_THRESHOLD_PCT
 stale_order_cleanup_interval = STALE_ORDER_CLEANUP_INTERVAL
 stale_order_max_age = STALE_ORDER_MAX_AGE
-market_update_interval = 30
+market_update_interval = MD_UPDATE_INTERVAL_S
+md_update_interval_s = MD_UPDATE_INTERVAL_S
+ticker_cache_ttl = TICKER_CACHE_TTL
 use_drop_anchor_since_last_close = USE_DROP_ANCHOR
 anchor_updates_when_flat = ANCHOR_UPDATES_WHEN_FLAT
 use_predictive_buys = USE_PREDICTIVE_BUYS

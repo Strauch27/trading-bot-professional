@@ -506,8 +506,9 @@ class TradingEngine:
                         # Deactivated - Dashboard shows status
                         # print(f"💓 Engine läuft - Cycle #{loop_counter} - {len(self.positions)} Positionen, {len(self.topcoins)} Symbole")
 
-                    # 1. Market Data Updates (every 5s)
-                    if cycle_start - self.last_market_update > 5.0:
+                    # 1. Market Data Updates (configurable interval)
+                    interval = getattr(self.config, 'md_update_interval_s', 5.0) or 5.0
+                    if cycle_start - self.last_market_update > float(interval):
                         md_start = time.time()
                         logger.info("📊 Updating market data...", extra={'event_type': 'MARKET_DATA_UPDATE'})
                         try:

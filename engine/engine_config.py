@@ -9,6 +9,7 @@ Contains:
 """
 
 import logging
+import os
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
@@ -27,6 +28,7 @@ class EngineConfig:
     never_market_sells: bool = False
     exit_escalation_bps: List[int] = None
     ticker_cache_ttl: float = 5.0
+    md_update_interval_s: float = 5.0
     enable_auto_exits: bool = True
     enable_trailing_stops: bool = True
     enable_top_drops_ticker: bool = True
@@ -75,7 +77,8 @@ def create_trading_engine(exchange, portfolio, orderbookprovider,
         max_positions=getattr(config, 'MAX_POSITIONS', 10),
         never_market_sells=getattr(config, 'NEVER_MARKET_SELLS', False),
         exit_escalation_bps=getattr(config, 'EXIT_ESCALATION_BPS', [50, 100, 200, 500]),
-        ticker_cache_ttl=5.0,
+        ticker_cache_ttl=float(os.getenv('TICKER_CACHE_TTL', getattr(config, 'TICKER_CACHE_TTL', 5.0))),
+        md_update_interval_s=float(os.getenv('MD_UPDATE_INTERVAL_S', getattr(config, 'MD_UPDATE_INTERVAL_S', 5.0))),
         enable_auto_exits=True,
         enable_trailing_stops=True,
         enable_top_drops_ticker=getattr(config, 'ENABLE_TOP_DROPS_TICKER', False)
