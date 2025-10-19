@@ -257,7 +257,8 @@ class PortfolioManager:
         
         # Budget reservation for atomic operations
         self.reserved_budget: float = 0.0
-        self.active_reservations: Dict[str, Dict] = {}  # symbol -> {amount, timestamp, order_info}
+        self.reserved_base: Dict[str, float] = {}
+        self.active_reservations: Dict[str, Dict] = {}  # symbol -> reservation metadata
 
         # Position Lifecycle & PnL Management (NEW - Reconciliation System)
         self.positions: Dict[str, Position] = {}  # symbol -> Position
@@ -686,11 +687,17 @@ class PortfolioManager:
         if symbol:
             self.reserved_quote[symbol] = self.reserved_quote.get(symbol, 0.0) + quote_amount
             # Track active reservations with metadata
-            self.active_reservations[symbol] = {
-                'amount': quote_amount,
+            reservation = self.active_reservations.get(symbol, {})
+            if reservation.get('side') not in (None, 'buy'):
+                reservation = {}
+            reservation.update({
+                'side': 'buy',
+                'quote': reservation.get('quote', 0.0) + quote_amount,
+                'amount': reservation.get('quote', 0.0) + quote_amount,  # backwards compat
                 'timestamp': time.time(),
                 'order_info': order_info or {}
-            }
+            })
+            self.active_reservations[symbol] = reservation
         
         log_event("BUDGET_RESERVED", context={
             "reserved": float(quote_amount),
@@ -715,8 +722,16 @@ class PortfolioManager:
             if self.reserved_quote[symbol] == 0.0:
                 self.reserved_quote.pop(symbol, None)
             # Remove from active reservations
-            if symbol in self.active_reservations:
-                del self.active_reservations[symbol]
+            reservation = self.active_reservations.get(symbol)
+            if reservation and reservation.get('side') == 'buy':
+                remaining = max(0.0, reservation.get('quote', 0.0) - quote_amount)
+                if remaining <= 0:
+                    self.active_reservations.pop(symbol, None)
+                else:
+                    reservation['quote'] = remaining
+                    reservation['amount'] = remaining
+                    reservation['timestamp'] = time.time()
+                    self.active_reservations[symbol] = reservation
         
         log_event("BUDGET_RELEASED", context={
             "released": float(quote_amount),
@@ -742,8 +757,16 @@ class PortfolioManager:
             if self.reserved_quote[symbol] == 0.0:
                 self.reserved_quote.pop(symbol, None)
             # Remove from active reservations
-            if symbol in self.active_reservations:
-                del self.active_reservations[symbol]
+            reservation = self.active_reservations.get(symbol)
+            if reservation and reservation.get('side') == 'buy':
+                remaining = max(0.0, reservation.get('quote', 0.0) - quote_amount)
+                if remaining <= 0:
+                    self.active_reservations.pop(symbol, None)
+                else:
+                    reservation['quote'] = remaining
+                    reservation['amount'] = remaining
+                    reservation['timestamp'] = time.time()
+                    self.active_reservations[symbol] = reservation
         
         log_event("BUDGET_COMMITTED", context={
             "committed": float(quote_amount),
@@ -777,6 +800,14 @@ class PortfolioManager:
                     total += float(data.get('amount', 0.0))
                 except (TypeError, ValueError):
                     continue
+            # Subtract reserved base inventory for open sell reservations
+            for symbol, reserved in self.reserved_base.items():
+                try:
+                    base_symbol, _ = symbol.split('/', 1)
+                except ValueError:
+                    continue
+                if base_symbol.upper() == asset:
+                    total = max(0.0, total - reserved)
             return total
 
     def balance(self, asset: str) -> float:
@@ -793,20 +824,133 @@ class PortfolioManager:
             if current_time - reservation['timestamp'] > max_age_seconds:
                 stale_symbols.append(symbol)
         
-        total_released = 0.0
+        total_quote_released = 0.0
+        total_base_released = 0.0
         for symbol in stale_symbols:
-            reservation = self.active_reservations[symbol]
-            amount = reservation['amount']
-            self.release_budget(amount, symbol, reason="stale_cleanup")
-            total_released += amount
-            logger.warning(f"Cleaned up stale budget reservation: {symbol} - {amount:.2f} USDT (age: {current_time - reservation['timestamp']:.1f}s)",
-                         extra={'event_type': 'STALE_BUDGET_CLEANUP', 'symbol': symbol, 'amount': amount})
+            reservation = self.active_reservations.get(symbol)
+            if not reservation:
+                continue
+
+            side = reservation.get('side') or reservation.get('order_info', {}).get('side')
+            age_seconds = current_time - reservation.get('timestamp', current_time)
+
+            if side == 'sell':
+                base_amount = float(reservation.get('base') or reservation.get('amount') or 0.0)
+                if base_amount > 0:
+                    self.release(symbol, "sell", base_amount, price=0.0)
+                    total_base_released += base_amount
+                    logger.warning(
+                        f"Cleaned up stale sell reservation: {symbol} - {base_amount:.8f} base units "
+                        f"(age: {age_seconds:.1f}s)",
+                        extra={
+                            'event_type': 'STALE_BUDGET_CLEANUP',
+                            'symbol': symbol,
+                            'amount': base_amount,
+                            'side': 'sell'
+                        }
+                    )
+            else:
+                quote_amount = float(reservation.get('quote') or reservation.get('amount') or 0.0)
+                if quote_amount > 0:
+                    self.release_budget(quote_amount, symbol, reason="stale_cleanup")
+                    total_quote_released += quote_amount
+                    logger.warning(
+                        f"Cleaned up stale buy reservation: {symbol} - {quote_amount:.2f} USDT "
+                        f"(age: {age_seconds:.1f}s)",
+                        extra={
+                            'event_type': 'STALE_BUDGET_CLEANUP',
+                            'symbol': symbol,
+                            'amount': quote_amount,
+                            'side': 'buy'
+                        }
+                    )
+            
+            # Remove reservation entry regardless of side
+            self.active_reservations.pop(symbol, None)
         
-        if total_released > 0:
-            logger.info(f"Total stale budget released: {total_released:.2f} USDT from {len(stale_symbols)} reservations",
-                       extra={'event_type': 'STALE_BUDGET_CLEANUP_SUMMARY', 'total_released': total_released, 'count': len(stale_symbols)})
-        
-        return total_released
+        if total_quote_released > 0 or total_base_released > 0:
+            logger.info(
+                "Total stale reservations released: "
+                f"{total_quote_released:.2f} USDT, {total_base_released:.8f} base units "
+                f"from {len(stale_symbols)} symbols",
+                extra={
+                    'event_type': 'STALE_BUDGET_CLEANUP_SUMMARY',
+                    'total_released_quote': total_quote_released,
+                    'total_released_base': total_base_released,
+                    'count': len(stale_symbols)
+                }
+            )
+
+            # P5: Log budget health metrics after cleanup
+            try:
+                health_metrics = self.get_budget_health_metrics()
+                logger.info(
+                    f"Budget health after cleanup: drift={health_metrics['drift_pct']:.2f}%, "
+                    f"active_reservations={health_metrics['active_reservations_count']}",
+                    extra={
+                        'event_type': 'BUDGET_HEALTH_CHECK',
+                        **health_metrics
+                    }
+                )
+            except Exception as health_error:
+                logger.debug(f"Budget health check failed: {health_error}")
+
+        return total_quote_released
+
+    def get_budget_health_metrics(self) -> Dict[str, Any]:
+        """
+        P5: Get budget health metrics for leak detection and monitoring.
+
+        Returns:
+            Dict with budget health indicators
+        """
+        with self._budget_lock:
+            total_reserved_quote = sum(self.reserved_quote.values())
+            total_reserved_base = sum(self.reserved_base.values())
+
+            # Calculate expected vs actual available
+            expected_available = self.my_budget - self.reserved_budget
+            actual_available = self.get_free_usdt()
+
+            # Drift detection (budget mismatch)
+            budget_drift = abs(expected_available - actual_available)
+            drift_pct = (budget_drift / max(self.my_budget, 1.0)) * 100
+
+            # Analyze reservation ages
+            old_reservations = []
+            now = time.time()
+            for symbol, reservation in self.active_reservations.items():
+                age_s = now - reservation.get("timestamp", now)
+                if age_s > 300:  # >5 minutes
+                    old_reservations.append({
+                        "symbol": symbol,
+                        "side": reservation.get("side"),
+                        "amount": reservation.get("amount") or reservation.get("quote") or reservation.get("base"),
+                        "age_s": age_s
+                    })
+
+            # Determine health status
+            if drift_pct > 1.0:
+                health = "WARNING"  # >1% drift
+            elif len(old_reservations) > 0:
+                health = "WARNING"  # Old reservations exist
+            else:
+                health = "HEALTHY"
+
+            return {
+                "my_budget": self.my_budget,
+                "reserved_budget": self.reserved_budget,
+                "verified_budget": self.verified_budget,
+                "reserved_quote_total": total_reserved_quote,
+                "reserved_base_total": total_reserved_base,
+                "expected_available": expected_available,
+                "actual_available": actual_available,
+                "budget_drift": budget_drift,
+                "drift_pct": drift_pct,
+                "active_reservations_count": len(self.active_reservations),
+                "old_reservations": old_reservations,
+                "health": health
+            }
     
     @synchronized_budget
     def reconcile_budget_from_exchange(self):
@@ -1003,19 +1147,23 @@ class PortfolioManager:
                 return True
 
             else:  # sell
-                # Sell: check if we have enough base currency
+                # Sell: check if we have enough base currency (excludes already reserved)
                 base_currency = symbol.split("/")[0]
                 available = self.get_balance(base_currency)
 
-                if available >= qty:
-                    # Reserve by tracking (no actual USDT reservation needed)
-                    # Just track in active_reservations
-                    if symbol not in self.active_reservations:
-                        self.active_reservations[symbol] = {
-                            "amount": qty,
-                            "timestamp": time.time(),
-                            "order_info": {"side": "sell", "qty": qty, "price": price}
-                        }
+                if available + 1e-12 >= qty:
+                    self.reserved_base[symbol] = self.reserved_base.get(symbol, 0.0) + qty
+                    reservation = self.active_reservations.get(symbol, {})
+                    if reservation.get('side') not in (None, 'sell'):
+                        reservation = {}
+                    reservation.update({
+                        "side": "sell",
+                        "base": reservation.get('base', 0.0) + qty,
+                        "amount": reservation.get('base', 0.0) + qty,
+                        "timestamp": time.time(),
+                        "order_info": {"side": "sell", "qty": qty, "price": price}
+                    })
+                    self.active_reservations[symbol] = reservation
                     return True
                 else:
                     logger.warning(
@@ -1052,9 +1200,21 @@ class PortfolioManager:
                 self.release_budget(notional, symbol=symbol, reason="order_router_release")
 
             else:  # sell
-                # Remove sell reservation tracking
-                if symbol in self.active_reservations:
-                    del self.active_reservations[symbol]
+                current_reserved = self.reserved_base.get(symbol, 0.0)
+                self.reserved_base[symbol] = max(0.0, current_reserved - qty)
+                if self.reserved_base.get(symbol, 0.0) == 0.0:
+                    self.reserved_base.pop(symbol, None)
+
+                reservation = self.active_reservations.get(symbol)
+                if reservation and reservation.get('side') == 'sell':
+                    remaining = max(0.0, reservation.get('base', 0.0) - qty)
+                    if remaining <= 0:
+                        self.active_reservations.pop(symbol, None)
+                    else:
+                        reservation['base'] = remaining
+                        reservation['amount'] = remaining
+                        reservation['timestamp'] = time.time()
+                        self.active_reservations[symbol] = reservation
 
         except Exception as e:
             logger.error(f"Error releasing budget for {symbol}: {e}")
@@ -1104,6 +1264,11 @@ class PortfolioManager:
 
             # Aggregate trade data
             tot_qty, notional, fees = 0.0, 0.0, 0.0
+            buy_quote_total = 0.0
+            sell_quote_total = 0.0
+            buy_fees = 0.0
+            sell_fees = 0.0
+            sell_qty_total = 0.0
 
             for t in trades:
                 q = float(t.get("amount", 0))
@@ -1115,6 +1280,7 @@ class PortfolioManager:
                 fee_curr = (t.get("fee") or {}).get("currency", "")
                 if fee_curr != "USDT" and f > 0:
                     f = f * px  # Convert base fee to quote
+                fee_value = f if f > 0 else q * px * self.fee_rate
 
                 signed = q if side == "buy" else -q
 
@@ -1137,7 +1303,15 @@ class PortfolioManager:
                 pos.qty += signed
                 tot_qty += signed
                 notional += q * px
-                fees += f if f > 0 else q * px * self.fee_rate
+                fees += fee_value
+
+                if side == "buy":
+                    buy_quote_total += q * px
+                    buy_fees += fee_value
+                else:
+                    sell_quote_total += q * px
+                    sell_fees += fee_value
+                    sell_qty_total += q
 
             pos.fees_paid += fees
 
@@ -1150,11 +1324,57 @@ class PortfolioManager:
             elif pos.state == "OPEN" and self._is_reducing(trades):
                 pos.state = "PARTIAL_EXIT"
 
-            # Release reservation (budget now committed)
-            if symbol in self.reserved_quote:
-                self.reserved_quote.pop(symbol, None)
-            if symbol in self.active_reservations:
-                del self.active_reservations[symbol]
+            # Budget and reservation adjustments based on fills
+            if buy_quote_total > 0:
+                reserved_for_symbol = self.reserved_quote.get(symbol, 0.0)
+                commit_amount = min(reserved_for_symbol, buy_quote_total)
+
+                if commit_amount > 0:
+                    self.commit_budget(commit_amount, symbol=symbol)
+
+                surplus_reserved = max(0.0, reserved_for_symbol - commit_amount)
+                if surplus_reserved > 0:
+                    self.release_budget(surplus_reserved, symbol=symbol, reason="fill_adjustment")
+
+                extra_cost = max(0.0, buy_quote_total - reserved_for_symbol)
+                if extra_cost > 0:
+                    self.my_budget = max(0.0, self.my_budget - extra_cost)
+
+                if buy_fees > 0:
+                    self.my_budget = max(0.0, self.my_budget - buy_fees)
+
+            if sell_qty_total > 0:
+                reserved_base_amt = self.reserved_base.get(symbol, 0.0)
+                remaining_base = max(0.0, reserved_base_amt - sell_qty_total)
+
+                if remaining_base > 0:
+                    self.reserved_base[symbol] = remaining_base
+                else:
+                    self.reserved_base.pop(symbol, None)
+
+                reservation = self.active_reservations.get(symbol)
+                if reservation and reservation.get('side') == 'sell':
+                    if remaining_base <= 0:
+                        self.active_reservations.pop(symbol, None)
+                    else:
+                        reservation['base'] = remaining_base
+                        reservation['amount'] = remaining_base
+                        reservation['timestamp'] = time.time()
+                        self.active_reservations[symbol] = reservation
+
+                cash_inflow = max(0.0, sell_quote_total - sell_fees)
+                if cash_inflow > 0:
+                    self.my_budget += cash_inflow
+
+            # Clean up any lingering reservation metadata
+            if symbol in self.active_reservations and not self.active_reservations[symbol]:
+                self.active_reservations.pop(symbol, None)
+
+            # Keep settlement manager in sync with latest cash balance
+            try:
+                self.settlement_manager.update_verified_budget(self.my_budget)
+            except Exception as settlement_error:
+                logger.debug(f"Failed to update settlement manager after fills: {settlement_error}")
 
             # Emit position event
             self._emit_event({

@@ -21,6 +21,10 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
+# P1: State Persistence
+from core.state_writer import DebouncedStateWriter
+import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,12 +39,14 @@ class RouterConfig:
         tif: Time in force ("IOC", "GTC", "FOK")
         slippage_bps: Maximum allowed slippage in basis points
         min_notional: Minimum order notional in quote currency
+        fetch_order_on_fill: P2 - Fetch full order details on fill (default: False for performance)
     """
     max_retries: int = 3
     retry_backoff_ms: int = 400
     tif: str = "IOC"
     slippage_bps: int = 20
     min_notional: float = 5.0
+    fetch_order_on_fill: bool = False  # P2: Performance optimization
 
 
 class OrderRouter:
@@ -87,6 +93,10 @@ class OrderRouter:
 
         # Idempotency: track seen intent IDs
         self._seen: set = set()
+        self._order_meta: Dict[str, Dict[str, Any]] = {}
+
+        # P1: Debounced state persistence for order metadata
+        self._init_state_persistence()
 
         logger.info(
             f"OrderRouter initialized: tif={config.tif}, "
@@ -258,7 +268,13 @@ class OrderRouter:
             # Limit order
             return self.ex.create_limit_order(symbol, side, qty, limit_px, params=params)
 
-    def _publish_filled(self, symbol: str, order_id: str) -> None:
+    def _publish_filled(
+        self,
+        symbol: str,
+        order_id: str,
+        filled_qty: float,
+        average_px: Optional[float] = None
+    ) -> None:
         """
         Publish order.filled event for reconciler to handle.
 
@@ -269,13 +285,37 @@ class OrderRouter:
             symbol: Trading pair
             order_id: Exchange order ID
         """
+        metadata = self._order_meta.pop(order_id, {})
+        # P1: Persist metadata after removal (debounced)
+        self._persist_meta_state()
+
         if self.event_bus:
             try:
-                self.event_bus.publish("order.filled", {
+                payload: Dict[str, Any] = {
                     "symbol": symbol,
                     "order_id": order_id,
+                    "filled_qty": filled_qty,
+                    "average_price": average_px,
                     "timestamp": time.time()
-                })
+                }
+
+                payload.update(metadata)
+
+                # P2: Optionally fetch final order snapshot for downstream processing
+                # Default: False for performance (saves ~30-50ms per fill)
+                if self.cfg.fetch_order_on_fill:
+                    try:
+                        fetch_start = time.time()
+                        order_details = self.ex.fetch_order(symbol, order_id)
+                        if order_details:
+                            payload["order"] = order_details
+                            fetch_latency_ms = (time.time() - fetch_start) * 1000
+                            payload["fetch_order_latency_ms"] = fetch_latency_ms
+                            logger.debug(f"Fetched order details for {order_id} in {fetch_latency_ms:.1f}ms")
+                    except Exception as fetch_error:
+                        logger.debug(f"Failed to fetch order snapshot for {order_id}: {fetch_error}")
+
+                self.event_bus.publish("order.filled", payload)
                 logger.debug(f"Published order.filled event for {order_id}")
             except Exception as e:
                 logger.error(f"Failed to publish order.filled event: {e}")
@@ -370,7 +410,17 @@ class OrderRouter:
         attempt = 0
         filled_qty = 0.0
         order_id = None
+        last_status: Optional[Dict[str, Any]] = None
         client_order_id = self._client_oid(intent_id)
+        base_meta = {
+            "intent_id": intent_id,
+            "side": side,
+            "reason": reason,
+            "qty": qty,
+            "symbol": symbol,
+            "client_order_id": client_order_id,
+            "limit_price": limit_px
+        }
 
         while attempt <= self.cfg.max_retries:
             attempt += 1
@@ -383,6 +433,14 @@ class OrderRouter:
                 # State: SENT
                 order = self._place_order(symbol, side, remaining_qty, limit_px, client_order_id)
                 order_id = order.get("id")
+
+                if order_id:
+                    meta = dict(base_meta)
+                    meta.update({"attempt": attempt, "filled_qty": filled_qty})
+                    meta["start_ts"] = time.time()  # Fix: Set timestamp for recovery filtering
+                    self._order_meta[order_id] = meta
+                    # P1: Persist metadata (debounced)
+                    self._persist_meta_state()
 
                 self.tl.write("order_audit", {
                     "intent_id": intent_id,
@@ -398,7 +456,13 @@ class OrderRouter:
 
                 # Wait for fill
                 status = self.ex.wait_for_fill(symbol, order_id, timeout_ms=2500)
+                last_status = status
                 filled_qty += status.get("filled", 0.0)
+
+                if order_id in self._order_meta:
+                    self._order_meta[order_id]["filled_qty"] = filled_qty
+                    # P1: Persist metadata (debounced)
+                    self._persist_meta_state()
 
                 # Check terminal states
                 if status["status"] == "closed":
@@ -415,7 +479,12 @@ class OrderRouter:
                     logger.info(f"Order filled: {order_id} ({filled_qty} {symbol})")
 
                     # Publish filled event for reconciliation
-                    self._publish_filled(symbol, order_id)
+                    self._publish_filled(
+                        symbol,
+                        order_id,
+                        filled_qty=filled_qty,
+                        average_px=status.get("average")
+                    )
                     return
 
                 elif status["status"] == "canceled":
@@ -429,6 +498,8 @@ class OrderRouter:
                     })
 
                     logger.warning(f"Order canceled: {order_id} (filled {filled_qty}/{qty})")
+                    self._order_meta.pop(order_id, None)
+                    self._persist_meta_state()  # P1
                     break
 
                 else:
@@ -457,6 +528,10 @@ class OrderRouter:
 
                 logger.error(f"Order attempt {attempt} failed: {e}")
 
+                if order_id:
+                    self._order_meta.pop(order_id, None)
+                    self._persist_meta_state()  # P1
+
             # Exponential backoff before retry
             if attempt < self.cfg.max_retries:
                 backoff_ms = self.cfg.retry_backoff_ms * (2 ** (attempt - 1))
@@ -464,9 +539,18 @@ class OrderRouter:
                 time.sleep(backoff_ms / 1000.0)
 
         # Final state: FAILED or PARTIAL_SUCCESS
-        if filled_qty > 0:
+        if filled_qty > 0 and order_id:
             # Partial success - some fills occurred
-            self._publish_filled(symbol, order_id)
+            self._publish_filled(
+                symbol,
+                order_id,
+                filled_qty=filled_qty,
+                average_px=last_status.get("average") if last_status else None
+            )
+        else:
+            if order_id:
+                self._order_meta.pop(order_id, None)
+                self._persist_meta_state()  # P1
 
         # Release unfilled budget
         unfilled_qty = qty - filled_qty
@@ -489,3 +573,91 @@ class OrderRouter:
             f"Intent {intent_id} completed with {final_state}: "
             f"filled {filled_qty}/{qty} after {attempt} attempts"
         )
+
+    # ==================================================================================
+    # State Persistence (P1)
+    # ==================================================================================
+
+    def _init_state_persistence(self):
+        """Initialize debounced state writer for order metadata"""
+        try:
+            self._meta_state_writer = DebouncedStateWriter(
+                file_path=config.ORDER_ROUTER_META_FILE,
+                interval_s=config.STATE_PERSIST_INTERVAL_S,
+                auto_start=True
+            )
+
+            # Recover existing metadata
+            self._recover_meta_state()
+
+            logger.info(
+                f"OrderRouter state persistence initialized: "
+                f"file={config.ORDER_ROUTER_META_FILE}, "
+                f"interval={config.STATE_PERSIST_INTERVAL_S}s"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to initialize OrderRouter state persistence: {e}")
+            self._meta_state_writer = None
+
+    def _recover_meta_state(self):
+        """Recover order metadata from previous session"""
+        try:
+            if not self._meta_state_writer:
+                return
+
+            state = self._meta_state_writer.get()
+            if not state:
+                logger.info("No previous order metadata to recover")
+                return
+
+            # Filter old metadata (>24h)
+            cutoff = time.time() - config.ORDER_META_MAX_AGE_S
+            recovered = 0
+            filtered = 0
+
+            for order_id, metadata in state.get("order_meta", {}).items():
+                start_ts = metadata.get("start_ts", 0)
+                if start_ts > cutoff:
+                    self._order_meta[order_id] = metadata
+                    recovered += 1
+                else:
+                    filtered += 1
+
+            if recovered > 0:
+                logger.info(
+                    f"Recovered {recovered} order metadata entries "
+                    f"(filtered {filtered} stale entries)"
+                )
+            elif filtered > 0:
+                logger.info(f"All {filtered} previous metadata entries were stale")
+
+        except Exception as e:
+            logger.warning(f"Order metadata recovery failed: {e}")
+
+    def _persist_meta_state(self):
+        """Update persisted order metadata (debounced)"""
+        try:
+            if not self._meta_state_writer:
+                return
+
+            state = {
+                "order_meta": self._order_meta,
+                "last_update": time.time()
+            }
+
+            self._meta_state_writer.update(state)
+
+        except Exception as e:
+            logger.debug(f"Order metadata persist failed: {e}")
+
+    def shutdown(self):
+        """Shutdown router and persist final state"""
+        try:
+            if hasattr(self, '_meta_state_writer') and self._meta_state_writer:
+                logger.info("Persisting final OrderRouter state...")
+                self._persist_meta_state()
+                self._meta_state_writer.shutdown()
+                logger.info("OrderRouter state persisted successfully")
+        except Exception as e:
+            logger.error(f"Failed to persist OrderRouter state on shutdown: {e}")

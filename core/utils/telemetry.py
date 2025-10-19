@@ -12,6 +12,8 @@ class RollingStats:
         self.fills = deque(maxlen=maxlen)  # (timestamp, slippage_bp)
         self.drawdown_peak = 0.0
         self.session_equity_high = None
+        # P2: Intent-to-fill latency tracking
+        self.latencies = {}  # metric_name -> deque of (timestamp, latency_ms)
 
     def add_fill(self, ts, slippage_bp):
         """
@@ -86,6 +88,64 @@ class RollingStats:
         # Calculate drawdown from peak
         dd = equity_pct - self.session_equity_high
         self.drawdown_peak = min(self.drawdown_peak, dd)
+
+    # P2: Latency tracking methods
+    def add_latency(self, metric_name: str, latency_ms: float, maxlen: int = 300):
+        """
+        Record latency measurement for a specific metric.
+
+        Args:
+            metric_name: Name of the metric (e.g., "intent_to_fill", "order_placement")
+            latency_ms: Latency value in milliseconds
+            maxlen: Maximum number of entries to keep (default: 300)
+        """
+        import time
+        if metric_name not in self.latencies:
+            self.latencies[metric_name] = deque(maxlen=maxlen)
+
+        self.latencies[metric_name].append((time.time(), latency_ms))
+
+    def avg_latency(self, metric_name: str, seconds: int = 300) -> float:
+        """
+        Calculate average latency for a metric in the last N seconds.
+
+        Args:
+            metric_name: Name of the metric
+            seconds: Time window in seconds (default: 300 = 5 minutes)
+
+        Returns:
+            Average latency in ms, or 0.0 if no data
+        """
+        import time
+        if metric_name not in self.latencies:
+            return 0.0
+
+        now_ts = time.time()
+        vals = [lat for ts, lat in self.latencies[metric_name] if now_ts - ts <= seconds]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    def p95_latency(self, metric_name: str, seconds: int = 300) -> float:
+        """
+        Calculate 95th percentile latency for a metric.
+
+        Args:
+            metric_name: Name of the metric
+            seconds: Time window in seconds
+
+        Returns:
+            P95 latency in ms, or 0.0 if no data
+        """
+        import time
+        if metric_name not in self.latencies:
+            return 0.0
+
+        now_ts = time.time()
+        vals = sorted([lat for ts, lat in self.latencies[metric_name] if now_ts - ts <= seconds])
+        if not vals:
+            return 0.0
+
+        p95_index = int(len(vals) * 0.95)
+        return vals[p95_index] if p95_index < len(vals) else vals[-1]
 
 def heartbeat_emit(log_event, pnl_snapshot: dict, rolling: RollingStats, positions_open: int, equity: float, now_ts: float):
     """

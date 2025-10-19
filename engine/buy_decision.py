@@ -10,17 +10,18 @@ Contains:
 
 import time
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 import config
-from core.logging.logger import new_decision_id, new_client_order_id
+from core.logging.logger import new_decision_id
 from core.logging.debug_tracer import trace_function, trace_step, trace_error
 from core.logging.adaptive_logger import track_error, track_guard_block, notify_trade_completed
 from core.logging.adaptive_logger import guard_stats_record
 
 # Phase 1 Structured Logging
-from core.trace_context import Trace, new_order_req_id
+from core.trace_context import Trace
 from core.logger_factory import DECISION_LOG, ORDER_LOG, log_event
+from decision.assembler import assemble as assemble_intent
 
 logger = logging.getLogger(__name__)
 
@@ -472,8 +473,6 @@ class BuyDecisionHandler:
                 logger.warning(f"Risk limits check failed for {symbol}, continuing with order: {risk_check_error}")
 
             # Generate client order ID for tracking
-            client_order_id = new_client_order_id(decision_id, "buy")
-
             # Apply Symbol-specific Spread/Slippage Caps
             current_price = self._apply_spread_slippage_caps(symbol, coin_data, current_price, decision_id)
             if not current_price:
@@ -489,27 +488,71 @@ class BuyDecisionHandler:
             if not self._handle_dry_run_preview(symbol, current_price, amount, quote_budget, signal, decision_id):
                 return
 
-            # Place buy order
-            order = self._place_buy_order(symbol, amount, current_price, quote_budget, signal, decision_id, client_order_id, coin_data)
+            # Assemble intent for OrderRouter execution
+            signal_payload = {
+                "symbol": symbol,
+                "side": "buy",
+                "reason": signal,
+                "limit_price": self._intent_limit_price(symbol, current_price, coin_data)
+            }
+            guards_payload = {"passed": True}
+            risk_payload = {
+                "allowed_qty": amount,
+                "budget": self.engine.portfolio.get_free_usdt(),
+                "quote_budget": quote_budget
+            }
 
-            if order and order.get('status') == 'closed':
-                self._handle_buy_fill(symbol, order, signal, decision_id)
-            elif order and order.get('status') in ['canceled', 'cancelled', 'expired']:
-                # Phase 3: Log order_done for cancelled/expired orders
-                order_timestamp = order.get('timestamp', 0) / 1000 if order.get('timestamp') else None
-                latency_ms_total = int((time.time() - order_timestamp) * 1000) if order_timestamp else None
+            intent = assemble_intent(signal_payload, guards_payload, risk_payload)
+            if not intent:
+                logger.warning(f"BUY intent assembly returned None for {symbol}")
+                return
 
-                with Trace(decision_id=decision_id, client_order_id=client_order_id, exchange_order_id=order.get('id')):
-                    log_event(
-                        ORDER_LOG(),
-                        "order_done",
-                        symbol=symbol,
-                        side="buy",
-                        final_status=order.get('status'),
-                        filled_qty=order.get('filled', 0),
-                        latency_ms_total=latency_ms_total,
-                        reason="ioc_not_filled" if order.get('status') == 'canceled' else "expired"
-                    )
+            intent_metadata = {
+                "decision_id": decision_id,
+                "symbol": symbol,
+                "signal": signal,
+                "quote_budget": quote_budget,
+                "intended_price": signal_payload["limit_price"],
+                "amount": amount,
+                "start_ts": time.time(),
+                "market_snapshot": {
+                    "bid": coin_data.get('bid') if coin_data else None,
+                    "ask": coin_data.get('ask') if coin_data else None
+                }
+            }
+            self.engine.pending_buy_intents[intent.intent_id] = intent_metadata
+
+            # P1: Persist intent state (debounced)
+            self.engine._persist_intent_state()
+
+            with Trace(decision_id=decision_id, intent_id=intent.intent_id):
+                log_event(
+                    ORDER_LOG(),
+                    "order_intent",
+                    symbol=symbol,
+                    side="buy",
+                    intent_id=intent.intent_id,
+                    qty=amount,
+                    limit_price=signal_payload["limit_price"],
+                    reason=signal
+                )
+
+            self.engine.jsonl_logger.order_sent(
+                decision_id=decision_id,
+                symbol=symbol,
+                side="buy",
+                amount=amount,
+                price=signal_payload["limit_price"],
+                intent_id=intent.intent_id,
+                quote_budget=quote_budget,
+                timestamp=time.time()
+            )
+
+            self.engine.event_bus.publish("order.intent", intent.to_dict())
+            logger.info(
+                f"BUY INTENT submitted {symbol} qty={amount:.10f} limit={signal_payload['limit_price']:.10f} "
+                f"(intent_id={intent.intent_id})"
+            )
 
         except Exception as e:
             # Track error for adaptive logging
@@ -697,263 +740,136 @@ class BuyDecisionHandler:
 
         return True
 
-    def _place_buy_order(self, symbol: str, amount: float, current_price: float, quote_budget: float,
-                        signal: str, decision_id: str, client_order_id: str, coin_data: Dict = None):
-        """Place buy order with appropriate strategy"""
-        # Log order placement attempt
-        order_start_time = time.time()
-        self.engine.jsonl_logger.order_sent(
-            decision_id=decision_id,
-            symbol=symbol,
-            side="buy",
-            amount=amount,
-            price=current_price,
-            client_order_id=client_order_id,
-            signal_reason=signal,
-            quote_budget=quote_budget,
-            timestamp=order_start_time
+    def _intent_limit_price(
+        self,
+        symbol: str,
+        current_price: float,
+        coin_data: Optional[Dict]
+    ) -> float:
+        """Calculate an aggressive buy limit price for intent submission."""
+        reference_price = current_price
+        if coin_data:
+            ask = coin_data.get("ask")
+            if ask and ask > 0:
+                reference_price = ask
+        premium_bps = getattr(config, "BUY_LIMIT_PREMIUM_BPS", 10)
+        limit_price = reference_price * (1 + premium_bps / 10000.0)
+        if limit_price <= 0:
+            limit_price = current_price
+        return limit_price
+
+    def handle_router_fill(
+        self,
+        intent_id: str,
+        event_data: Dict[str, Any],
+        summary: Optional[Dict[str, Any]]
+    ) -> None:
+        """Finalize buy-side processing once OrderRouter reports a fill."""
+        metadata = self.engine.pending_buy_intents.pop(intent_id, None)
+
+        # P1: Persist intent state after removal (debounced)
+        self.engine._persist_intent_state()
+
+        # P2: Calculate intent-to-fill latency with breakdown
+        intent_to_fill_ms = None
+        latency_breakdown = {}
+
+        if metadata:
+            start_ts = metadata.get("start_ts")
+            if start_ts:
+                intent_to_fill_ms = (time.time() - start_ts) * 1000
+
+                # Build latency breakdown (with defaults to avoid KeyErrors)
+                latency_breakdown = {
+                    "total_ms": intent_to_fill_ms,
+                    "placement_ms": event_data.get("placement_latency_ms", 0),
+                    "exchange_fill_ms": event_data.get("fill_latency_ms", 0),
+                    "reconcile_ms": event_data.get("reconcile_latency_ms", 0),
+                    "fetch_order_ms": event_data.get("fetch_order_latency_ms", 0)
+                }
+
+                # Track in rolling stats (NPE-safe)
+                if hasattr(self.engine, 'rolling_stats') and self.engine.rolling_stats:
+                    try:
+                        # Add dedicated intent_to_fill metric
+                        if hasattr(self.engine.rolling_stats, 'add_latency'):
+                            self.engine.rolling_stats.add_latency("intent_to_fill", intent_to_fill_ms)
+                        # Also add to general latency tracking
+                        if hasattr(self.engine.rolling_stats, 'add_fill'):
+                            self.engine.rolling_stats.add_fill(time.time(), 0)  # Slippage tracked separately
+                    except Exception as stats_error:
+                        logger.debug(f"Rolling stats update failed: {stats_error}")
+
+                # P2: Log intent latency for monitoring
+                logger.info(
+                    f"INTENT_TO_FILL_LATENCY: {intent_to_fill_ms:.1f}ms | "
+                    f"placement={latency_breakdown.get('placement_ms', 0):.1f}ms, "
+                    f"exchange={latency_breakdown.get('exchange_fill_ms', 0):.1f}ms, "
+                    f"reconcile={latency_breakdown.get('reconcile_ms', 0):.1f}ms, "
+                    f"fetch_order={latency_breakdown.get('fetch_order_ms', 0):.1f}ms",
+                    extra={
+                        "event_type": "INTENT_LATENCY",
+                        "intent_id": intent_id,
+                        "symbol": event_data.get("symbol"),
+                        "latency_ms": intent_to_fill_ms,
+                        "breakdown": latency_breakdown
+                    }
+                )
+
+        symbol = event_data.get("symbol") or (metadata or {}).get("symbol")
+        if not symbol:
+            logger.warning(f"BUY fill received without symbol (intent_id={intent_id})")
+            return
+
+        decision_id = (
+            (metadata or {}).get("decision_id")
+            or self.engine.current_decision_id
+            or new_decision_id()
         )
-
-        # Place buy order with IOC for aggressive fills (slight overpay but guaranteed execution)
-        # Calculate aggressive price: ASK + premium for guaranteed fill
-        bid = coin_data.get('bid', current_price) if coin_data else current_price
-        ask = coin_data.get('ask', current_price) if coin_data else current_price
-        premium_bps = getattr(config, 'BUY_LIMIT_PREMIUM_BPS', 10)
-
-        # BUY aggressively: Limit price slightly above ASK (TAKER side)
-        aggressive_price = ask * (1 + premium_bps / 10000.0)
-
-        trace_step("placing_order", symbol=symbol, amount=amount, price=aggressive_price,
-                  client_order_id=client_order_id, premium_bps=premium_bps,
-                  original_price=current_price, bid=bid, ask=ask)
-
-        # Phase 1: Log structured order events
-        order_req_id = new_order_req_id()
-
-        # Phase 2: Idempotency Check - Prevent duplicate orders
-        from core.idempotency import get_idempotency_store
+        signal = (metadata or {}).get("signal") or event_data.get("reason") or "UNKNOWN"
 
         try:
-            idempotency_store = get_idempotency_store()
-            existing_order_id = idempotency_store.register_order(
-                order_req_id=order_req_id,
-                symbol=symbol,
-                side="buy",
-                amount=amount,
-                price=aggressive_price,
-                client_order_id=client_order_id
-            )
+            order_data = event_data.get("order") or {}
+            filled_amount = float(event_data.get("filled_qty") or 0.0)
+            if filled_amount <= 0 and summary:
+                filled_amount = float(summary.get("qty_delta") or 0.0)
 
-            if existing_order_id:
-                # Duplicate detected - fetch and return existing order
-                logger.warning(
-                    f"Duplicate buy order detected for {symbol}, "
-                    f"returning existing order {existing_order_id}"
-                )
-
-                try:
-                    # Fetch existing order from exchange
-                    existing_order = self.engine.exchange_adapter.fetch_order(existing_order_id, symbol)
-                    trace_step("duplicate_order_returned", symbol=symbol, order_id=existing_order_id,
-                              status=existing_order.get('status'))
-                    return existing_order
-                except Exception as fetch_error:
-                    logger.error(f"Failed to fetch duplicate order {existing_order_id}: {fetch_error}")
-                    # Continue with new order placement if fetch fails
-                    pass
-
-        except Exception as idempotency_error:
-            # Don't fail order placement if idempotency check fails
-            logger.error(f"Idempotency check failed for {symbol}: {idempotency_error}")
-
-        # Phase 2: Client Order ID Deduplication - Check exchange for existing order
-        try:
-            from trading.orders import verify_order_not_duplicate
-
-            existing_exchange_order = verify_order_not_duplicate(
-                exchange=self.engine.exchange_adapter._exchange,
-                client_order_id=client_order_id,
-                symbol=symbol
-            )
-
-            if existing_exchange_order:
-                # Duplicate found on exchange
-                logger.warning(
-                    f"Duplicate order detected on exchange for {symbol} "
-                    f"(client_order_id: {client_order_id}, exchange_order_id: {existing_exchange_order.get('id')})"
-                )
-                trace_step("duplicate_on_exchange", symbol=symbol,
-                          client_order_id=client_order_id,
-                          exchange_order_id=existing_exchange_order.get('id'))
-                return existing_exchange_order
-
-        except Exception as dedup_error:
-            # Don't fail order placement if deduplication check fails
-            logger.debug(f"Client Order ID deduplication check failed for {symbol}: {dedup_error}")
-
-        with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
-            # Log price snapshot before order
-            if coin_data and 'bid' in coin_data and 'ask' in coin_data:
-                spread = coin_data['ask'] - coin_data['bid']
-                spread_bp = (spread / coin_data['ask']) * 10000 if coin_data['ask'] > 0 else 0
-                log_event(
-                    ORDER_LOG(),
-                    "price_snapshot",
-                    symbol=symbol,
-                    bid=coin_data['bid'],
-                    ask=coin_data['ask'],
-                    spread=spread,
-                    spread_bp=spread_bp,
-                    mid_price=(coin_data['bid'] + coin_data['ask']) / 2
-                )
-
-            # Log order attempt
-            log_event(
-                ORDER_LOG(),
-                "order_attempt",
-                symbol=symbol,
-                side="buy",
-                type="limit",
-                tif="IOC",
-                price=aggressive_price,
-                qty=amount,
-                notional=amount * aggressive_price
-            )
-
-        # Use IOC for guaranteed fills
-        try:
-            order = self.engine.order_service.place_limit_ioc(
-                symbol=symbol,
-                side="buy",
-                amount=amount,
-                price=aggressive_price,
-                client_order_id=client_order_id
-            )
-
-            # Phase 0: Check and log order fills (already done in order_service, but double-check for safety)
-            if order:
-                try:
-                    from trading.orders import check_and_log_order_fills
-                    check_and_log_order_fills(order, symbol)
-                except Exception as fill_log_error:
-                    logger.debug(f"Fill logging failed for buy order: {fill_log_error}")
-
-            # Phase 2: Update idempotency store with exchange order ID
-            if order and order.get('id'):
-                try:
-                    idempotency_store.update_order_status(
-                        order_req_id=order_req_id,
-                        exchange_order_id=order['id'],
-                        status=order.get('status', 'open')
-                    )
-                except Exception as update_error:
-                    logger.debug(f"Failed to update idempotency store: {update_error}")
-
-            trace_step("order_placed", symbol=symbol, order_id=order.get('id') if order else None,
-                      status=order.get('status') if order else None)
-
-            # Phase 1: Log order acknowledgment
-            with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
-                if order:
-                    exchange_order_id = order.get('id')
-                    with Trace(exchange_order_id=exchange_order_id):
-                        log_event(
-                            ORDER_LOG(),
-                            "order_ack",
-                            symbol=symbol,
-                            exchange_order_id=exchange_order_id,
-                            status=order.get('status'),
-                            latency_ms=int((time.time() - order_start_time) * 1000),
-                            exchange_raw=order
-                        )
-
-        except Exception as e:
-            # Phase 1: Log order error
-            with Trace(decision_id=decision_id, order_req_id=order_req_id, client_order_id=client_order_id):
-                log_event(
-                    ORDER_LOG(),
-                    "order_error",
-                    message=f"Order placement failed: {type(e).__name__}: {str(e)}",
-                    symbol=symbol,
-                    error_class=type(e).__name__,
-                    error_message=str(e),
-                    latency_ms=int((time.time() - order_start_time) * 1000),
-                    level=logging.ERROR
-                )
-            raise
-
-        # Track order latency
-        order_latency = time.time() - order_start_time
-        self.engine.monitoring.performance_metrics['order_latencies'].append(order_latency)
-
-        if order:
-            # Log order update
-            self.engine.jsonl_logger.order_update(
-                decision_id=decision_id,
-                symbol=symbol,
-                client_order_id=client_order_id,
-                order_id=order.get('id'),
-                status=order.get('status'),
-                filled=order.get('filled', 0),
-                remaining=order.get('remaining', 0),
-                average_price=order.get('average'),
-                order_latency_ms=order_latency * 1000,
-                timestamp=time.time()
-            )
-
-        return order
-
-    def _handle_buy_fill(self, symbol: str, order: Dict, signal: str, decision_id: str = None):
-        """Handle buy order fill - create position"""
-        decision_id = decision_id or new_decision_id()
-
-        try:
-            filled_amount = order.get('filled', 0)
-            avg_price = order.get('average', 0)
-
-            # Log order fill
-            self.engine.jsonl_logger.order_filled(
-                decision_id=decision_id,
-                symbol=symbol,
-                side="buy",
-                client_order_id=order.get('clientOrderId'),
-                order_id=order.get('id'),
-                filled_amount=filled_amount,
-                average_price=avg_price,
-                total_cost=filled_amount * avg_price,
-                signal_reason=signal,
-                timestamp=time.time()
-            )
-
-            if filled_amount <= 0 or avg_price <= 0:
+            if filled_amount <= 0:
+                logger.warning(f"BUY fill for {symbol} had zero quantity (intent_id={intent_id})")
                 return
 
-            # Record fill in PnL Service with trade-based fee collection using cache
-            buy_fee = order.get('fee', {}).get('cost', 0)
-            if buy_fee == 0:
-                # Fallback: get fees from trades with intelligent caching
-                trades = order.get("trades") or []
-                if not trades and order.get("id"):
-                    try:
-                        # Use trade cache for efficient API calls
-                        from services.trade_cache import get_trade_cache
-                        trade_cache = get_trade_cache()
+            avg_price = event_data.get("average_price")
+            if avg_price is None:
+                avg_price = order_data.get("average")
+            if (avg_price is None or avg_price == 0) and summary:
+                notional = float(summary.get("notional") or 0.0)
+                if filled_amount > 0 and notional > 0:
+                    avg_price = notional / filled_amount
+            if not avg_price or avg_price <= 0:
+                avg_price = (
+                    (metadata or {}).get("intended_price")
+                    or order_data.get("price")
+                    or event_data.get("limit_price")
+                )
+            if not avg_price or avg_price <= 0:
+                logger.warning(f"BUY fill for {symbol} missing price (intent_id={intent_id})")
+                return
+            avg_price = float(avg_price)
 
-                        trades = trade_cache.get_trades_cached(
-                            symbol=symbol,
-                            exchange_adapter=self.engine.exchange_adapter,
-                            params={"orderId": order["id"]},
-                            cache_ttl=60.0  # Cache for 1 minute
-                        )
-                    except Exception:
-                        pass
-                buy_fee = sum(t.get("fee", {}).get("cost", 0) for t in (trades or []))
+            fees = 0.0
+            if summary:
+                fees = float(summary.get("fees") or 0.0)
+            if fees <= 0 and order_data.get("fee"):
+                try:
+                    fees = float((order_data.get("fee") or {}).get("cost") or 0.0)
+                except Exception:
+                    fees = 0.0
+            if fees <= 0:
+                fees = filled_amount * avg_price * getattr(config, 'TRADING_FEE_RATE', 0.001)
+            fee_quote = fees
 
-            # Process fill in enhanced PnL tracker
-            fee_quote = buy_fee if buy_fee > 0 else filled_amount * avg_price * getattr(config, 'TRADING_FEE_RATE', 0.001)
             self.engine.pnl_tracker.on_fill(symbol, "BUY", avg_price, filled_amount)
 
-            # Create TRADE_FILL event for telemetry
             trade_fill_event = {
                 "event_type": "TRADE_FILL",
                 "symbol": symbol,
@@ -964,17 +880,15 @@ class BuyDecisionHandler:
                 "ts": time.time()
             }
 
-            # Calculate slippage if possible
-            if order.get('price') and avg_price:
-                slippage_bp = abs(avg_price - order['price']) / order['price'] * 10000.0
+            reference_price = order_data.get("price") or (metadata or {}).get("intended_price")
+            if reference_price and reference_price > 0:
+                slippage_bp = abs(avg_price - reference_price) / reference_price * 10000.0
                 trade_fill_event["slippage_bp"] = slippage_bp
                 self.engine.rolling_stats.add_fill(trade_fill_event["ts"], slippage_bp)
 
-            # Process fill event through order flow
             from core.utils.order_flow import on_order_update
             on_order_update(trade_fill_event, self.engine.pnl_tracker)
 
-            # Log TRADE_FILL event
             logger.info("TRADE_FILL", extra=trade_fill_event)
 
             self.engine.pnl_service.record_fill(
@@ -982,113 +896,142 @@ class BuyDecisionHandler:
                 side="buy",
                 quantity=filled_amount,
                 avg_price=avg_price,
-                fee_quote=buy_fee
+                fee_quote=fee_quote
             )
 
-            # Create position
-            position_data = {
-                'symbol': symbol,
-                'amount': filled_amount,
-                'buying_price': avg_price,
-                'time': time.time(),
-                'signal': signal,
-                'order_id': order['id'],
-                'decision_id': decision_id  # Track decision ID for position
-            }
+            order_id = event_data.get("order_id") or order_data.get("id")
+            client_order_id = event_data.get("client_order_id") or order_data.get("clientOrderId")
+            total_cost = filled_amount * avg_price
 
+            self.engine.jsonl_logger.order_filled(
+                decision_id=decision_id,
+                symbol=symbol,
+                side="buy",
+                client_order_id=client_order_id,
+                order_id=order_id,
+                filled_amount=filled_amount,
+                average_price=avg_price,
+                total_cost=total_cost,
+                signal_reason=signal,
+                intent_id=intent_id,
+                timestamp=time.time()
+            )
+
+            self.engine.jsonl_logger.trade_open(
+                decision_id=decision_id,
+                symbol=symbol,
+                entry_price=avg_price,
+                amount=filled_amount,
+                total_cost=total_cost,
+                signal_reason=signal,
+                order_id=order_id,
+                timestamp=time.time()
+            )
+
+            order_ts = None
+            if order_data.get("timestamp"):
+                try:
+                    order_ts = order_data["timestamp"] / 1000.0
+                except Exception:
+                    order_ts = None
+            if not order_ts and metadata and metadata.get("start_ts"):
+                order_ts = metadata["start_ts"]
+            latency_ms_total = int((time.time() - order_ts) * 1000) if order_ts else None
+
+            with Trace(decision_id=decision_id, intent_id=intent_id, exchange_order_id=order_id):
+                # P2: Enhanced latency tracking with breakdown
+                event_payload = {
+                    "symbol": symbol,
+                    "side": "buy",
+                    "final_status": "filled",
+                    "filled_qty": filled_amount,
+                    "avg_price": avg_price,
+                    "total_cost": total_cost,
+                    "fee_quote": fee_quote,
+                    "latency_ms_total": latency_ms_total
+                }
+
+                # Add latency breakdown if available
+                if latency_breakdown:
+                    event_payload["latency_breakdown"] = latency_breakdown
+
+                log_event(ORDER_LOG(), "order_done", **event_payload)
+
+            notify_trade_completed(symbol, "buy")
+
+            portfolio_position = self.engine.portfolio.positions.get(symbol)
+            if portfolio_position:
+                try:
+                    position_qty = float(portfolio_position.qty)
+                    position_avg = float(portfolio_position.avg_price)
+                except AttributeError:
+                    position_qty = filled_amount
+                    position_avg = avg_price
+            else:
+                position_qty = filled_amount
+                position_avg = avg_price
+
+            position_data = {
+                "symbol": symbol,
+                "amount": position_qty,
+                "buying_price": position_avg,
+                "time": time.time(),
+                "signal": signal,
+                "order_id": order_id,
+                "decision_id": decision_id
+            }
             self.engine.positions[symbol] = position_data
 
-            # Phase 3: Log position_opened event
             try:
                 from core.event_schemas import PositionOpened
                 from datetime import datetime
 
                 position_opened = PositionOpened(
                     symbol=symbol,
-                    qty=filled_amount,
-                    avg_entry=avg_price,
-                    notional=filled_amount * avg_price,
-                    fee_accum=buy_fee,
+                    qty=position_qty,
+                    avg_entry=position_avg,
+                    notional=position_qty * position_avg,
+                    fee_accum=fee_quote,
                     opened_at=datetime.now().isoformat()
                 )
 
-                with Trace(decision_id=decision_id, exchange_order_id=order.get('id')):
+                with Trace(decision_id=decision_id, intent_id=intent_id, exchange_order_id=order_id):
                     log_event(DECISION_LOG(), "position_opened", **position_opened.model_dump())
 
-            except Exception as e:
-                logger.debug(f"Failed to log position_opened for {symbol}: {e}")
+            except Exception as exc:
+                logger.debug(f"Failed to log position_opened for {symbol}: {exc}")
 
-            # Add to portfolio with fee information for later net PnL calculation
-            fee_per_unit = (buy_fee / filled_amount) if filled_amount > 0 else 0.0
-            self.engine.portfolio.add_held_asset(symbol, {
-                "amount": filled_amount,
-                "entry_price": avg_price,
-                "buy_fee_quote_per_unit": fee_per_unit,
-                "buy_price": avg_price
-            })
-
-            # Log trade opening
-            self.engine.jsonl_logger.trade_open(
-                decision_id=decision_id,
-                symbol=symbol,
-                entry_price=avg_price,
-                amount=filled_amount,
-                total_cost=filled_amount * avg_price,
-                signal_reason=signal,
-                order_id=order['id'],
-                timestamp=time.time()
-            )
-
-            # Phase 3: Log order_done event for completed order
-            order_timestamp = order.get('timestamp', 0) / 1000 if order.get('timestamp') else None
-            latency_ms_total = int((time.time() - order_timestamp) * 1000) if order_timestamp else None
-
-            with Trace(decision_id=decision_id, client_order_id=order.get('clientOrderId'), exchange_order_id=order.get('id')):
-                log_event(
-                    ORDER_LOG(),
-                    "order_done",
-                    symbol=symbol,
-                    side="buy",
-                    final_status="filled",
-                    filled_qty=filled_amount,
-                    avg_price=avg_price,
-                    total_cost=filled_amount * avg_price,
-                    fee_quote=fee_quote,
-                    latency_ms_total=latency_ms_total
-                )
-
-            # Notify adaptive logger of trade completion
-            notify_trade_completed(symbol, "buy")
-
-            # Add to session digest
             self.engine.session_digest['buys'].append({
-                'sym': symbol, 'px': avg_price, 'qty': filled_amount,
-                't': int(time.time()), 'signal': signal
+                'sym': symbol,
+                'px': avg_price,
+                'qty': filled_amount,
+                't': int(time.time()),
+                'signal': signal
             })
 
-            # Format unified BUY notification message
-            total_cost = filled_amount * avg_price
-            buy_msg = f"🛒 BUY {symbol} @{avg_price:.6f} x{filled_amount:.6f} [{signal}] Cost: ${total_cost:.2f}"
+            buy_msg = f"[BUY] {symbol} @{avg_price:.6f} x{filled_amount:.6f} [{signal}] Cost: ${total_cost:.2f}"
+            print(f"\n>>> {buy_msg}\n", flush=True)
 
-            # Console output for order fill visibility
-            print(f"\n✅ {buy_msg}\n", flush=True)
-
-            # Dashboard event
             try:
                 from ui.dashboard import emit_dashboard_event
                 emit_dashboard_event("BUY_FILLED", f"{symbol} @ ${avg_price:.4f} x{filled_amount:.4f} (Cost: ${total_cost:.2f})")
             except Exception:
                 pass
 
-            # Terminal output (already exists)
-            logger.info(f"BUY FILLED {symbol} @{avg_price:.6f} x{filled_amount:.6f} [{signal}]")
+            logger.info(buy_msg)
 
-            # Telegram notification (if available)
             if hasattr(self.engine, 'telegram') and self.engine.telegram:
                 try:
                     self.engine.telegram.send_message(buy_msg)
-                except Exception as e:
-                    logger.warning(f"Telegram BUY notification failed: {e}")
+                except Exception as exc:
+                    logger.warning(f"Telegram BUY notification failed: {exc}")
+
+            start_ts = metadata.get("start_ts") if metadata else None
+            duration_ms = (time.time() - start_ts) * 1000 if start_ts else 0.0
+            try:
+                self.engine.buy_flow_logger.end_evaluation("BUY_COMPLETED", duration_ms, reason="order_router_fill")
+            except Exception:
+                pass
 
         except Exception as e:
-            logger.error(f"Buy fill handling error: {e}")
+            logger.error(f"Buy fill handling error for intent {intent_id}: {e}", exc_info=True)

@@ -172,6 +172,7 @@ ROUTER_BACKOFF_MS = 400  # Initial backoff in milliseconds (exponential)
 ROUTER_TIF = "IOC"  # Time in force: "IOC" (Immediate or Cancel) or "GTC" (Good Till Cancel)
 ROUTER_SLIPPAGE_BPS = 20  # Maximum allowed slippage in basis points
 ROUTER_MIN_NOTIONAL = 5.0  # Minimum order notional in quote currency
+ROUTER_FETCH_ORDER_ON_FILL = False  # P2: Fetch full order details on fill (slower, more complete data)
 
 # Reconciliation & Position Lifecycle (NEW - Exchange-Truth-Based Position Management)
 USE_RECONCILER = True  # Enable reconciler for position lifecycle management
@@ -555,6 +556,19 @@ STATE_FILE_OPEN_BUYS = os.path.join(BASE_DIR, "open_buy_orders.json")
 HISTORY_FILE = os.path.join(BASE_DIR, "trade_history.csv")
 DROP_ANCHORS_FILE = os.path.join(BASE_DIR, "drop_anchors.json")
 CONFIG_BACKUP_PATH = os.path.join(SESSION_DIR, "config_backup.py")
+
+# Intent System & Order Router State Management (P1)
+# Debounced persistence to reduce I/O load
+ENGINE_TRANSIENT_STATE_FILE = os.path.join(STATE_DIR, "engine_transient.json")
+ORDER_ROUTER_META_FILE = os.path.join(STATE_DIR, "order_router_meta.json")
+STATE_PERSIST_INTERVAL_S = 10.0  # Write state every 10s (debounced)
+STATE_PERSIST_ON_SHUTDOWN = True  # Always persist on clean shutdown
+INTENT_STALE_THRESHOLD_S = 60  # Intent considered stale after 60s
+ORDER_META_MAX_AGE_S = 86400  # Clean up metadata older than 24h
+
+# P4: Stale Intent Monitoring & Alerts
+STALE_INTENT_CHECK_ENABLED = True  # Enable periodic stale intent cleanup
+STALE_INTENT_TELEGRAM_ALERTS = False  # Send Telegram alerts for stale intents (disable in dev/test)
 
 # =============================================================================
 # 13. SIMULATION / TRACING

@@ -78,6 +78,9 @@ from telemetry.jsonl_writer import JsonlWriter
 # NEW: Exit Engine for Prioritized Exit Rules
 from .exit_engine import ExitEngine
 
+# P1: Debounced State Writer for Intent Persistence
+from core.state_writer import DebouncedStateWriter
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +118,7 @@ class TradingEngine:
 
         # State Management
         self.positions: Dict[str, Dict] = {}
+        self.pending_buy_intents: Dict[str, Dict[str, Any]] = {}
         self.topcoins: Dict[str, Any] = watchlist or {}
         self.running = False
         self.main_thread = None
@@ -173,6 +177,9 @@ class TradingEngine:
         self.last_position_check = 0
         self.last_exit_processing = 0
         self._md_started = False  # Track market data loop state
+
+        # P1: Debounced State Persistence for Intents
+        self._init_state_persistence()
 
         logger.info("Trading Engine initialized with service composition")
 
@@ -291,7 +298,8 @@ class TradingEngine:
             retry_backoff_ms=getattr(config, 'ROUTER_BACKOFF_MS', 400),
             tif=getattr(config, 'ROUTER_TIF', 'IOC'),
             slippage_bps=getattr(config, 'ROUTER_SLIPPAGE_BPS', 20),
-            min_notional=getattr(config, 'ROUTER_MIN_NOTIONAL', 5.0)
+            min_notional=getattr(config, 'ROUTER_MIN_NOTIONAL', 5.0),
+            fetch_order_on_fill=getattr(config, 'ROUTER_FETCH_ORDER_ON_FILL', False)  # P2: Performance
         )
 
         # Order Router with FSM Execution
@@ -370,6 +378,178 @@ class TradingEngine:
             logger.info(f"Market data backfill completed: {results}")
         except Exception as e:
             logger.error(f"Market data backfill failed: {e}")
+
+    # =================================================================
+    # STATE PERSISTENCE (P1)
+    # =================================================================
+
+    def _init_state_persistence(self):
+        """Initialize debounced state writers for transient engine state"""
+        try:
+            # Engine transient state (pending_buy_intents)
+            self._engine_state_writer = DebouncedStateWriter(
+                file_path=config.ENGINE_TRANSIENT_STATE_FILE,
+                interval_s=config.STATE_PERSIST_INTERVAL_S,
+                auto_start=True
+            )
+
+            # Recover existing state
+            self._recover_transient_state()
+
+            logger.info(
+                f"State persistence initialized: "
+                f"file={config.ENGINE_TRANSIENT_STATE_FILE}, "
+                f"interval={config.STATE_PERSIST_INTERVAL_S}s"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to initialize state persistence: {e}")
+            # Create dummy writer that doesn't fail
+            self._engine_state_writer = None
+
+    def _recover_transient_state(self):
+        """Recover transient state from previous session"""
+        try:
+            if not self._engine_state_writer:
+                return
+
+            state = self._engine_state_writer.get()
+            if not state:
+                logger.info("No previous transient state to recover")
+                return
+
+            # Filter stale intents (>1h old)
+            cutoff = time.time() - config.INTENT_STALE_THRESHOLD_S
+            recovered = 0
+            filtered = 0
+
+            for intent_id, metadata in state.get("pending_buy_intents", {}).items():
+                start_ts = metadata.get("start_ts", 0)
+                if start_ts > cutoff:
+                    self.pending_buy_intents[intent_id] = metadata
+                    recovered += 1
+                else:
+                    filtered += 1
+                    logger.debug(
+                        f"Filtered stale intent: {intent_id} "
+                        f"(age: {time.time() - start_ts:.0f}s)"
+                    )
+
+            if recovered > 0:
+                logger.info(
+                    f"Recovered {recovered} pending buy intents from previous session "
+                    f"(filtered {filtered} stale intents)"
+                )
+            elif filtered > 0:
+                logger.info(f"All {filtered} previous intents were stale - none recovered")
+
+        except Exception as e:
+            logger.warning(f"Transient state recovery failed: {e}")
+
+    def _persist_intent_state(self):
+        """Update persisted intent state (debounced)"""
+        try:
+            if not self._engine_state_writer:
+                return
+
+            state = {
+                "pending_buy_intents": self.pending_buy_intents,
+                "last_update": time.time()
+            }
+
+            self._engine_state_writer.update(state)
+
+        except Exception as e:
+            logger.debug(f"Intent state persist failed: {e}")
+
+    def _check_stale_intents(self):
+        """
+        P4: Check for and cleanup stale intents (intents stuck without fill).
+
+        Detects intents older than INTENT_STALE_THRESHOLD_S and:
+        - Releases reserved budget
+        - Removes from pending_buy_intents
+        - Logs warning with details
+        - Optionally sends Telegram alert
+        """
+        if not getattr(config, 'STALE_INTENT_CHECK_ENABLED', True):
+            return
+
+        if not self.pending_buy_intents:
+            return
+
+        stale_threshold_s = getattr(config, 'INTENT_STALE_THRESHOLD_S', 60)
+        now = time.time()
+        stale_intents = []
+
+        for intent_id, metadata in list(self.pending_buy_intents.items()):
+            age_s = now - metadata.get("start_ts", now)
+
+            if age_s > stale_threshold_s:
+                stale_intents.append({
+                    "intent_id": intent_id,
+                    "symbol": metadata.get("symbol"),
+                    "age_s": age_s,
+                    "quote_budget": metadata.get("quote_budget", 0.0),
+                    "signal": metadata.get("signal"),
+                    "decision_id": metadata.get("decision_id")
+                })
+
+                # Remove from pending
+                self.pending_buy_intents.pop(intent_id)
+
+                # Release budget (if still reserved)
+                symbol = metadata.get("symbol")
+                quote_budget = metadata.get("quote_budget", 0.0)
+
+                if symbol and quote_budget > 0:
+                    try:
+                        # Release budget back to portfolio
+                        self.portfolio.release_budget(
+                            quote_budget,
+                            symbol,
+                            reason="stale_intent_cleanup"
+                        )
+                        logger.info(
+                            f"Released ${quote_budget:.2f} budget for stale intent: {symbol} (age: {age_s:.0f}s)"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to release budget for stale intent {intent_id}: {e}")
+
+        if stale_intents:
+            # Persist state after cleanup
+            self._persist_intent_state()
+
+            # Log warning
+            logger.warning(
+                f"Cleaned up {len(stale_intents)} stale intents (age > {stale_threshold_s}s)",
+                extra={
+                    "event_type": "STALE_INTENT_CLEANUP",
+                    "count": len(stale_intents),
+                    "intents": stale_intents
+                }
+            )
+
+            # Optional: Send Telegram alert
+            if getattr(config, 'STALE_INTENT_TELEGRAM_ALERTS', False):
+                if hasattr(self, 'telegram') and self.telegram:
+                    try:
+                        # Build alert message
+                        msg_lines = [f"⚠️ Stale Intent Cleanup: {len(stale_intents)} intents"]
+                        for intent in stale_intents[:5]:  # Show max 5
+                            msg_lines.append(
+                                f"• {intent['symbol']}: ${intent['quote_budget']:.2f} "
+                                f"(age: {intent['age_s']:.0f}s)"
+                            )
+
+                        if len(stale_intents) > 5:
+                            msg_lines.append(f"... and {len(stale_intents) - 5} more")
+
+                        msg = "\n".join(msg_lines)
+                        self.telegram.send_message(msg)
+
+                    except Exception as telegram_error:
+                        logger.debug(f"Telegram alert failed: {telegram_error}")
 
     # =================================================================
     # MAIN ENGINE LOOP - PURE ORCHESTRATION
@@ -473,6 +653,23 @@ class TradingEngine:
         self.running = False
         if self.main_thread and self.main_thread.is_alive():
             self.main_thread.join(timeout=5.0)
+
+        # P1: Shutdown state persistence (final flush)
+        if config.STATE_PERSIST_ON_SHUTDOWN:
+            try:
+                # Engine transient state
+                if hasattr(self, '_engine_state_writer') and self._engine_state_writer:
+                    logger.info("Persisting final engine state...")
+                    self._persist_intent_state()
+                    self._engine_state_writer.shutdown()
+                    logger.info("Engine state persisted successfully")
+
+                # OrderRouter metadata state
+                if hasattr(self, 'order_router') and self.order_router:
+                    self.order_router.shutdown()
+
+            except Exception as e:
+                logger.error(f"Failed to persist state on shutdown: {e}")
 
         # Print final statistics
         self.monitoring.log_final_statistics(self.session_digest, self.positions, self.pnl_service)
@@ -603,6 +800,13 @@ class TradingEngine:
                     # 5. Enhanced Heartbeat with PnL/Telemetry (every 30s)
                     if cycle_start % 30 < 1.0:
                         co.beat("before_heartbeat_emit")
+
+                        # P4: Check for stale intents (same interval as heartbeat)
+                        try:
+                            self._check_stale_intents()
+                        except Exception as stale_error:
+                            logger.error(f"Stale intent check failed: {stale_error}")
+
                         try:
                             equity = self._calculate_current_equity()
                             drawdown_peak_pct = getattr(self, '_session_drawdown_peak', 0.0)
@@ -922,6 +1126,8 @@ class TradingEngine:
                 return
 
             # Reconcile order to update position with exchange truth
+            summary = None
+
             if self.reconciler:
                 summary = self.reconciler.reconcile_order(symbol, order_id)
 
@@ -931,6 +1137,13 @@ class TradingEngine:
                         f"state={summary.get('state')}, "
                         f"qty_delta={summary.get('qty_delta')}"
                     )
+
+            if event_data.get("side") == "buy" and event_data.get("intent_id"):
+                self.buy_decision_handler.handle_router_fill(
+                    event_data["intent_id"],
+                    event_data,
+                    summary
+                )
 
         except Exception as e:
             logger.error(f"Order filled event handler error: {e}", exc_info=True)
