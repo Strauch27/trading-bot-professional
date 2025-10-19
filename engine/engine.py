@@ -120,6 +120,7 @@ class TradingEngine:
         self.main_thread = None
         self._lock = threading.RLock()
         self._snap_recv = 0  # DEBUG_DROPS: Count received snapshot batches
+        self._last_snap_recv_check = 0  # Health Monitoring: Last snapshot count for watchdog
 
         # Drop Snapshot Store (Long-term solution)
         self.drop_snapshot_store: Dict[str, Dict] = {}  # symbol -> latest drop snapshot
@@ -488,6 +489,8 @@ class TradingEngine:
         try:
             logger.info("🚀 Main trading loop started", extra={'event_type': 'ENGINE_MAIN_LOOP_STARTED'})
             loop_counter = 0
+            last_md_health_check = time.time()  # For periodic market data thread health checks
+            last_snapshot_check = time.time()  # Track last snapshot delivery check
 
             while self.running:
                 try:
@@ -505,6 +508,54 @@ class TradingEngine:
                                           'symbols': len(self.topcoins), 'cycle': loop_counter})
                         # Deactivated - Dashboard shows status
                         # print(f"💓 Engine läuft - Cycle #{loop_counter} - {len(self.positions)} Positionen, {len(self.topcoins)} Symbole")
+
+                    # Health Monitoring: Market Data Thread Liveness Check
+                    health_check_interval = getattr(config, 'MD_HEALTH_CHECK_INTERVAL_S', 60)
+                    if cycle_start - last_md_health_check > health_check_interval:
+                        if hasattr(self, 'market_data') and hasattr(self.market_data, '_thread'):
+                            thread = self.market_data._thread
+                            if thread and not thread.is_alive():
+                                logger.error(
+                                    "🚨 CRITICAL: Market Data Thread is DEAD! Thread stopped unexpectedly.",
+                                    extra={'event_type': 'MD_THREAD_DEAD'}
+                                )
+                                # Optional: Auto-restart (if enabled)
+                                if getattr(config, 'MD_AUTO_RESTART_ON_CRASH', False):
+                                    logger.warning("Attempting to restart Market Data Thread...")
+                                    try:
+                                        self.market_data.start()
+                                        logger.info("Market Data Thread restarted successfully")
+                                    except Exception as restart_error:
+                                        logger.error(f"Failed to restart Market Data Thread: {restart_error}")
+                            elif thread:
+                                # Thread is alive, check heartbeat freshness
+                                last_heartbeat = getattr(self.market_data, '_last_heartbeat', None)
+                                if last_heartbeat:
+                                    heartbeat_age = cycle_start - last_heartbeat
+                                    if heartbeat_age > 120:  # No heartbeat for 2 minutes
+                                        logger.warning(
+                                            f"⚠️ Market Data Thread heartbeat is stale ({heartbeat_age:.1f}s old). Thread may be hung.",
+                                            extra={'event_type': 'MD_HEARTBEAT_STALE', 'age_s': heartbeat_age}
+                                        )
+                        last_md_health_check = cycle_start
+
+                    # Health Monitoring: Snapshot Delivery Watchdog
+                    snapshot_timeout = getattr(config, 'MD_SNAPSHOT_TIMEOUT_S', 30)
+                    if cycle_start - last_snapshot_check > snapshot_timeout:
+                        # Check if snapshots are still being received
+                        last_snap_count = getattr(self, '_last_snap_recv_check', 0)
+                        current_snap_count = self._snap_recv
+
+                        if current_snap_count == last_snap_count:
+                            # No new snapshots in the last timeout period
+                            logger.warning(
+                                f"⚠️ No new market snapshots received for {snapshot_timeout}s. "
+                                f"Snapshot count stuck at {current_snap_count}.",
+                                extra={'event_type': 'MD_NO_SNAPSHOTS', 'timeout_s': snapshot_timeout}
+                            )
+
+                        self._last_snap_recv_check = current_snap_count
+                        last_snapshot_check = cycle_start
 
                     # 1. Market Data Updates (configurable interval)
                     interval = getattr(self.config, 'md_update_interval_s', 5.0) or 5.0

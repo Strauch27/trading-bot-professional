@@ -1635,6 +1635,11 @@ class MarketDataProvider:
         self._running = True
         self._thread = None
 
+        # Initialize health monitoring attributes
+        self._last_heartbeat = time.time()
+        self._last_cycle_time = None
+        self._last_success_rate = None
+
         import threading
         self._thread = threading.Thread(target=self._loop, name="MarketDataLoop", daemon=True)
         self._thread.start()
@@ -1821,6 +1826,13 @@ class MarketDataProvider:
                 logger.info(f"MD_BATCH_POLLING disabled: fetching all {len(symbols)} symbols sequentially")
 
             loop_counter = 0
+            last_heartbeat_time = time.time()
+            heartbeat_interval = getattr(config, 'MD_HEARTBEAT_INTERVAL_CYCLES', 100)
+
+            # Performance tracking for health monitoring
+            recent_cycles = []  # Rolling window of last 100 cycle durations
+            recent_success_rates = []  # Rolling window of last 100 success rates
+
             while self._running:
                 try:
                     loop_counter += 1
@@ -1937,6 +1949,43 @@ class MarketDataProvider:
                             })
                         except Exception:
                             pass
+
+                    # Health Monitoring: Track performance metrics
+                    success_rate = success_count / len(symbols) if symbols else 0.0
+                    recent_cycles.append(cycle_duration)
+                    recent_success_rates.append(success_rate)
+
+                    # Keep only last 100 entries (rolling window)
+                    if len(recent_cycles) > 100:
+                        recent_cycles.pop(0)
+                    if len(recent_success_rates) > 100:
+                        recent_success_rates.pop(0)
+
+                    # Store metrics for external monitoring
+                    self._last_cycle_time = cycle_duration
+                    self._last_success_rate = success_rate
+                    self._last_heartbeat = time.time()
+
+                    # Heartbeat logging (every N cycles)
+                    if loop_counter % heartbeat_interval == 0:
+                        avg_cycle = sum(recent_cycles) / len(recent_cycles) if recent_cycles else 0
+                        avg_success = sum(recent_success_rates) / len(recent_success_rates) if recent_success_rates else 0
+
+                        logger.info(
+                            f"MD_HEARTBEAT cycle={loop_counter} "
+                            f"avg_duration={avg_cycle:.2f}s avg_success={avg_success:.1%} "
+                            f"current_success={success_count}/{len(symbols)}",
+                            extra={"event_type": "MD_HEARTBEAT", "cycle": loop_counter}
+                        )
+
+                        # Warning if average success rate is low
+                        warning_threshold = getattr(config, 'MD_SUCCESS_RATE_WARNING_THRESHOLD', 0.80)
+                        if avg_success < warning_threshold:
+                            logger.warning(
+                                f"MD_LOW_SUCCESS_RATE: {avg_success:.1%} < {warning_threshold:.1%} "
+                                f"(last 100 cycles)",
+                                extra={"event_type": "MD_LOW_SUCCESS_RATE", "rate": avg_success}
+                            )
 
                     # Sleep until next poll cycle (adjust for time already spent)
                     remaining_sleep = poll_s - cycle_duration

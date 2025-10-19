@@ -123,6 +123,13 @@ MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
 MD_DEBUG_PER_COIN = True  # Enable detailed per-coin fetch logging
 MD_DEBUG_LOG_FILE = "market_data_debug.log"  # Dedicated log file for market data debugging
 
+# Market Data Health Monitoring
+MD_HEALTH_CHECK_INTERVAL_S = 60  # Check thread liveness every 60s
+MD_HEARTBEAT_INTERVAL_CYCLES = 100  # Log heartbeat every 100 cycles
+MD_SNAPSHOT_TIMEOUT_S = 30  # Alert if no snapshots for 30s
+MD_AUTO_RESTART_ON_CRASH = False  # Auto-restart thread if it dies (experimental)
+MD_SUCCESS_RATE_WARNING_THRESHOLD = 0.80  # Warn if success rate < 80%
+
 # Rate Limiting (Token Bucket)
 RATE_LIMIT_ENABLED = True  # Enable API rate limiting
 RATE_LIMIT_RPM_CAP = 800  # Hard cap: 800 requests per minute
