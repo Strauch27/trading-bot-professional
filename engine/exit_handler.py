@@ -197,8 +197,22 @@ class ExitHandler:
             except Exception as e:
                 logger.debug(f"Failed to log order_done for sell order {symbol}: {e}")
 
-            # Remove position
+            # Remove/update position store
             del self.engine.positions[symbol]
+
+            # Synchronize PortfolioManager holdings so UI/portfolio views update
+            try:
+                portfolio = getattr(self.engine, 'portfolio', None)
+                if portfolio and hasattr(portfolio, 'held_assets'):
+                    asset = portfolio.held_assets.get(symbol)
+                    if asset:
+                        remaining = float(asset.get('amount') or 0.0) - float(result.filled_amount or 0.0)
+                        if remaining <= 1e-9:
+                            portfolio.remove_held_asset(symbol)
+                        else:
+                            portfolio.update_held_asset(symbol, {"amount": max(0.0, remaining)})
+            except Exception as portfolio_error:
+                logger.debug(f"Failed to sync portfolio after exit for {symbol}: {portfolio_error}")
 
             # Notify BuySignalService of trade completion (for Mode 4 anchor reset)
             self.engine.buy_signal_service.on_trade_completed(symbol)

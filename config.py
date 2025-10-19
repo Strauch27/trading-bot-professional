@@ -631,6 +631,23 @@ MARKET_DATA_USE_FETCH_TICKERS = True      # fetch_tickers() mit Symbol-Chunking 
 MARKET_DATA_BATCH_SIZE = 50              # Anzahl Symbole pro Batch-Request
 MARKET_DATA_BATCH_DELAY_S = 0.05         # Pause zwischen Batch-Requests in Sekunden
 
+# Retry/Degrade Settings für Market-Data
+MARKET_DATA_MAX_RETRIES = 2              # Anzahl zusätzlicher Einzel-Retries nach Batch-Fehlschlag
+MARKET_DATA_RETRY_DELAY_S = 0.3          # Delay zwischen Retries
+MARKET_DATA_FAILURE_DEGRADE_THRESHOLD = 5  # Ab wie vielen Fehlschlägen Symbol verlangsamen
+MARKET_DATA_DEGRADE_INTERVAL_S = 30.0      # Dauer der Verlangsamung in Sekunden
+MARKET_DATA_FAILURE_LOG_TOP_N = 5         # Wie viele Fehler-Symbole im Health-Log anzeigen
+MARKET_DATA_HEALTH_LOG_INTERVAL_S = 60.0   # Intervall für Health-Log (Sekunden)
+
+# Snapshot Stale Handling
+SNAPSHOT_STALE_TTL_S = 30.0              # Gültigkeitsdauer eines Snapshots in Sekunden
+
+# Optional: Budget Refresh nach Market-Data Update
+MD_REFRESH_PORTFOLIO_BUDGET = False
+
+# Optional: Export Health-Stats to JSONL (None = disabled, or path like "data/md_health")
+MARKET_DATA_HEALTH_EXPORT_DIR = None
+
 MARKET_DATA_FLUSH_INTERVAL_S = 5
 RETENTION = {
     "ticks_days": 60, "quotes_days": 60, "orderbook_days": 60,
@@ -754,6 +771,22 @@ def validate_config():
         problems.append("MARKET_DATA_BATCH_SIZE muss > 0 sein")
     if MARKET_DATA_BATCH_DELAY_S < 0:
         problems.append("MARKET_DATA_BATCH_DELAY_S darf nicht negativ sein")
+    if MARKET_DATA_MAX_RETRIES < 0:
+        problems.append("MARKET_DATA_MAX_RETRIES darf nicht negativ sein")
+    if MARKET_DATA_RETRY_DELAY_S < 0:
+        problems.append("MARKET_DATA_RETRY_DELAY_S darf nicht negativ sein")
+    if MARKET_DATA_FAILURE_DEGRADE_THRESHOLD < 0:
+        problems.append("MARKET_DATA_FAILURE_DEGRADE_THRESHOLD darf nicht negativ sein")
+    if MARKET_DATA_DEGRADE_INTERVAL_S <= 0:
+        problems.append("MARKET_DATA_DEGRADE_INTERVAL_S muss > 0 sein")
+    if MARKET_DATA_FAILURE_LOG_TOP_N <= 0:
+        problems.append("MARKET_DATA_FAILURE_LOG_TOP_N muss > 0 sein")
+    if MARKET_DATA_HEALTH_LOG_INTERVAL_S <= 0:
+        problems.append("MARKET_DATA_HEALTH_LOG_INTERVAL_S muss > 0 sein")
+    if SNAPSHOT_STALE_TTL_S <= 0:
+        problems.append("SNAPSHOT_STALE_TTL_S muss > 0 sein")
+    if not isinstance(MD_REFRESH_PORTFOLIO_BUDGET, bool):
+        problems.append("MD_REFRESH_PORTFOLIO_BUDGET muss bool sein")
     if any(v <= 0 for v in RETENTION.values()):
         problems.append("RETENTION Werte mussen > 0 sein")
     if USE_SMA_GUARD and SMA_GUARD_MIN_RATIO >= 1.0:
@@ -906,6 +939,15 @@ ticker_cache_ttl = TICKER_CACHE_TTL
 market_data_use_fetch_tickers = MARKET_DATA_USE_FETCH_TICKERS
 market_data_batch_size = MARKET_DATA_BATCH_SIZE
 market_data_batch_delay_s = MARKET_DATA_BATCH_DELAY_S
+market_data_max_retries = MARKET_DATA_MAX_RETRIES
+market_data_retry_delay_s = MARKET_DATA_RETRY_DELAY_S
+market_data_failure_degrade_threshold = MARKET_DATA_FAILURE_DEGRADE_THRESHOLD
+market_data_degrade_interval_s = MARKET_DATA_DEGRADE_INTERVAL_S
+market_data_failure_log_top_n = MARKET_DATA_FAILURE_LOG_TOP_N
+market_data_health_log_interval_s = MARKET_DATA_HEALTH_LOG_INTERVAL_S
+snapshot_stale_ttl_s = SNAPSHOT_STALE_TTL_S
+md_refresh_portfolio_budget = MD_REFRESH_PORTFOLIO_BUDGET
+market_data_health_export_dir = MARKET_DATA_HEALTH_EXPORT_DIR
 use_drop_anchor_since_last_close = USE_DROP_ANCHOR
 anchor_updates_when_flat = ANCHOR_UPDATES_WHEN_FLAT
 use_predictive_buys = USE_PREDICTIVE_BUYS

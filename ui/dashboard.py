@@ -168,7 +168,11 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
             # Get current price
             current_price = engine.get_current_price(symbol)
             if not current_price:
-                current_price = asset.get('entry_price', 0)
+                snap, snap_ts = engine.get_snapshot_entry(symbol) if hasattr(engine, 'get_snapshot_entry') else (None, None)
+                if snap:
+                    current_price = snap.get('price', {}).get('last')
+            if not current_price:
+                current_price = asset.get('entry_price', 0) or getattr(portfolio, 'last_prices', {}).get(symbol)
 
             entry_price = asset.get('entry_price', 0) or asset.get('buy_price', 0)
             amount = asset.get('amount', 0)
@@ -196,18 +200,40 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
 
 def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
     """Collect and calculate top drop data from snapshot store (long-term solution)."""
+    global _last_symbol, _last_price
     drops = []
 
     try:
         # Access drop snapshot store (long-term solution)
         drop_snapshot_store = getattr(engine, 'drop_snapshot_store', {})
+        stale_symbols: List[str] = []
+        stale_ttl = getattr(config_module, 'SNAPSHOT_STALE_TTL_S', 30.0)
+        now_ts = time.time()
 
         # If snapshot store is available and populated, use it (preferred)
         if drop_snapshot_store:
             logger.debug(f"Using drop_snapshot_store with {len(drop_snapshot_store)} symbols")
 
-            for symbol, snap in drop_snapshot_store.items():
+            iter_entries = getattr(engine, 'iter_snapshot_entries', None)
+            if callable(iter_entries):
+                snapshot_entries = list(iter_entries())
+            else:
+                snapshot_entries = []
+                for symbol, entry in drop_snapshot_store.items():
+                    if isinstance(entry, dict) and 'snapshot' in entry:
+                        snapshot_entries.append((symbol, entry.get('snapshot'), entry.get('ts')))
+                    else:
+                        snapshot_entries.append((symbol, entry, None))
+
+            for symbol, snap, snap_ts in snapshot_entries:
                 try:
+                    if not snap:
+                        continue
+
+                    if snap_ts is not None and (now_ts - snap_ts) > stale_ttl:
+                        stale_symbols.append(symbol)
+                        continue
+
                     # Validate snapshot version
                     if snap.get('v') != 1:
                         logger.debug(f"Skipping snapshot for {symbol}: unknown version {snap.get('v')}")
@@ -294,6 +320,16 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
                     logger.debug(f"Error calculating drop for {symbol}: {e}")
                     continue
 
+        # Expose stale symbols for health monitoring
+        setattr(engine, '_last_stale_snapshot_symbols', stale_symbols)
+
+        if drops:
+            first_drop = drops[0]
+            price_val = first_drop.get('current_price')
+            if price_val:
+                _last_symbol = first_drop.get('symbol')
+                _last_price = price_val
+
         # Custom sorting: BTC first, then biggest losers
         # 1. Extract BTC/USDT if present
         btc_drop = None
@@ -320,6 +356,31 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
         logger.error(f"Error getting drop data: {e}")
 
     return drops
+
+
+def get_health_data(engine, config_module) -> Dict[str, Any]:
+    """Collect health metrics for footer display."""
+    stats = getattr(engine, '_last_market_data_stats', {}) or {}
+    snapshot_ts = getattr(engine, '_last_snapshot_ts', 0.0)
+    stale_symbols = getattr(engine, '_last_stale_snapshot_symbols', []) or []
+
+    snapshot_age = None
+    if snapshot_ts:
+        snapshot_age = max(0.0, time.time() - snapshot_ts)
+
+    return {
+        'requested': stats.get('requested', 0),
+        'fetched': stats.get('fetched', 0),
+        'failed': stats.get('failed', 0),
+        'degraded': stats.get('degraded', 0),
+        'retry_attempts': stats.get('retry_attempts', 0),
+        'failures': stats.get('failures', []),
+        'degraded_symbols': stats.get('degraded_symbols', []),
+        'snapshot_age': snapshot_age,
+        'stale_count': len(stale_symbols),
+        'stale_symbols': stale_symbols,
+        'snapshot_ttl': getattr(config_module, 'SNAPSHOT_STALE_TTL_S', 30.0)
+    }
 
 
 def make_header_panel(config_data: Dict[str, Any]) -> Panel:
@@ -404,6 +465,7 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
 
 def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
     """Create the top drops panel (V9_3: with current price, anchor and spread columns)."""
+    global _last_symbol, _last_price
     table = Table(expand=True, show_header=True)
     table.add_column("#", style="dim", justify="right", width=3)
     table.add_column("Symbol", style="bold", width=10)
@@ -454,15 +516,29 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
     # DEBUG_DROPS: Add snapshot reception counter to title
     snap_rx = getattr(engine, '_snap_recv', 0)
     last_tick_ts = "-"
-    if drop_data and len(drop_data) > 0:
-        # Try to get timestamp from first snapshot
-        try:
-            first_snap = list(getattr(engine, 'drop_snapshot_store', {}).values())[0]
-            ts = first_snap.get('ts')
-            if ts:
-                last_tick_ts = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M:%S")
-        except (IndexError, KeyError, TypeError):
-            pass
+    if drop_data:
+        primary_symbol = drop_data[0]['symbol']
+        snap, snap_ts = engine.get_snapshot_entry(primary_symbol)
+        if snap_ts:
+            try:
+                last_tick_ts = datetime.fromtimestamp(snap_ts, tz=timezone.utc).strftime("%H:%M:%S")
+            except Exception:
+                pass
+        elif not snap:
+            try:
+                first_symbol, first_snap, first_ts = next(engine.iter_snapshot_entries())
+                if first_ts:
+                    last_tick_ts = datetime.fromtimestamp(first_ts, tz=timezone.utc).strftime("%H:%M:%S")
+                    primary_symbol = first_symbol
+                    snap = first_snap
+            except (StopIteration, AttributeError, TypeError, ValueError):
+                pass
+
+        global _last_symbol, _last_price
+        price_val = drop_data[0].get('current_price')
+        if price_val:
+            _last_symbol = drop_data[0]['symbol']
+            _last_price = price_val
 
     # Add last snapshot symbol and price
     last_snap_info = ""
@@ -473,14 +549,61 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
     return Panel(table, title=title, border_style="cyan", expand=True)
 
 
-def make_footer_panel(last_event: str) -> Panel:
-    """Create the footer panel with last event."""
+def make_footer_panel(last_event: str, health: Dict[str, Any]) -> Panel:
+    """Create the footer panel with last event and market-data health."""
     timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
-    content = Text.assemble(
+
+    content = Text()
+    content.append(Text.assemble(
         ("🔔 LAST EVENT: ", "yellow"),
         (f"[{timestamp}] ", "dim white"),
         (last_event, "white")
-    )
+    ))
+
+    md_requested = health.get('requested', 0)
+    md_fetched = health.get('fetched', 0)
+    md_failed = health.get('failed', 0)
+    md_degraded = health.get('degraded', 0)
+    md_retries = health.get('retry_attempts', 0)
+    snapshot_age = health.get('snapshot_age')
+    snapshot_ttl = health.get('snapshot_ttl', 30.0)
+    stale_count = health.get('stale_count', 0)
+
+    if snapshot_age is None:
+        snapshot_str = "n/a"
+    else:
+        snapshot_str = f"{snapshot_age:.1f}s"
+        if snapshot_age > snapshot_ttl:
+            snapshot_str += " !"
+
+    status_style = "green" if md_failed == 0 else "red"
+
+    failures = health.get('failures') or []
+    degraded_symbols = health.get('degraded_symbols') or []
+
+    content.append("\n")
+    content.append(Text.assemble(
+        (" MD ", "cyan"),
+        (f"{md_fetched}/{md_requested} fetched", status_style),
+        ("  |  failures=", "dim white"),
+        (str(md_failed), status_style),
+        ("  |  degraded=", "dim white"),
+        (str(md_degraded), "magenta" if md_degraded else "dim white"),
+        ("  |  retries=", "dim white"),
+        (str(md_retries), "white"),
+        ("  |  stale=", "dim white"),
+        (str(stale_count), "yellow" if stale_count else "dim white"),
+        ("  |  snapshot age=", "dim white"),
+        (snapshot_str, "white" if snapshot_age is None or snapshot_age <= snapshot_ttl else "red")
+    ))
+
+    if failures:
+        content.append("\n")
+        content.append(Text(f"   fails: {', '.join(failures[:3])}", style="red"))
+    if degraded_symbols:
+        content.append("\n")
+        content.append(Text(f"   slow: {', '.join(degraded_symbols[:3])}", style="magenta"))
+
     return Panel(content, border_style="yellow", expand=True)
 
 
@@ -563,13 +686,14 @@ def run_dashboard(engine, portfolio, config_module):
                     config_data = get_config_data(config_module, start_time)
                     portfolio_data = get_portfolio_data(portfolio, engine)
                     drop_data = get_drop_data(engine, portfolio, config_module)
+                    health_data = get_health_data(engine, config_module)
                     last_event = _event_bus.get_last_event()
 
                     # Update UI components
                     layout["header"].update(make_header_panel(config_data))
                     layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
-                    layout["footer"].update(make_footer_panel(last_event))
+                    layout["footer"].update(make_footer_panel(last_event, health_data))
 
                     # Update debug panel if enabled
                     if debug_drops:

@@ -123,7 +123,8 @@ class TradingEngine:
         self._last_snap_recv_check = 0  # Health Monitoring: Last snapshot count for watchdog
 
         # Drop Snapshot Store (Long-term solution)
-        self.drop_snapshot_store: Dict[str, Dict] = {}  # symbol -> latest drop snapshot
+        self.drop_snapshot_store: Dict[str, Dict[str, Any]] = {}  # symbol -> {'snapshot': ..., 'ts': float}
+        self._last_snapshot_ts: float = 0.0
 
         # Ensure BTC/USDT is in watchlist for market conditions
         if self.topcoins and "BTC/USDT" not in self.topcoins:
@@ -135,6 +136,7 @@ class TradingEngine:
             "buys": [], "sells": [],
             "errors": 0, "total_trades": 0
         }
+        self._last_market_data_stats: Dict[str, Any] = {}
 
         # Decision Trail Logging
         self.jsonl_logger = JsonlLogger()
@@ -703,6 +705,27 @@ class TradingEngine:
             except Exception as e:
                 logger.warning(f"Market data update failed: {e}", extra={'event_type': 'MARKET_DATA_ERROR'})
                 results = {symbol: True for symbol in unique_symbols}
+                self._last_market_data_stats = {
+                    'timestamp': time.time(),
+                    'requested': len(unique_symbols),
+                    'fetched': 0,
+                    'failed': len(unique_symbols),
+                    'degraded': 0,
+                    'retry_attempts': 0,
+                    'failures': unique_symbols,
+                    'degraded_symbols': []
+                }
+            else:
+                try:
+                    self._last_market_data_stats = self.market_data.get_last_cycle_stats()
+                except Exception as stats_error:
+                    logger.debug(f"Could not retrieve market data stats: {stats_error}")
+
+                if getattr(config, 'MD_REFRESH_PORTFOLIO_BUDGET', False) and results:
+                    try:
+                        self.portfolio.refresh_budget()
+                    except Exception as budget_error:
+                        logger.debug(f"Budget refresh skipped: {budget_error}")
 
             # Update market conditions for guards
             self._update_market_conditions(unique_symbols)
@@ -760,6 +783,25 @@ class TradingEngine:
         except Exception as e:
             logger.warning(f"Market conditions update failed: {e}")
 
+    # ------------------------------------------------------------------
+    # Snapshot helpers
+    # ------------------------------------------------------------------
+
+    def get_snapshot_entry(self, symbol: str) -> tuple[Optional[Dict], Optional[float]]:
+        """Return (snapshot, ts) tuple for symbol with backwards compatibility."""
+        entry = self.drop_snapshot_store.get(symbol)
+        if not entry:
+            return None, None
+        if isinstance(entry, dict) and 'snapshot' in entry:
+            return entry.get('snapshot'), entry.get('ts')
+        return entry, None
+
+    def iter_snapshot_entries(self):
+        """Iterate symbols with (snapshot, ts)."""
+        for symbol, entry in self.drop_snapshot_store.items():
+            snapshot, ts = self.get_snapshot_entry(symbol)
+            yield symbol, snapshot, ts
+
     def _on_drop_snapshots(self, snapshots: list[Dict]):
         """
         Callback for market snapshot events from MarketDataService.
@@ -814,11 +856,18 @@ class TradingEngine:
 
                     symbol = snap.get("symbol")
                     if symbol:
+                        entry = {
+                            'snapshot': snap,
+                            'ts': time.time()
+                        }
                         # Store for Dashboard/UI
-                        self.drop_snapshot_store[symbol] = snap
+                        self.drop_snapshot_store[symbol] = entry
 
                         # NEW: Store for ExitEngine
                         self.snapshots[symbol] = snap
+
+                        # Track last snapshot timestamp
+                        self._last_snapshot_ts = entry['ts']
 
                         # NEW: Mark portfolio price for PnL calculation
                         last_price = snap.get("price", {}).get("last")
@@ -1219,7 +1268,9 @@ class TradingEngine:
                             for snap in snaps:
                                 symbol = snap.get("symbol")
                                 if symbol:
-                                    self.drop_snapshot_store[symbol] = snap
+                                    now_ts = time.time()
+                            self.drop_snapshot_store[symbol] = {'snapshot': snap, 'ts': now_ts}
+                            self._last_snapshot_ts = now_ts
 
                         logger.debug(f"UI_FALLBACK_FEED fed {len(snaps)} snapshots")
 

@@ -13,10 +13,12 @@ Thread-safe implementation with comprehensive logging and audit trail.
 
 import logging
 import threading
+import time
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, Any, List
 import numpy as np
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -140,9 +142,22 @@ class BuySignalService:
                 if not drop_snapshot_store:
                     return False, {"error": "Snapshot store required for V9_3"}
 
-                snapshot = drop_snapshot_store.get(symbol)
+                snapshot_entry = drop_snapshot_store.get(symbol)
+                snapshot_ts = None
+                snapshot = None
+                if snapshot_entry:
+                    if isinstance(snapshot_entry, dict) and 'snapshot' in snapshot_entry:
+                        snapshot = snapshot_entry.get('snapshot')
+                        snapshot_ts = snapshot_entry.get('ts')
+                    else:
+                        snapshot = snapshot_entry
+
                 if not snapshot:
                     return False, {"error": f"No snapshot found for {symbol}"}
+
+                stale_ttl = getattr(config, 'SNAPSHOT_STALE_TTL_S', 30.0)
+                if snapshot_ts is not None and (time.time() - snapshot_ts) > stale_ttl:
+                    return False, {"error": f"Snapshot for {symbol} is stale"}
 
                 anchor = snapshot.get('windows', {}).get('anchor')
                 if not anchor or anchor <= 0:
@@ -152,7 +167,6 @@ class BuySignalService:
                 trigger_price = anchor * self.drop_trigger_value
 
                 # V9_3: Apply BUY_MODE logic
-                import config
                 buy_mode = getattr(config, "BUY_MODE", "PREDICTIVE")
 
                 if buy_mode == "PREDICTIVE":
@@ -245,9 +259,23 @@ class BuySignalService:
                 logger.warning("get_top_drops requires snapshot store for V9_3")
                 return drops
 
+            stale_ttl = getattr(config, 'SNAPSHOT_STALE_TTL_S', 30.0)
+            now_ts = time.time()
+
             # Iterate over snapshots instead of price history
-            for symbol, snapshot in drop_snapshot_store.items():
+            for symbol, entry in drop_snapshot_store.items():
+                snapshot = None
+                snapshot_ts = None
+                if isinstance(entry, dict) and 'snapshot' in entry:
+                    snapshot = entry.get('snapshot')
+                    snapshot_ts = entry.get('ts')
+                else:
+                    snapshot = entry
+
                 if not snapshot:
+                    continue
+
+                if snapshot_ts is not None and (now_ts - snapshot_ts) > stale_ttl:
                     continue
 
                 # Get price and anchor from snapshot

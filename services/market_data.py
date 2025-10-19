@@ -15,7 +15,7 @@ import math
 from typing import Dict, List, Optional, Any, Tuple
 from threading import RLock
 from dataclasses import dataclass, asdict
-from collections import defaultdict, deque
+from collections import defaultdict, deque, Counter
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -360,8 +360,29 @@ class MarketDataProvider:
             'ohlcv_bars_stored': 0,
             'ohlcv_partial_candles_removed': 0,
             'errors': 0,
-            'drop_snapshots_emitted': 0
+            'drop_snapshots_emitted': 0,
+            'ticker_failures': 0,
+            'ticker_retries': 0
         }
+
+        # Batch fetch configuration (rate-limit friendly)
+        import config as _config  # Late import to avoid cycles at module level
+        self.use_batch_fetch = getattr(_config, 'MARKET_DATA_USE_FETCH_TICKERS', True)
+        self.batch_size = max(1, int(getattr(_config, 'MARKET_DATA_BATCH_SIZE', 50)))
+        self.batch_delay_s = max(0.0, float(getattr(_config, 'MARKET_DATA_BATCH_DELAY_S', 0.05)))
+        self.max_retries = max(0, int(getattr(_config, 'MARKET_DATA_MAX_RETRIES', 2)))
+        self.retry_delay_s = max(0.0, float(getattr(_config, 'MARKET_DATA_RETRY_DELAY_S', 0.3)))
+        self.failure_degrade_threshold = max(0, int(getattr(_config, 'MARKET_DATA_FAILURE_DEGRADE_THRESHOLD', 5)))
+        self.degrade_interval_s = max(0.0, float(getattr(_config, 'MARKET_DATA_DEGRADE_INTERVAL_S', 30.0)))
+        self.failure_log_top_n = max(1, int(getattr(_config, 'MARKET_DATA_FAILURE_LOG_TOP_N', 5)))
+        self.health_log_interval_s = max(1.0, float(getattr(_config, 'MARKET_DATA_HEALTH_LOG_INTERVAL_S', 60.0)))
+
+        # Failure/degrade tracking
+        self._failure_counts: Dict[str, int] = defaultdict(int)
+        self._degraded_until: Dict[str, float] = {}
+        self._last_success_ts: Dict[str, float] = {}
+        self._last_cycle_stats: Dict[str, Any] = {}
+        self._last_health_log_ts = time.time()
 
         # V9_3: Per-symbol retry state tracking (Phase 3)
         # {symbol: {"attempts": int, "next_retry": float, "last_error": str}}
@@ -490,6 +511,71 @@ class MarketDataProvider:
                 f"Snapshot pipeline enabled: lookback={lookback_s}s, "
                 f"persist={persist}, base_path={base_path}"
             )
+
+    # ------------------------------------------------------------------
+    # Helpers for failure/degradation tracking
+    # ------------------------------------------------------------------
+
+    def get_last_cycle_stats(self) -> Dict[str, Any]:
+        """Return shallow copy of last market-data cycle statistics."""
+        return self._last_cycle_stats.copy()
+
+    def _is_degraded(self, symbol: str, now: float) -> bool:
+        """Check if symbol is currently rate-limited via degrade mode."""
+        until = self._degraded_until.get(symbol)
+        if until and now < until:
+            return True
+        if until and now >= until:
+            self._degraded_until.pop(symbol, None)
+        return False
+
+    def _record_success(self, symbol: str, now: float) -> None:
+        """Reset failure counters for a successful fetch."""
+        was_degraded = symbol in self._degraded_until
+
+        if symbol in self._failure_counts:
+            self._failure_counts.pop(symbol, None)
+        if symbol in self._degraded_until:
+            self._degraded_until.pop(symbol, None)
+        self._last_success_ts[symbol] = now
+
+        # Emit dashboard event if recovering from degraded state
+        if was_degraded:
+            try:
+                from ui.dashboard import emit_dashboard_event
+                emit_dashboard_event("MD_RECOVERED", f"{symbol} recovered")
+            except Exception as e:
+                logger.debug(f"Could not emit dashboard event: {e}")
+
+    def _record_failure(self, symbol: str, now: float, reason: Optional[str] = None) -> None:
+        """Increment failure counters and trigger degrade mode if necessary."""
+        count = self._failure_counts[symbol] + 1
+        self._failure_counts[symbol] = count
+        self._statistics['ticker_failures'] += 1
+
+        if self.failure_degrade_threshold and count >= self.failure_degrade_threshold:
+            if symbol not in self._degraded_until:
+                self._degraded_until[symbol] = now + self.degrade_interval_s
+                logger.warning(
+                    f"MD degrade: {symbol} delayed for {self.degrade_interval_s:.1f}s after {count} failures.",
+                    extra={
+                        'event_type': 'MD_SYMBOL_DEGRADED',
+                        'symbol': symbol,
+                        'failures': count,
+                        'degrade_until': self._degraded_until[symbol],
+                        'reason': reason or 'unknown'
+                    }
+                )
+
+                # Emit dashboard event
+                try:
+                    from ui.dashboard import emit_dashboard_event
+                    emit_dashboard_event(
+                        "MD_DEGRADED",
+                        f"{symbol} degraded for {self.degrade_interval_s:.0f}s ({count} failures)"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not emit dashboard event: {e}")
 
     def get_ticker(self, symbol: str, use_cache: bool = True) -> Optional[TickerData]:
         """
@@ -1275,95 +1361,289 @@ class MarketDataProvider:
             with open("/tmp/update_market_data.txt", "a") as f:
                 f.write(f"  Using NEW pipeline, fetching {len(symbols)} tickers...\n")
                 f.flush()
-        except:
+        except Exception:
             pass
 
-        # New Pipeline: Fetch all tickers first (PARALLEL for speed)
-        tickers = {}
+        # New Pipeline: Fetch tickers with batch-friendly strategy
+        tickers: Dict[str, TickerData] = {}
         persist_ticks = getattr(config, 'PERSIST_TICKS', True)
 
         fetch_start = time.time()
 
-        # Parallel ticker fetching with ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def fetch_single_ticker(symbol):
-            """Fetch single ticker with error handling"""
-            fetch_t0 = time.time()
-            try:
-                ticker = self.get_ticker(symbol, use_cache=False)  # Force fresh fetch with rate-limiting
-                fetch_duration_ms = (time.time() - fetch_t0) * 1000
+        original_symbols = list(symbols)
+        degraded_symbols: List[str] = []
+        symbols_to_query: List[str] = []
 
-                # Per-coin debugging (if enabled)
-                if getattr(config, 'MD_DEBUG_PER_COIN', False):
-                    log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
-                    try:
-                        with open(log_file, 'a') as f:
-                            if ticker and ticker.last:
-                                f.write(f"{time.time():.3f} | {symbol:15s} | SUCCESS | price={ticker.last:12.8f} | duration={fetch_duration_ms:6.1f}ms\n")
-                            else:
-                                f.write(f"{time.time():.3f} | {symbol:15s} | NO_DATA | ticker={ticker}\n")
-                    except:
-                        pass
+        for sym in original_symbols:
+            if self._is_degraded(sym, now):
+                degraded_symbols.append(sym)
+                results.setdefault(sym, True)
+            else:
+                symbols_to_query.append(sym)
 
-                return (symbol, ticker, None)
-            except Exception as e:
-                fetch_duration_ms = (time.time() - fetch_t0) * 1000
+        if degraded_symbols:
+            logger.debug(f"MD degrade skip (cooldown): {degraded_symbols}")
 
-                # Per-coin debugging (if enabled)
-                if getattr(config, 'MD_DEBUG_PER_COIN', False):
-                    log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
-                    try:
-                        with open(log_file, 'a') as f:
-                            f.write(f"{time.time():.3f} | {symbol:15s} | ERROR   | error={str(e)[:60]:60s} | duration={fetch_duration_ms:6.1f}ms\n")
-                    except:
-                        pass
+        total_retry_attempts = 0
+        missing_symbols: List[str] = []
 
-                return (symbol, None, str(e))
+        def chunked(iterable: List[str], size: int):
+            for idx in range(0, len(iterable), max(1, size)):
+                yield iterable[idx:idx + size]
 
-        # Parallel fetch: max 32 concurrent threads
-        max_workers = min(32, len(symbols) or 1)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(fetch_single_ticker, sym): sym for sym in symbols}
+        def fetch_single_ticker(symbol: str):
+            """Fetch single ticker with retry/backoff."""
+            retries_used = 0
+            last_error: Optional[Exception] = None
+            for attempt in range(self.max_retries + 1):
+                fetch_t0 = time.time()
+                try:
+                    ticker = self.get_ticker(symbol, use_cache=False)
+                    fetch_duration_ms = (time.time() - fetch_t0) * 1000
 
-            for future in as_completed(futures):
-                symbol, ticker, error = future.result()
-
-                if ticker and ticker.last > 0:
-                    tickers[symbol] = ticker
-                    results[symbol] = True
-
-                    # V9_3 Phase 4: Persist tick data per symbol
-                    if persist_ticks and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                    if getattr(config, 'MD_DEBUG_PER_COIN', False):
+                        log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
                         try:
-                            # Get or create tick writer for this symbol
-                            if symbol not in self.tick_writers:
-                                symbol_safe = symbol.replace('/', '_')
-                                self.tick_writers[symbol] = RotatingJSONLWriter(
-                                    base_dir=f"{self.base_path}/ticks",
-                                    prefix=f"tick_{symbol_safe}",
-                                    max_mb=getattr(config, 'MAX_FILE_MB', 50)
-                                )
+                            with open(log_file, 'a') as f:
+                                if ticker and ticker.last:
+                                    f.write(f"{time.time():.3f} | {symbol:15s} | SUCCESS | price={ticker.last:12.8f} | duration={fetch_duration_ms:6.1f}ms | retries={retries_used}\n")
+                                else:
+                                    f.write(f"{time.time():.3f} | {symbol:15s} | NO_DATA | duration={fetch_duration_ms:6.1f}ms | retries={retries_used}\n")
+                        except Exception:
+                            pass
 
-                            # Write tick
-                            tick_obj = {
-                                "ts": now,
-                                "symbol": symbol,
-                                "last": ticker.last,
-                                "bid": ticker.bid,
-                                "ask": ticker.ask,
-                                "volume": ticker.volume,
-                                "spread_bps": ticker.spread_bps
-                            }
-                            self.tick_writers[symbol].append(tick_obj)
-                        except Exception as e:
-                            logger.debug(f"Failed to persist tick for {symbol}: {e}")
-                else:
-                    results[symbol] = False
-                    if error:
-                        logger.debug(f"Failed to fetch ticker for {symbol}: {error}")
+                    if ticker and ticker.last:
+                        return symbol, ticker, None, retries_used
+                    last_error = None  # missing last price
+                except Exception as e:
+                    last_error = e
+                    if getattr(config, 'MD_DEBUG_PER_COIN', False):
+                        log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
+                        try:
+                            with open(log_file, 'a') as f:
+                                f.write(f"{time.time():.3f} | {symbol:15s} | ERROR   | error={str(e)[:60]:60s} | retries={retries_used}\n")
+                        except Exception:
+                            pass
+
+                if attempt == self.max_retries:
+                    break
+
+                retries_used += 1
+                if self.retry_delay_s > 0:
+                    time.sleep(self.retry_delay_s)
+
+            error_msg = str(last_error) if last_error is not None else "Ticker missing last price"
+            return symbol, None, error_msg, retries_used
+
+        batch_fetch_supported = (
+            self.use_batch_fetch and hasattr(self.exchange_adapter, "fetch_tickers")
+        )
+
+        # Batch stage
+        if batch_fetch_supported and symbols_to_query:
+            for chunk in chunked(symbols_to_query, self.batch_size):
+                try:
+                    batch_raw = self.exchange_adapter.fetch_tickers(chunk)
+                    self._statistics['ticker_requests'] += len(chunk)
+                except Exception as batch_error:
+                    logger.debug(f"Batch fetch failed for chunk ({len(chunk)} symbols): {batch_error}")
+                    missing_symbols.extend(chunk)
+                    batch_fetch_supported = False
+                    break
+
+                processed_symbols: set[str] = set()
+
+                if isinstance(batch_raw, dict):
+                    for symbol in chunk:
+                        raw = batch_raw.get(symbol) or batch_raw.get(symbol.replace("/", ""))
+                        if not raw:
+                            continue
+
+                        last_price = raw.get('last') or raw.get('close')
+                        if not last_price or float(last_price) <= 0:
+                            continue
+
+                        bid = raw.get('bid') or last_price
+                        ask = raw.get('ask') or last_price
+                        volume = raw.get('baseVolume') or raw.get('volume') or 0
+                        timestamp_ms = raw.get('timestamp') or int(time.time() * 1000)
+
+                        ticker_obj = TickerData(
+                            symbol=symbol,
+                            last=float(last_price),
+                            bid=float(bid),
+                            ask=float(ask),
+                            volume=float(volume),
+                            timestamp=int(timestamp_ms),
+                            high_24h=raw.get('high'),
+                            low_24h=raw.get('low'),
+                            change_24h=raw.get('change'),
+                            change_percent_24h=raw.get('percentage')
+                        )
+
+                        try:
+                            self.ticker_cache.store_ticker(ticker_obj)
+                        except Exception:
+                            pass
+
+                        tickers[symbol] = ticker_obj
+                        results[symbol] = True
+                        self._record_success(symbol, now)
+                        processed_symbols.add(symbol)
+
+                        if self.enable_drop_tracking and self.rw_manager:
+                            try:
+                                self.rw_manager.update(symbol, now, ticker_obj.last)
+                            except Exception as e:
+                                logger.debug(f"Failed to update rolling window for {symbol}: {e}")
+
+                        if persist_ticks and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                            try:
+                                if symbol not in self.tick_writers:
+                                    symbol_safe = symbol.replace('/', '_')
+                                    self.tick_writers[symbol] = RotatingJSONLWriter(
+                                        base_dir=f"{self.base_path}/ticks",
+                                        prefix=f"tick_{symbol_safe}",
+                                        max_mb=getattr(config, 'MAX_FILE_MB', 50)
+                                    )
+
+                                tick_obj = {
+                                    "ts": now,
+                                    "symbol": symbol,
+                                    "last": ticker_obj.last,
+                                    "bid": ticker_obj.bid,
+                                    "ask": ticker_obj.ask,
+                                    "volume": ticker_obj.volume,
+                                    "spread_bps": ticker_obj.spread_bps
+                                }
+                                self.tick_writers[symbol].append(tick_obj)
+                            except Exception as e:
+                                logger.debug(f"Failed to persist tick for {symbol}: {e}")
+
+                missing_chunk = [sym for sym in chunk if sym not in processed_symbols]
+                if missing_chunk:
+                    missing_symbols.extend(missing_chunk)
+
+                if self.batch_delay_s > 0:
+                    time.sleep(self.batch_delay_s)
+        else:
+            missing_symbols = list(symbols_to_query)
+
+        # Remove duplicates while preserving order
+        seen_symbols = set()
+        missing_symbols = [sym for sym in missing_symbols if sym not in seen_symbols and not seen_symbols.add(sym)]
+
+        # Fallback stage with retries
+        if missing_symbols:
+            max_workers = min(16, len(missing_symbols)) or 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(fetch_single_ticker, sym): sym for sym in missing_symbols}
+
+                for future in as_completed(futures):
+                    symbol, ticker, error, retries_used = future.result()
+                    total_retry_attempts += retries_used
+                    self._statistics['ticker_retries'] += retries_used
+
+                    if ticker and ticker.last > 0:
+                        tickers[symbol] = ticker
+                        results[symbol] = True
+                        self._record_success(symbol, now)
+
+                        if persist_ticks and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                            try:
+                                if symbol not in self.tick_writers:
+                                    symbol_safe = symbol.replace('/', '_')
+                                    self.tick_writers[symbol] = RotatingJSONLWriter(
+                                        base_dir=f"{self.base_path}/ticks",
+                                        prefix=f"tick_{symbol_safe}",
+                                        max_mb=getattr(config, 'MAX_FILE_MB', 50)
+                                    )
+
+                                tick_obj = {
+                                    "ts": now,
+                                    "symbol": symbol,
+                                    "last": ticker.last,
+                                    "bid": ticker.bid,
+                                    "ask": ticker.ask,
+                                    "volume": ticker.volume,
+                                    "spread_bps": ticker.spread_bps
+                                }
+                                self.tick_writers[symbol].append(tick_obj)
+                            except Exception as e:
+                                logger.debug(f"Failed to persist tick for {symbol}: {e}")
+                    else:
+                        results[symbol] = False
+                        self._record_failure(symbol, now, error)
+                        if error:
+                            logger.debug(f"Failed to fetch ticker for {symbol}: {error}")
+
+        for sym in original_symbols:
+            results.setdefault(sym, False if sym not in degraded_symbols else True)
 
         fetch_duration = time.time() - fetch_start
+
+        failure_symbols = [sym for sym in original_symbols if not results.get(sym, False)]
+        stats = {
+            'timestamp': time.time(),
+            'requested': len(original_symbols),
+            'queried': len(symbols_to_query),
+            'fetched': len(tickers),
+            'failed': len(failure_symbols),
+            'degraded': len(degraded_symbols),
+            'failures': failure_symbols[:self.failure_log_top_n],
+            'degraded_symbols': degraded_symbols[:self.failure_log_top_n],
+            'duration_s': fetch_duration,
+            'retry_attempts': total_retry_attempts
+        }
+        self._last_cycle_stats = stats
+
+        now_health = time.time()
+        if now_health - self._last_health_log_ts >= self.health_log_interval_s:
+            top_failures = Counter(self._failure_counts).most_common(self.failure_log_top_n)
+            logger.info(
+                "MD health: total=%s fetched=%s failed=%s degraded=%s retries=%s",
+                stats['requested'],
+                stats['fetched'],
+                stats['failed'],
+                stats['degraded'],
+                stats['retry_attempts'],
+                extra={
+                    'event_type': 'MD_HEALTH',
+                    'requested': stats['requested'],
+                    'fetched': stats['fetched'],
+                    'failed': stats['failed'],
+                    'degraded': stats['degraded'],
+                    'retry_attempts': stats['retry_attempts'],
+                    'top_failures': top_failures
+                }
+            )
+            self._last_health_log_ts = now_health
+
+            # Optional: Export health stats to JSONL
+            export_dir = getattr(config, 'MARKET_DATA_HEALTH_EXPORT_DIR', None)
+            if export_dir:
+                try:
+                    from pathlib import Path
+                    import json
+                    Path(export_dir).mkdir(parents=True, exist_ok=True)
+                    export_file = Path(export_dir) / "md_health.jsonl"
+                    with open(export_file, 'a') as f:
+                        health_record = {
+                            'timestamp': now_health,
+                            'requested': stats['requested'],
+                            'fetched': stats['fetched'],
+                            'failed': stats['failed'],
+                            'degraded': stats['degraded'],
+                            'retry_attempts': stats['retry_attempts'],
+                            'duration_s': stats['duration_s'],
+                            'top_failures': [{'symbol': sym, 'count': cnt} for sym, cnt in top_failures]
+                        }
+                        f.write(json.dumps(health_record) + '\n')
+                except Exception as export_err:
+                    logger.debug(f"Could not export health stats: {export_err}")
+
         # ULTRA DEBUG
         try:
             with open("/tmp/update_market_data.txt", "a") as f:
@@ -1590,10 +1870,15 @@ class MarketDataProvider:
             ticker_cache_keys = self.ticker_cache._cache.keys()
             ohlcv_keys = list(self.ohlcv_history._data.keys())
 
+            tracked_symbols = list(ticker_cache_keys) + ohlcv_keys
+
             stats = {
                 'provider': self._statistics.copy(),
                 'ticker_cache': self.ticker_cache.get_statistics(),
-                'symbols_tracked': len(set(ticker_cache_keys + ohlcv_keys))
+                'symbols_tracked': len(set(tracked_symbols)),
+                'last_cycle': self._last_cycle_stats.copy(),
+                'failure_counts': dict(self._failure_counts),
+                'degraded_symbols': list(self._degraded_until.keys())
             }
 
             # Add coalescing statistics if enabled

@@ -71,6 +71,11 @@ class ExchangeInterface(ABC):
         pass
 
     @abstractmethod
+    def fetch_tickers(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Fetches ticker data for multiple symbols"""
+        pass
+
+    @abstractmethod
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 100, since: Optional[int] = None) -> List[List]:
         """Fetches OHLCV candle data"""
         pass
@@ -185,6 +190,11 @@ class ExchangeAdapterRobust(ExchangeInterface):
 
     def fetch_ticker(self, symbol):
         return self._safe_ccxt_call(self.x.fetch_ticker, symbol)
+
+    def fetch_tickers(self, symbols: Optional[List[str]] = None):
+        if symbols is None:
+            return self._safe_ccxt_call(self.x.fetch_tickers)
+        return self._safe_ccxt_call(self.x.fetch_tickers, symbols)
 
     def fetch_ohlcv(self, symbol, timeframe="1m", limit=250):
         return self._safe_ccxt_call(self.x.fetch_ohlcv, symbol, timeframe=timeframe, limit=limit)
@@ -542,6 +552,14 @@ class ExchangeAdapter(ExchangeInterface):
         return self._safe_ccxt_call(
             lambda: self._retry_request(self.exchange.fetch_ticker, symbol),
             f"fetch_ticker:{symbol}"
+        )
+
+    def fetch_tickers(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Fetches multiple tickers with retry logic"""
+        label = "fetch_tickers" if not symbols else f"fetch_tickers:{len(symbols)}"
+        return self._safe_ccxt_call(
+            lambda: self._retry_request(self.exchange.fetch_tickers, symbols),
+            label
         )
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 100, since: Optional[int] = None) -> List[List]:
@@ -1111,6 +1129,12 @@ class MockExchange(ExchangeInterface):
             "baseVolume": 1000.0,
             "quoteVolume": 1000.0 * price
         }
+
+    def fetch_tickers(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Mock multi-ticker fetch"""
+        if symbols is None:
+            symbols = list(self.prices.keys())
+        return {symbol: self.fetch_ticker(symbol) for symbol in symbols}
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 100, since: Optional[int] = None) -> List[List]:
         """Mock OHLCV data"""
