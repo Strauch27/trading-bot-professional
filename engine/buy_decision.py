@@ -264,7 +264,7 @@ class BuyDecisionHandler:
 
             # Console output for debugging buy signals
             if buy_triggered:
-                print(f"\n🔥 BUY TRIGGER HIT: {symbol} @ {current_price:.6f} | "
+                print(f"\n[BUY TRIGGER] {symbol} @ {current_price:.6f} | "
                       f"Drop: {context.get('drop_pct', 0):.2f}% | "
                       f"Anchor: {context.get('anchor', 0):.6f}\n", flush=True)
 
@@ -406,11 +406,11 @@ class BuyDecisionHandler:
         # CRITICAL: Log buy candidate for debugging
         usdt_balance = self.engine.portfolio.get_balance("USDT")
         trace_step("buy_candidate", symbol=symbol, price=current_price, budget=usdt_balance, signal=signal)
-        logger.info(f"BUY CANDIDATE {symbol} 🔥 price={current_price:.10f} budget={usdt_balance:.2f} signal={signal}",
+        logger.info(f"BUY CANDIDATE {symbol} price={current_price:.10f} budget={usdt_balance:.2f} signal={signal}",
                    extra={'event_type':'BUY_CANDIDATE','symbol':symbol,'price':current_price,'budget':usdt_balance})
 
         # Console output for buy candidate visibility
-        print(f"\n💰 BUY CANDIDATE: {symbol} @ {current_price:.6f} | Budget: ${usdt_balance:.2f} | Signal: {signal}\n", flush=True)
+        print(f"\n[BUY CANDIDATE] {symbol} @ {current_price:.6f} | Budget: ${usdt_balance:.2f} | Signal: {signal}\n", flush=True)
 
         # Dashboard event
         try:
@@ -629,7 +629,8 @@ class BuyDecisionHandler:
 
         # Phase 3: Log sizing_calc event with market_limits_snapshot
         with Trace(decision_id=self.engine.current_decision_id):
-            passed = quote_budget >= min_slot
+            # Use exchange-specific min_notional, not global min_slot
+            passed = quote_budget >= min_notional
             fail_reason = None if passed else "insufficient_budget_after_sizing"
 
             log_event(
@@ -650,12 +651,13 @@ class BuyDecisionHandler:
                 market_limits_hash=market_limits_hash
             )
 
-        trace_step("budget_check", symbol=symbol, quote_budget=quote_budget, min_slot=min_slot)
+        trace_step("budget_check", symbol=symbol, quote_budget=quote_budget, min_slot=min_slot, min_notional=min_notional)
 
-        if quote_budget < min_slot:
-            trace_step("insufficient_budget", symbol=symbol, quote_budget=quote_budget, min_slot=min_slot)
-            logger.info(f"BUY SKIP {symbol} – insufficient budget: {quote_budget:.2f} < {min_slot:.2f}",
-                       extra={'event_type':'BUY_SKIP_BUDGET','symbol':symbol,'quote_budget':quote_budget,'min_slot':min_slot})
+        # Check against exchange-specific min_notional, not just global min_slot
+        if quote_budget < min_notional:
+            trace_step("insufficient_budget", symbol=symbol, quote_budget=quote_budget, min_notional=min_notional)
+            logger.info(f"BUY SKIP {symbol} – insufficient budget: {quote_budget:.2f} < {min_notional:.2f} (exchange min_notional)",
+                       extra={'event_type':'BUY_SKIP_BUDGET','symbol':symbol,'quote_budget':quote_budget,'min_notional':min_notional,'min_slot':min_slot})
             self.engine.jsonl_logger.order_canceled(
                 decision_id=self.engine.current_decision_id,
                 symbol=symbol,

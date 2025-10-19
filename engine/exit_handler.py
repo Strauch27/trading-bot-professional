@@ -229,7 +229,7 @@ class ExitHandler:
             # Dashboard event
             try:
                 from ui.dashboard import emit_dashboard_event
-                pnl_sign = "📈" if realized_pnl >= 0 else "📉"
+                pnl_sign = "[+]" if realized_pnl >= 0 else "[-]"
                 emit_dashboard_event("SELL_FILLED", f"{pnl_sign} {symbol} @ ${result.avg_price:.4f} | PnL: ${realized_pnl:.2f}")
             except Exception:
                 pass
@@ -278,7 +278,7 @@ class ExitHandler:
                 pnl_pct = ((exit_price - entry_price) / entry_price) * 100.0
 
                 # Format unified message
-                pnl_sign = "📈" if realized_pnl >= 0 else "📉"
+                pnl_sign = "[+]" if realized_pnl >= 0 else "[-]"
                 pnl_msg = (f"{pnl_sign} EXIT {symbol} @{exit_price:.6f} x{exit_qty:.6f} "
                           f"[{exit_reason}] PnL: ${realized_pnl:.2f} ({pnl_pct:+.2f}%)")
 

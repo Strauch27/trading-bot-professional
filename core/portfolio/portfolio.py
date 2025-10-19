@@ -634,9 +634,10 @@ class PortfolioManager:
         self.held_assets[symbol] = data
         self.save_state()
         
-    def on_partial_fill(self, symbol: str, client_order_id: str, 
+    @synchronized_budget
+    def on_partial_fill(self, symbol: str, client_order_id: str,
                         filled_quote: float, orig_quote: float):
-        """Release budget on partial fill
+        """Release budget on partial fill (thread-safe with _budget_lock)
         
         Args:
             symbol: Trading pair
