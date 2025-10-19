@@ -36,9 +36,21 @@ class ExitHandler:
     def process_exit_signals(self):
         """Process pending exit signals via Exit Manager"""
         try:
-            processed = self.engine.exit_manager.process_exit_signals(max_per_cycle=5)
-            if processed > 0:
-                logger.debug(f"Processed {processed} exit signals")
+            results = self.engine.exit_manager.process_exit_signals(max_per_cycle=5)
+            handled = 0
+
+            for signal, result in results:
+                if not result:
+                    continue
+
+                symbol = signal.get('symbol')
+                if result.success and symbol:
+                    reason = result.reason or signal.get('type') or signal.get('signal_type') or "EXIT"
+                    self.handle_exit_fill(symbol, result, reason)
+                    handled += 1
+
+            if results:
+                logger.debug(f"Processed {len(results)} exit signals (handled={handled})")
 
         except Exception as e:
             logger.error(f"Exit signal processing error: {e}")

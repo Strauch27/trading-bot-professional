@@ -535,6 +535,7 @@ def main():
                           'interval_min': DUST_SWEEP_INTERVAL_MIN})
     
     # Sanity Check und Reconciliation mit robuster Market Data
+    preise: dict[str, float] = {}
     if exchange:
         # Initialize robust market data provider
         from adapters.exchange import ExchangeAdapter

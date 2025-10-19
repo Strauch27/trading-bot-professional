@@ -144,6 +144,7 @@ class ExitOrderManager:
     def execute_exit_order(self, context: ExitContext, reason: str) -> ExitResult:
         """Execute exit order with escalation strategy"""
         with self._lock:
+            idempotency_store = None
             try:
                 self._statistics['exits_placed'] += 1
 
@@ -279,7 +280,7 @@ class ExitOrderManager:
                     self._statistics['exits_filled'] += 1
 
                     # Phase 2: Update idempotency store with exchange order ID
-                    if result.order_id:
+                    if result.order_id and idempotency_store:
                         try:
                             idempotency_store.update_order_status(
                                 order_req_id=order_req_id,
@@ -299,7 +300,7 @@ class ExitOrderManager:
                         self._statistics['exits_filled'] += 1
 
                         # Phase 2: Update idempotency store with exchange order ID
-                        if result.order_id:
+                        if result.order_id and idempotency_store:
                             try:
                                 idempotency_store.update_order_status(
                                     order_req_id=order_req_id,
@@ -318,7 +319,7 @@ class ExitOrderManager:
                         self._statistics['exits_filled'] += 1
 
                         # Phase 2: Update idempotency store with exchange order ID
-                        if result.order_id:
+                        if result.order_id and idempotency_store:
                             try:
                                 idempotency_store.update_order_status(
                                     order_req_id=order_req_id,
@@ -333,14 +334,15 @@ class ExitOrderManager:
                 self._statistics['exits_failed'] += 1
 
                 # Phase 2: Update idempotency store with failure status
-                try:
-                    idempotency_store.update_order_status(
-                        order_req_id=order_req_id,
-                        exchange_order_id="failed",
-                        status='failed'
-                    )
-                except Exception as update_error:
-                    logger.debug(f"Failed to update idempotency store for failed sell order: {update_error}")
+                if idempotency_store:
+                    try:
+                        idempotency_store.update_order_status(
+                            order_req_id=order_req_id,
+                            exchange_order_id="failed",
+                            status='failed'
+                        )
+                    except Exception as update_error:
+                        logger.debug(f"Failed to update idempotency store for failed sell order: {update_error}")
 
                 return ExitResult(
                     success=False,
@@ -703,9 +705,10 @@ class ExitManager:
         self.signal_manager = signal_manager
         self._lock = RLock()
 
-    def process_exit_signals(self, max_per_cycle: int = 5) -> int:
+    def process_exit_signals(self, max_per_cycle: int = 5) -> List[Tuple[Dict, ExitResult]]:
         """Process pending exit signals from signal queue"""
         with self._lock:
+            results: List[Tuple[Dict, ExitResult]] = []
             processed_count = 0
 
             while processed_count < max_per_cycle:
@@ -728,6 +731,8 @@ class ExitManager:
                     # Execute exit
                     result = self.order_manager.execute_exit_order(context, signal['signal_type'])
 
+                    results.append((signal, result))
+
                     if result.success:
                         logger.info(f"Exit executed for {signal['symbol']}: {signal['signal_type']}")
                     else:
@@ -739,7 +744,7 @@ class ExitManager:
                     logger.error(f"Exit signal processing error: {e}")
                     processed_count += 1
 
-            return processed_count
+            return results
 
     def evaluate_position_exits(self, symbol: str, position_data: Dict,
                               current_price: float) -> List[str]:

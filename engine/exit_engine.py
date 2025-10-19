@@ -14,6 +14,7 @@ Generates exit signals for OrderRouter execution.
 from dataclasses import dataclass
 from typing import Optional, Dict
 import time
+from types import SimpleNamespace
 
 
 @dataclass
@@ -186,6 +187,14 @@ class ExitEngine:
             Exit signal dict for Intent assembly, or None if no exit
         """
         pos = self.engine.portfolio.positions.get(sym)
+        if not pos:
+            raw_pos = self.engine.positions.get(sym)
+            if raw_pos:
+                qty = float(raw_pos.get("amount", 0.0) or 0.0)
+                avg_price = float(raw_pos.get("buying_price", 0.0) or 0.0)
+                opened_ts = float(raw_pos.get("time", time.time()) or time.time())
+                pos = SimpleNamespace(qty=qty, avg_price=avg_price, opened_ts=opened_ts)
+
         snap = self.engine.snapshots.get(sym)
 
         if not pos or not snap or pos.qty == 0:
