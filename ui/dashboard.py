@@ -128,7 +128,7 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
         # Read last N lines
         with open(latest_log, 'r', encoding='utf-8', errors='ignore') as f:
             lines = deque(f, maxlen=n_lines)
-            result = [f"📄 {latest_log} (last {n_lines} lines):"]
+            result = [f"[LOG] {latest_log} (last {n_lines} lines):"]
             result.extend(list(lines))
             return result
 
@@ -400,7 +400,7 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
         (f"...{config_data.get('SESSION_ID', 'unknown')}", "cyan"),
         ("  |  UPTIME: ", "white"),
         (config_data.get('uptime', '00:00:00'), "cyan"),
-        ("  |  💓 HEARTBEAT: ", "white"),
+        ("  |  [HEARTBEAT]: ", "white"),
         ("OK", "green"),
         (f" @ {datetime.now(timezone.utc).strftime('%H:%M:%S')}", "dim white"),
     )
@@ -419,7 +419,7 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
 
     # Combine
     content = Text()
-    content.append("🤖 TRADING BOT DASHBOARD", style="bold white")
+    content.append("[TRADING BOT DASHBOARD]", style="bold white")
     content.append("\n")
     content.append(line1)
     content.append("\n")
@@ -434,14 +434,17 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
 
 def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
     """Create the portfolio panel."""
-    table = Table(expand=True, border_style="magenta", show_header=True)
-    table.add_column("Symbol", style="cyan", no_wrap=True)
-    table.add_column("Menge", style="white", justify="right")
-    table.add_column("Entry", style="yellow", justify="right")
-    table.add_column("Current", style="yellow", justify="right")
-    table.add_column("PnL ($/%)", justify="right")
+    try:
+        table = Table(expand=True, border_style="magenta", show_header=True)
+        table.add_column("Symbol", style="cyan", no_wrap=True)
+        table.add_column("Menge", style="white", justify="right")
+        table.add_column("Entry", style="yellow", justify="right")
+        table.add_column("Current", style="yellow", justify="right")
+        table.add_column("PnL ($/%)", justify="right")
 
-    positions = portfolio_data.get("positions", [])
+        positions = portfolio_data.get("positions", []) if portfolio_data else []
+    except Exception as e:
+        return Panel(Text(f"Portfolio Panel Error: {e}", style="red"), title="PORTFOLIO ERROR", border_style="red")
 
     if not positions:
         table.add_row("—", "—", "—", "—", "—")
@@ -459,23 +462,26 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
                 Text(f"{pnl:+.2f} ({pnl_pct:+.2f}%)", style=style)
             )
 
-    title = f"💼 Portfolio (Wert: ${portfolio_data.get('total_value', 0):.2f} / Budget: ${portfolio_data.get('budget', 0):.2f})"
+    title = f"[PORTFOLIO] Wert: ${portfolio_data.get('total_value', 0):.2f} / Budget: ${portfolio_data.get('budget', 0):.2f}"
     return Panel(table, title=title, border_style="magenta", expand=True)
 
 
 def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
     """Create the top drops panel (V9_3: with current price, anchor and spread columns)."""
-    global _last_symbol, _last_price
-    table = Table(expand=True, show_header=True)
-    table.add_column("#", style="dim", justify="right", width=3)
-    table.add_column("Symbol", style="bold", width=10)
-    table.add_column("Last", justify="right", width=11)
-    table.add_column("Drop %", justify="right", width=8)
-    table.add_column("Spread %", justify="right", width=8)
-    table.add_column("Anchor", justify="right", width=11)
-    table.add_column("To Trig", justify="right", width=8)
+    try:
+        global _last_symbol, _last_price
+        table = Table(expand=True, show_header=True)
+        table.add_column("#", style="dim", justify="right", width=3)
+        table.add_column("Symbol", style="bold", width=10)
+        table.add_column("Last", justify="right", width=11)
+        table.add_column("Drop %", justify="right", width=8)
+        table.add_column("Spread %", justify="right", width=8)
+        table.add_column("Anchor", justify="right", width=11)
+        table.add_column("To Trig", justify="right", width=8)
 
-    drop_trigger_pct = config_data.get('DT', 0)
+        drop_trigger_pct = config_data.get('DT', 0) if config_data else 0
+    except Exception as e:
+        return Panel(Text(f"Drop Panel Error: {e}", style="red"), title="DROPS ERROR", border_style="red")
 
     # Show top 10 drops
     top_drops = drop_data[:10]
@@ -514,25 +520,29 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
             )
 
     # DEBUG_DROPS: Add snapshot reception counter to title
-    snap_rx = getattr(engine, '_snap_recv', 0)
+    snap_rx = getattr(engine, '_snap_recv', 0) if engine else 0
     last_tick_ts = "-"
-    if drop_data:
-        primary_symbol = drop_data[0]['symbol']
-        snap, snap_ts = engine.get_snapshot_entry(primary_symbol)
-        if snap_ts:
-            try:
-                last_tick_ts = datetime.fromtimestamp(snap_ts, tz=timezone.utc).strftime("%H:%M:%S")
-            except Exception:
-                pass
-        elif not snap:
-            try:
-                first_symbol, first_snap, first_ts = next(engine.iter_snapshot_entries())
-                if first_ts:
-                    last_tick_ts = datetime.fromtimestamp(first_ts, tz=timezone.utc).strftime("%H:%M:%S")
-                    primary_symbol = first_symbol
-                    snap = first_snap
-            except (StopIteration, AttributeError, TypeError, ValueError):
-                pass
+    if drop_data and engine:
+        try:
+            primary_symbol = drop_data[0]['symbol']
+            if hasattr(engine, 'get_snapshot_entry'):
+                snap, snap_ts = engine.get_snapshot_entry(primary_symbol)
+                if snap_ts:
+                    try:
+                        last_tick_ts = datetime.fromtimestamp(snap_ts, tz=timezone.utc).strftime("%H:%M:%S")
+                    except Exception:
+                        pass
+                elif not snap and hasattr(engine, 'iter_snapshot_entries'):
+                    try:
+                        first_symbol, first_snap, first_ts = next(engine.iter_snapshot_entries())
+                        if first_ts:
+                            last_tick_ts = datetime.fromtimestamp(first_ts, tz=timezone.utc).strftime("%H:%M:%S")
+                            primary_symbol = first_symbol
+                            snap = first_snap
+                    except (StopIteration, AttributeError, TypeError, ValueError):
+                        pass
+        except Exception:
+            pass  # Fail gracefully if engine methods don't exist
 
         global _last_symbol, _last_price
         price_val = drop_data[0].get('current_price')
@@ -555,7 +565,7 @@ def make_footer_panel(last_event: str, health: Dict[str, Any]) -> Panel:
 
     content = Text()
     content.append(Text.assemble(
-        ("🔔 LAST EVENT: ", "yellow"),
+        ("[LAST EVENT]: ", "yellow"),
         (f"[{timestamp}] ", "dim white"),
         (last_event, "white")
     ))
@@ -622,7 +632,7 @@ def make_debug_panel() -> Panel:
 
     return Panel(
         content,
-        title="🔍 DEBUG LOG (last 20 lines) - Press 'd' to toggle",
+        title="[DEBUG LOG] (last 20 lines) - Press 'd' to toggle",
         border_style="dim blue",
         expand=True
     )
@@ -700,7 +710,10 @@ def run_dashboard(engine, portfolio, config_module):
                         layout["debug"].update(make_debug_panel())
 
                 except Exception as update_error:
-                    logger.debug(f"Dashboard update error: {update_error}")
+                    logger.error(f"Dashboard update error: {update_error}", exc_info=True)
+                    # Show error in dashboard instead of empty content
+                    error_text = Text(f"Dashboard Update Error:\n{str(update_error)}", style="red bold")
+                    layout["body"].update(Panel(error_text, title="ERROR", border_style="red"))
 
                 # Sleep to reduce CPU usage
                 time.sleep(1.0)
