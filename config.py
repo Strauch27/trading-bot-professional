@@ -590,22 +590,24 @@ RUN_TIMESTAMP_LOCAL = run_timestamp
 # =============================================================================
 
 topcoins_keys = [
-    'BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT',
-    'TRXUSDT', 'LINKUSDT', 'AVAXUSDT', 'XLMUSDT', 'TONUSDT', 'HBARUSDT',
-    'SUIUSDT', 'SHIBUSDT', 'DOTUSDT', 'LTCUSDT', 'BCHUSDT', 'UNIUSDT',
-    'NEARUSDT', 'ONDOUSDT', 'AAVEUSDT', 'APTUSDT', 'ICPUSDT', 'XMRUSDT',
-    'TAOUSDT', 'MNTUSDT', 'VETUSDT', 'CROUSDT', 'POLUSDT', 'KASUSDT',
-    'ALGOUSDT', 'RENDERUSDT', 'FILUSDT', 'ARBUSDT', 'FETUSDT', 'ATOMUSDT',
-    'TKXUSDT', 'ENAUSDT', 'TIAUSDT', 'RAYUSDT', 'JUPUSDT', 'IMXUSDT',
-    'STXUSDT', 'OPUSDT', 'BERAUSDT', 'DEXEUSDT', 'XDCUSDT', 'MOVEUSDT',
-    'INJUSDT', 'LDOUSDT', 'WLDUSDT', 'FTNUSDT', 'KCSUSDT', 'GRTUSDT',
-    'NEXOUSDT', 'QNTUSDT', 'FLRUSDT', 'SEIUSDT', 'SANDUSDT', 'GALAUSDT',
-    'XTZUSDT', 'IOTAUSDT', 'MKRUSDT', 'FLOWUSDT', 'CRVUSDT', 'AXSUSDT',
-    'MANAUSDT', 'RUNEUSDT', 'PEPEUSDT', 'BONKUSDT', 'WIFUSDT', 'FLOKIUSDT',
-    'POPCATUSDT', 'MOGUSDT', 'PNUTUSDT', 'TURBOUSDT', 'TRUMPUSDT',
-    'DAIUSDT', 'EOSUSDT', 'NEOUSDT', 'COREUSDT', 'STRKUSDT', 'JASMYUSDT',
-    'MINAUSDT', 'PENDLEUSDT', 'ORDIUSDT', 'RONUSDT', 'SNXUSDT', 'COMPUSDT',
-    'ZECUSDT', 'JTOUSDT', 'GRASSUSDT', 'DYDXUSDT', 'ARUSDT'
+    '0GUSDT', '4USDT', 'AAVEUSDT', 'ADAUSDT', 'AEAUSDT', 'AIXUSDT', 'ALGOUSDT', 'API3USDT',
+    'APTUSDT', 'ARBUSDT', 'ARUSDT', 'ASTERUSDT', 'ATLAUSDT', 'ATOMUSDT', 'AVAXUSDT', 'AXSUSDT',
+    'BASUSDT', 'BATUSDT', 'BCHUSDT', 'BELUSDT', 'BGBUSDT', 'BLESSUSDT', 'BNBUSDT', 'BTCUSDT',
+    'CAKEUSDT', 'COAIUSDT', 'CROUSDT', 'CRVUSDT', 'CUSDT', 'DASHUSDT', 'DOGEUSDT', 'DOTUSDT',
+    'EDUUSDT', 'EIGENUSDT', 'ENAUSDT', 'ETCUSDT', 'ETHUSDT', 'FETUSDT', 'FFUSDT', 'FILUSDT',
+    'FLOWUSDT', 'FLRUSDT', 'FTNUSDT', 'GALAUSDT', 'GIGGLEUSDT', 'GRTUSDT', 'HANAUSDT', 'HBARUSDT',
+    'HUSDT', 'HYPERUSDT', 'ICPUSDT', 'IDOLUSDT', 'IMXUSDT', 'INITUSDT', 'INJUSDT', 'IOTAUSDT',
+    'JUPUSDT', 'KASUSDT', 'KCSUSDT', 'KERNELUSDT', 'KGENUSDT', 'LABUSDT', 'LDOUSDT', 'LGCTUSDT',
+    'LINKUSDT', 'LTCUSDT', 'MANAUSDT', 'MBGUSDT', 'METYAUSDT', 'MLNUSDT', 'MNTUSDT', 'MOVEUSDT',
+    'MXUSDT', 'NEARUSDT', 'NEXOUSDT', 'NFPUSDT', 'OKBUSDT', 'OMUSDT', 'ONDOUSDT', 'OPNODEUSDT',
+    'OPUSDT', 'PAXGUSDT', 'PENGUUSDT', 'PEPEUSDT', 'PHBUSDT', 'PKAMUSDT', 'POLUSDT', 'POPCATUSDT',
+    'PROVEUSDT', 'PUMPUSDT', 'QNTUSDT', 'RAYUSDT', 'RDACUSDT', 'READYUSDT', 'RECALLUSDT', 'RENDERUSDT',
+    'RIVERUSDT', 'RUNEUSDT', 'RVVUSDT', 'SANDUSDT', 'SEIUSDT', 'SHIBUSDT', 'SNXUSDT', 'SOLUSDT',
+    'SOONUSDT', 'STBLUSDT', 'STXUSDT', 'SUIUSDT', 'TAOUSDT', 'TIAUSDT', 'TLMUSDT', 'TONUSDT',
+    'TOWNSUSDT', 'TRUMPUSDT', 'TRXUSDT', 'UCNUSDT', 'ULTIUSDT', 'UMAUSDT', 'UNIUSDT', 'USELESSUSDT',
+    'VETUSDT', 'VIRTUALUSDT', 'WALUSDT', 'WBTCUSDT', 'WIFUSDT', 'WLDUSDT', 'WLFIUSDT', 'XDCUSDT',
+    'XLMUSDT', 'XMRUSDT', 'XPINUSDT', 'XPLUSUSDT', 'XRPUSDT', 'XTZUSDT', 'ZBTUSDT', 'ZECUSDT',
+    'ZENUSDT', 'ZORAUSDT'
 ]
 
 # Convert to CCXT format (with slash) for market data loop
@@ -623,6 +625,11 @@ MD_UPDATE_INTERVAL_S = 30.0
 # als gültig im Cache gilt (für ad‑hoc Abrufe außerhalb des Batch-Updates)
 # Typisch: 5–10s. Kleinere Werte = aktueller, größere = weniger API-Last.
 TICKER_CACHE_TTL = 5.0
+
+# Batch-Fetch Einstellungen für Markt-Daten (Rate-Limit freundlich)
+MARKET_DATA_USE_FETCH_TICKERS = True      # fetch_tickers() mit Symbol-Chunking verwenden
+MARKET_DATA_BATCH_SIZE = 50              # Anzahl Symbole pro Batch-Request
+MARKET_DATA_BATCH_DELAY_S = 0.05         # Pause zwischen Batch-Requests in Sekunden
 
 MARKET_DATA_FLUSH_INTERVAL_S = 5
 RETENTION = {
@@ -743,6 +750,10 @@ def validate_config():
         problems.append("MD_UPDATE_INTERVAL_S muss > 0 sein")
     if TICKER_CACHE_TTL <= 0:
         problems.append("TICKER_CACHE_TTL muss > 0 sein")
+    if MARKET_DATA_BATCH_SIZE <= 0:
+        problems.append("MARKET_DATA_BATCH_SIZE muss > 0 sein")
+    if MARKET_DATA_BATCH_DELAY_S < 0:
+        problems.append("MARKET_DATA_BATCH_DELAY_S darf nicht negativ sein")
     if any(v <= 0 for v in RETENTION.values()):
         problems.append("RETENTION Werte mussen > 0 sein")
     if USE_SMA_GUARD and SMA_GUARD_MIN_RATIO >= 1.0:
@@ -892,6 +903,9 @@ stale_order_max_age = STALE_ORDER_MAX_AGE
 market_update_interval = MD_UPDATE_INTERVAL_S
 md_update_interval_s = MD_UPDATE_INTERVAL_S
 ticker_cache_ttl = TICKER_CACHE_TTL
+market_data_use_fetch_tickers = MARKET_DATA_USE_FETCH_TICKERS
+market_data_batch_size = MARKET_DATA_BATCH_SIZE
+market_data_batch_delay_s = MARKET_DATA_BATCH_DELAY_S
 use_drop_anchor_since_last_close = USE_DROP_ANCHOR
 anchor_updates_when_flat = ANCHOR_UPDATES_WHEN_FLAT
 use_predictive_buys = USE_PREDICTIVE_BUYS
