@@ -115,9 +115,13 @@ ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run tes
 MD_USE_WEBSOCKET = False  # True = WebSocket primary, False = HTTP Polling
 MD_BATCH_POLLING = True  # Enable batch-based polling for HTTP mode
 MD_BATCH_SIZE = 13  # 91 symbols → 7 batches (13 symbols per batch)
-MD_BATCH_INTERVAL_MS = 1000  # 1 batch per second
+MD_BATCH_INTERVAL_MS = 150  # 150ms between batches (was 1000ms - too slow!)
 MD_CACHE_TTL_MS = 2500  # Soft-TTL for ticker cache (ms)
-MD_JITTER_MS = 150  # Random jitter to spread request spikes (ms)
+MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
+
+# Per-Coin Market Data Debugging
+MD_DEBUG_PER_COIN = True  # Enable detailed per-coin fetch logging
+MD_DEBUG_LOG_FILE = "market_data_debug.log"  # Dedicated log file for market data debugging
 
 # Rate Limiting (Token Bucket)
 RATE_LIMIT_ENABLED = True  # Enable API rate limiting

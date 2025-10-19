@@ -1289,10 +1289,36 @@ class MarketDataProvider:
 
         def fetch_single_ticker(symbol):
             """Fetch single ticker with error handling"""
+            fetch_t0 = time.time()
             try:
                 ticker = self.get_ticker(symbol, use_cache=False)  # Force fresh fetch with rate-limiting
+                fetch_duration_ms = (time.time() - fetch_t0) * 1000
+
+                # Per-coin debugging (if enabled)
+                if getattr(config, 'MD_DEBUG_PER_COIN', False):
+                    log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
+                    try:
+                        with open(log_file, 'a') as f:
+                            if ticker and ticker.last:
+                                f.write(f"{time.time():.3f} | {symbol:15s} | SUCCESS | price={ticker.last:12.8f} | duration={fetch_duration_ms:6.1f}ms\n")
+                            else:
+                                f.write(f"{time.time():.3f} | {symbol:15s} | NO_DATA | ticker={ticker}\n")
+                    except:
+                        pass
+
                 return (symbol, ticker, None)
             except Exception as e:
+                fetch_duration_ms = (time.time() - fetch_t0) * 1000
+
+                # Per-coin debugging (if enabled)
+                if getattr(config, 'MD_DEBUG_PER_COIN', False):
+                    log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
+                    try:
+                        with open(log_file, 'a') as f:
+                            f.write(f"{time.time():.3f} | {symbol:15s} | ERROR   | error={str(e)[:60]:60s} | duration={fetch_duration_ms:6.1f}ms\n")
+                    except:
+                        pass
+
                 return (symbol, None, str(e))
 
         # Parallel fetch: max 32 concurrent threads
@@ -1851,7 +1877,22 @@ class MarketDataProvider:
                             pass
 
                     success_count = sum(1 for v in all_results.values() if v)
+                    failed_count = sum(1 for v in all_results.values() if not v)
                     cycle_duration = time.time() - cycle_start
+
+                    # Per-cycle summary (if per-coin debugging enabled)
+                    if getattr(config, 'MD_DEBUG_PER_COIN', False):
+                        log_file = getattr(config, 'MD_DEBUG_LOG_FILE', 'market_data_debug.log')
+                        try:
+                            with open(log_file, 'a') as f:
+                                f.write(f"{'='*100}\n")
+                                f.write(f"CYCLE #{loop_counter} | success={success_count}/{len(symbols)} | failed={failed_count} | duration={cycle_duration:.2f}s\n")
+                                if failed_count > 0:
+                                    failed_symbols = [sym for sym, success in all_results.items() if not success]
+                                    f.write(f"Failed symbols: {', '.join(failed_symbols[:10])}{' ...' if len(failed_symbols) > 10 else ''}\n")
+                                f.write(f"{'='*100}\n\n")
+                        except:
+                            pass
 
                     # DEBUG_DROPS: Detailed logging
                     if debug_drops:
