@@ -302,7 +302,7 @@ def main():
         stackdump_file.parent.mkdir(parents=True, exist_ok=True)
         # Handle offen halten!
         global STACKDUMP_FP
-        STACKDUMP_FP = open(stackdump_file, "w", buffering=1)
+        STACKDUMP_FP = open(stackdump_file, "w", encoding="utf-8", buffering=1)
         faulthandler.dump_traceback_later(30, repeat=True, file=STACKDUMP_FP)
     except Exception as e:
         print(f"Warning: Could not setup stackdump: {e}")
@@ -951,10 +951,10 @@ def main():
 
     # Hauptloop starten
     try:
-        # DEBUG: Print engine type and check start method
-        print(f"[MAIN] About to call engine.start() - engine type: {type(engine)}")
-        print(f"[MAIN] engine.start method: {engine.start}")
-        print(f"[MAIN] Has HybridEngine? {hasattr(engine, 'legacy_engine')}")
+        # DEBUG: Log engine type and check start method
+        logger.debug(f"About to call engine.start() - engine type: {type(engine)}")
+        logger.debug(f"engine.start method: {engine.start}")
+        logger.debug(f"Has HybridEngine? {hasattr(engine, 'legacy_engine')}")
 
         # Start engine with timeout monitoring
         start_time = tmod.time()

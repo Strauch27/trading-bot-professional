@@ -7,8 +7,45 @@ Modular design - returns formatted string for display in main dashboard.
 """
 
 import time
+import sys
 from typing import Dict, Any, List, Optional
 import config
+
+
+# Unicode support detection
+_UNICODE_SUPPORTED = None
+
+def _supports_unicode():
+    """Check if terminal supports Unicode output."""
+    global _UNICODE_SUPPORTED
+    if _UNICODE_SUPPORTED is not None:
+        return _UNICODE_SUPPORTED
+
+    try:
+        # Try to encode a test emoji
+        test_str = "🟢"
+        if sys.stdout.encoding:
+            test_str.encode(sys.stdout.encoding)
+        _UNICODE_SUPPORTED = True
+    except (UnicodeEncodeError, AttributeError, LookupError):
+        _UNICODE_SUPPORTED = False
+
+    return _UNICODE_SUPPORTED
+
+# Emoji mapping with ASCII fallbacks
+_EMOJI_MAP = {
+    'chart': ('📊', '[CHART]'),
+    'check': ('✅', '[OK]'),
+    'metrics': ('📈', '[METRICS]'),
+    'red': ('🔴', '[!]'),
+    'yellow': ('🟡', '[~]'),
+    'green': ('🟢', '[+]'),
+}
+
+def _get_emoji(name: str) -> str:
+    """Get emoji or ASCII fallback based on terminal support."""
+    emoji, fallback = _EMOJI_MAP.get(name, ('?', '[?]'))
+    return emoji if _supports_unicode() else fallback
 
 
 def render_intent_panel(pending_intents: Dict[str, Dict[str, Any]], rolling_stats=None) -> str:
@@ -23,11 +60,11 @@ def render_intent_panel(pending_intents: Dict[str, Dict[str, Any]], rolling_stat
         Formatted string for dashboard display
     """
     if not pending_intents:
-        return "📊 Intent Tracking | ✅ No pending intents"
+        return f"{_get_emoji('chart')} Intent Tracking | {_get_emoji('check')} No pending intents"
 
     lines = [
         "=" * 80,
-        f"📊 INTENT TRACKING | {len(pending_intents)} pending",
+        f"{_get_emoji('chart')} INTENT TRACKING | {len(pending_intents)} pending",
         "=" * 80,
     ]
 
@@ -89,11 +126,11 @@ def _get_status_indicator(age_s: float) -> str:
     stale_threshold = getattr(config, 'INTENT_STALE_THRESHOLD_S', 60)
 
     if age_s > stale_threshold:
-        return "🔴 STALE"
+        return f"{_get_emoji('red')} STALE"
     elif age_s > stale_threshold * 0.5:
-        return "🟡 PENDING"
+        return f"{_get_emoji('yellow')} PENDING"
     else:
-        return "🟢 FRESH"
+        return f"{_get_emoji('green')} FRESH"
 
 
 def _format_age(age_s: float) -> str:
@@ -125,11 +162,11 @@ def render_latency_summary(rolling_stats) -> str:
         Formatted latency summary
     """
     if not rolling_stats or not hasattr(rolling_stats, 'latencies'):
-        return "📈 Latency Metrics | No data available"
+        return f"{_get_emoji('metrics')} Latency Metrics | No data available"
 
     lines = [
         "=" * 80,
-        "📈 LATENCY METRICS (Last 5 Minutes)",
+        f"{_get_emoji('metrics')} LATENCY METRICS (Last 5 Minutes)",
         "=" * 80,
     ]
 
@@ -164,7 +201,7 @@ def render_compact_intent_status(pending_intents: Dict[str, Dict[str, Any]]) -> 
         Compact status line
     """
     if not pending_intents:
-        return "Intents: ✅ None"
+        return f"Intents: {_get_emoji('check')} None"
 
     count = len(pending_intents)
 
@@ -175,11 +212,11 @@ def render_compact_intent_status(pending_intents: Dict[str, Dict[str, Any]]) -> 
 
     status_parts = []
     if fresh > 0:
-        status_parts.append(f"🟢{fresh}")
+        status_parts.append(f"{_get_emoji('green')}{fresh}")
     if pending > 0:
-        status_parts.append(f"🟡{pending}")
+        status_parts.append(f"{_get_emoji('yellow')}{pending}")
     if stale > 0:
-        status_parts.append(f"🔴{stale}")
+        status_parts.append(f"{_get_emoji('red')}{stale}")
 
     return f"Intents: {' '.join(status_parts)} ({count} total)"
 

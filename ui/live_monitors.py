@@ -10,6 +10,7 @@ Provides live-updating terminal displays:
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+import sys
 
 try:
     from rich.live import Live
@@ -24,6 +25,34 @@ except ImportError:
     Panel = None
     Live = None
     Group = None
+
+
+# Unicode support detection
+_UNICODE_SUPPORTED = None
+
+def _supports_unicode():
+    """Check if terminal supports Unicode output."""
+    global _UNICODE_SUPPORTED
+    if _UNICODE_SUPPORTED is not None:
+        return _UNICODE_SUPPORTED
+
+    try:
+        test_str = "📊"
+        if sys.stdout.encoding:
+            test_str.encode(sys.stdout.encoding)
+        _UNICODE_SUPPORTED = True
+    except (UnicodeEncodeError, AttributeError, LookupError):
+        _UNICODE_SUPPORTED = False
+
+    return _UNICODE_SUPPORTED
+
+def _get_emoji(name: str) -> str:
+    """Get emoji or ASCII fallback based on terminal support."""
+    emoji_map = {
+        'chart': ('📊', '[CHART]'),
+    }
+    emoji, fallback = emoji_map.get(name, ('?', '[?]'))
+    return emoji if _supports_unicode() else fallback
 
 
 def _fmt_time(dt: Optional[datetime]) -> str:
@@ -270,7 +299,7 @@ class LiveHeartbeat:
 
         return Panel(
             Group(*tables),
-            title="📊 Live Heartbeat",
+            title=f"{_get_emoji('chart')} Live Heartbeat",
             border_style="cyan",
             expand=True
         )

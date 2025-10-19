@@ -435,17 +435,29 @@ class ShutdownCoordinator:
         Returns:
             Thread object (not started)
         """
+        # Keep strong reference to shutdown event to prevent GC issues
+        # This prevents Windows access violations when coordinator is GC'd
+        shutdown_event = self._shutdown_event
+
         def _monitor():
             logger.info(f"Heartbeat monitor started (interval: {check_interval}s, timeout: {timeout_threshold}s, auto_shutdown: {self.auto_shutdown_on_missed_heartbeat})",
                        extra={"event_type": "HEARTBEAT_MONITOR_START"})
+
+            # Keep local reference to prevent GC-related access violations
             while not self._shutdown_in_progress and not self.is_shutdown_requested():
-                # Use shutdown event wait with timeout instead of time.sleep()
-                # This allows graceful shutdown when shutdown is requested
-                if self._shutdown_event.wait(timeout=check_interval):
-                    # Shutdown was signaled during wait
-                    logger.info("Heartbeat monitor stopping due to shutdown signal",
-                               extra={"event_type": "HEARTBEAT_MONITOR_SHUTDOWN"})
+                # Use local event reference instead of self._shutdown_event
+                # This prevents access violations if ShutdownCoordinator is GC'd
+                try:
+                    if shutdown_event.wait(timeout=check_interval):
+                        # Shutdown was signaled during wait
+                        logger.info("Heartbeat monitor stopping due to shutdown signal",
+                                   extra={"event_type": "HEARTBEAT_MONITOR_SHUTDOWN"})
+                        break
+                except Exception as event_error:
+                    logger.error(f"Heartbeat monitor event wait error: {event_error}")
+                    # If event access fails (GC issue), exit gracefully
                     break
+
                 last = self._last_heartbeat
                 elapsed = time.time() - last
 

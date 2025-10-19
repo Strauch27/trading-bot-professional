@@ -410,7 +410,7 @@ class COIDManager:
 
             # Atomic write: write to temp file, then rename
             temp_path = self.store_path + '.tmp'
-            with open(temp_path, 'w') as f:
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
 
             # Atomic rename (POSIX guarantees atomicity)

@@ -69,8 +69,8 @@ def test_correlation_ids():
             notional=96.0,
         )
 
-    print("✓ Correlation IDs test passed - check logs/decisions/decision.jsonl")
-    print("✓ Correlation IDs test passed - check logs/orders/order.jsonl")
+    print("[OK] Correlation IDs test passed - check logs/decisions/decision.jsonl")
+    print("[OK] Correlation IDs test passed - check logs/orders/order.jsonl")
 
 
 def test_decision_events():
@@ -127,7 +127,7 @@ def test_decision_events():
             reason="guards_failed: volume_guard",
         )
 
-    print("✓ Decision events test passed - check logs/decisions/decision.jsonl")
+    print("[OK] Decision events test passed - check logs/decisions/decision.jsonl")
 
 
 def test_order_lifecycle():
@@ -191,7 +191,7 @@ def test_order_lifecycle():
             latency_ms_total=450,
         )
 
-    print("✓ Order lifecycle test passed - check logs/orders/order.jsonl")
+    print("[OK] Order lifecycle test passed - check logs/orders/order.jsonl")
 
 
 def test_health_events():
@@ -227,8 +227,8 @@ def test_health_events():
         changed_params=["POSITION_SIZE_USDT", "MAX_AUTO_SIZE_UP_BPS"],
     )
 
-    print("✓ Health events test passed - check logs/health/health.jsonl")
-    print("✓ Audit events test passed - check logs/audit/audit.jsonl")
+    print("[OK] Health events test passed - check logs/health/health.jsonl")
+    print("[OK] Audit events test passed - check logs/audit/audit.jsonl")
 
 
 def test_exception_logging():
@@ -254,7 +254,7 @@ def test_exception_logging():
             component="test_script",
         )
 
-    print("✓ Exception logging test passed - check logs/audit/audit.jsonl")
+    print("[OK] Exception logging test passed - check logs/audit/audit.jsonl")
 
 
 def main():

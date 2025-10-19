@@ -651,8 +651,24 @@ class TradingEngine:
     def stop(self):
         """Stop the trading engine"""
         self.running = False
+
+        # Signal UI fallback thread to stop (if exists)
+        if hasattr(self, '_ui_fallback_shutdown_event') and self._ui_fallback_shutdown_event:
+            logger.debug("Signaling UI fallback thread shutdown")
+            self._ui_fallback_shutdown_event.set()
+
+        # Join main thread
         if self.main_thread and self.main_thread.is_alive():
             self.main_thread.join(timeout=5.0)
+
+        # Join UI fallback thread (non-daemon, needs explicit join)
+        if hasattr(self, '_ui_fallback_thread') and self._ui_fallback_thread and self._ui_fallback_thread.is_alive():
+            logger.debug("Waiting for UI fallback thread to stop...")
+            self._ui_fallback_thread.join(timeout=3.0)
+            if self._ui_fallback_thread.is_alive():
+                logger.warning("UI fallback thread did not stop within timeout")
+            else:
+                logger.debug("UI fallback thread stopped cleanly")
 
         # P1: Shutdown state persistence (final flush)
         if config.STATE_PERSIST_ON_SHUTDOWN:
@@ -1441,12 +1457,20 @@ class TradingEngine:
         symbols = getattr(config, "UI_FALLBACK_SYMBOLS", ["BTC/USDT", "ETH/USDT"])
         peaks = {}
 
+        # Create shutdown event for responsive thread cleanup
+        shutdown_event = threading.Event()
+        self._ui_fallback_shutdown_event = shutdown_event
+
         def run():
             logger.info("UI_FALLBACK_FEED_STARTED", extra={"symbols": symbols})
             while self.running:
                 try:
                     snaps = []
                     for s in symbols:
+                        # Check for shutdown during iteration
+                        if not self.running:
+                            break
+
                         try:
                             tkr = self.exchange_adapter.fetch_ticker(s)
                             last = float(tkr.get("last") or tkr.get("close") or 0.0)
@@ -1490,9 +1514,15 @@ class TradingEngine:
                 except Exception as e:
                     logger.exception("UI_FALLBACK_FEED_ERR")
 
-                time.sleep(1.5)
+                # Use event wait instead of sleep for responsive shutdown
+                # Returns True if shutdown signaled, False on timeout
+                if shutdown_event.wait(timeout=1.5):
+                    logger.debug("UI fallback thread received shutdown signal")
+                    break
 
-        th = threading.Thread(target=run, daemon=True, name="UIFallbackFeed")
+            logger.info("UI_FALLBACK_FEED_STOPPED")
+
+        th = threading.Thread(target=run, daemon=False, name="UIFallbackFeed")
         th.start()
         self._ui_fallback_thread = th
         logger.info("UI Fallback Feed started", extra={"symbols": symbols})

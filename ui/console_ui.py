@@ -23,6 +23,40 @@ except ImportError:
 # Global console instance
 console = Console() if RICH_AVAILABLE else None
 
+# Detect Unicode support
+_UNICODE_SUPPORTED = None
+
+def _supports_unicode():
+    """Check if terminal supports Unicode output."""
+    global _UNICODE_SUPPORTED
+    if _UNICODE_SUPPORTED is not None:
+        return _UNICODE_SUPPORTED
+
+    try:
+        import sys
+        # Try to encode a test emoji
+        test_str = "✓"
+        if sys.stdout.encoding:
+            test_str.encode(sys.stdout.encoding)
+        _UNICODE_SUPPORTED = True
+    except (UnicodeEncodeError, AttributeError, LookupError):
+        _UNICODE_SUPPORTED = False
+
+    return _UNICODE_SUPPORTED
+
+# Emoji mapping with ASCII fallbacks
+_EMOJI_MAP = {
+    'info': ('ℹ', '[i]'),
+    'success': ('✓', '[OK]'),
+    'warning': ('⚠', '[!]'),
+    'error': ('✗', '[X]'),
+}
+
+def _get_emoji(name: str) -> str:
+    """Get emoji or ASCII fallback based on terminal support."""
+    emoji, fallback = _EMOJI_MAP.get(name, ('?', '[?]'))
+    return emoji if _supports_unicode() else fallback
+
 
 def ts() -> str:
     """
@@ -194,7 +228,7 @@ def log_info(message: str, details: Dict[str, Any] = None):
                 print(f"       {k}: {v}")
         return
 
-    console.print(f"[cyan]ℹ {message}[/cyan]")
+    console.print(f"[cyan]{_get_emoji('info')} {message}[/cyan]")
     if details:
         for k, v in details.items():
             console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
@@ -215,7 +249,7 @@ def log_success(message: str, details: Dict[str, Any] = None):
                 print(f"          {k}: {v}")
         return
 
-    console.print(f"[green bold]✓ {message}[/green bold]")
+    console.print(f"[green bold]{_get_emoji('success')} {message}[/green bold]")
     if details:
         for k, v in details.items():
             console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
@@ -236,7 +270,7 @@ def log_warning(message: str, details: Dict[str, Any] = None):
                 print(f"          {k}: {v}")
         return
 
-    console.print(f"[yellow bold]⚠ {message}[/yellow bold]")
+    console.print(f"[yellow bold]{_get_emoji('warning')} {message}[/yellow bold]")
     if details:
         for k, v in details.items():
             console.print(f"  [dim]{k}:[/dim] [bold]{v}[/bold]")
@@ -260,7 +294,7 @@ def log_error(message: str, error: str = None, details: Dict[str, Any] = None):
                 print(f"        {k}: {v}")
         return
 
-    console.print(f"[red bold]✗ {message}[/red bold]")
+    console.print(f"[red bold]{_get_emoji('error')} {message}[/red bold]")
     if error:
         console.print(f"  [dim]Error:[/dim] [red]{error}[/red]")
     if details:

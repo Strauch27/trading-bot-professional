@@ -63,7 +63,7 @@ class SnapshotManager:
 
                 # Write atomically (write to temp, then rename)
                 temp_path = snapshot_path.with_suffix('.tmp')
-                with open(temp_path, 'w') as f:
+                with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(snapshot, f, indent=2)
 
                 temp_path.rename(snapshot_path)

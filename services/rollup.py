@@ -195,7 +195,7 @@ class DailyRollup:
             # Save to JSON
             rollup_path = self._get_rollup_path(date_str)
 
-            with open(rollup_path, "w") as f:
+            with open(rollup_path, "w", encoding="utf-8") as f:
                 json.dump(kpis, f, indent=2)
 
             logger.info(

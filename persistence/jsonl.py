@@ -100,7 +100,7 @@ class RotatingJSONLWriter:
                     # New file - use atomic rename
                     tmp_path = self.current_file.with_suffix('.jsonl.tmp')
 
-                    with tmp_path.open('w') as f:
+                    with tmp_path.open('w', encoding='utf-8') as f:
                         f.write(line)
 
                     # Atomic rename

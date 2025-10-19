@@ -210,7 +210,7 @@ class AnchorManager:
 
         try:
             # Write to temporary file first
-            with tmp_path.open("w") as f:
+            with tmp_path.open("w", encoding="utf-8") as f:
                 json.dump(self._anchors, f, indent=2)
 
             # Atomic rename (crashes can't corrupt the file)

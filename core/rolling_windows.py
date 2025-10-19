@@ -230,7 +230,7 @@ class RollingWindowManager:
             }
 
             # Atomic write: write to .tmp, then rename
-            with open(tmp_path, "w") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
 
             os.replace(tmp_path, path)
