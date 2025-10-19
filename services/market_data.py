@@ -1192,6 +1192,14 @@ class MarketDataProvider:
         results = {}
         total_ticks = 0
 
+        # Get stale threshold from config (align with anchor stale minutes)
+        stale_minutes = getattr(config, 'ANCHOR_STALE_MINUTES', 60)
+        stale_threshold_s = stale_minutes * 60
+        now = time.time()
+        cutoff_ts = now - stale_threshold_s
+
+        logger.info(f"Warm-start will filter ticks older than {stale_minutes} minutes")
+
         # Load persisted rolling windows first (V9_3: symbol-by-symbol)
         if self.rw_manager:
             for symbol in symbols:
@@ -1231,12 +1239,22 @@ class MarketDataProvider:
                     continue
 
                 # Replay ticks into PriceCache and RollingWindows
+                loaded_count = 0
+                skipped_stale = 0
+
                 for tick in ticks:
                     ts = tick.get('ts')
                     last = tick.get('last')
 
                     if not ts or not last or last <= 0:
                         continue
+
+                    # Skip stale ticks (older than threshold)
+                    if ts < cutoff_ts:
+                        skipped_stale += 1
+                        continue
+
+                    loaded_count += 1
 
                     # Update PriceCache
                     if self.price_cache:
@@ -1250,10 +1268,13 @@ class MarketDataProvider:
                     if self.anchor_manager:
                         self.anchor_manager.note_price(symbol, last, ts)
 
-                results[symbol] = len(ticks)
-                total_ticks += len(ticks)
+                results[symbol] = loaded_count
+                total_ticks += loaded_count
 
-                logger.debug(f"Warm-start: {symbol} loaded {len(ticks)} ticks")
+                if skipped_stale > 0:
+                    logger.debug(f"Warm-start: {symbol} loaded {loaded_count} ticks, skipped {skipped_stale} stale ticks")
+                else:
+                    logger.debug(f"Warm-start: {symbol} loaded {loaded_count} ticks")
 
             except Exception as e:
                 logger.warning(f"Warm-start failed for {symbol}: {e}")
