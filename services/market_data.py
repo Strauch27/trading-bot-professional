@@ -1865,10 +1865,11 @@ class MarketDataProvider:
                                 first_price = ticker.last
 
                         if success_count > 0:
+                            last_price_str = f"{first_price:.8f}" if first_price else "-1"
                             logger.debug(
                                 f"MD_POLL published count={success_count}/{len(symbols)} "
                                 f"batches={len(symbol_batches)} duration={cycle_duration:.2f}s "
-                                f"first={first_sym} last={first_price:.8f if first_price else -1}"
+                                f"first={first_sym} last={last_price_str}"
                             )
                         else:
                             logger.warning(
