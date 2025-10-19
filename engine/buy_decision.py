@@ -525,7 +525,7 @@ class BuyDecisionHandler:
             # P1: Persist intent state (debounced)
             self.engine._persist_intent_state()
 
-            with Trace(decision_id=decision_id, intent_id=intent.intent_id):
+            with Trace(decision_id=decision_id):
                 log_event(
                     ORDER_LOG(),
                     "order_intent",
@@ -940,7 +940,7 @@ class BuyDecisionHandler:
                 order_ts = metadata["start_ts"]
             latency_ms_total = int((time.time() - order_ts) * 1000) if order_ts else None
 
-            with Trace(decision_id=decision_id, intent_id=intent_id, exchange_order_id=order_id):
+            with Trace(decision_id=decision_id, exchange_order_id=order_id):
                 # P2: Enhanced latency tracking with breakdown
                 event_payload = {
                     "symbol": symbol,
@@ -997,7 +997,7 @@ class BuyDecisionHandler:
                     opened_at=datetime.now().isoformat()
                 )
 
-                with Trace(decision_id=decision_id, intent_id=intent_id, exchange_order_id=order_id):
+                with Trace(decision_id=decision_id, exchange_order_id=order_id):
                     log_event(DECISION_LOG(), "position_opened", **position_opened.model_dump())
 
             except Exception as exc:

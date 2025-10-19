@@ -1,29 +1,35 @@
-# Trading Bot Professional - Python Dependencies (Pinned Versions)
-# ==================================================================
-# Generated: 2025-10-11
-# Python Version: 3.12+
-#
-# IMPORTANT: These are pinned versions for reproducible builds.
-# Update with: pip list --format=freeze > requirements.txt
-#
-# For range-based requirements, see requirements-unpinned.txt
+# Trading Bot Professional - Python Dependencies
 
-# Core Trading Libraries
-ccxt==4.5.9
-pandas==2.3.3
-numpy==2.3.3
-scipy==1.16.2
+# Exchange Connectivity
+ccxt>=4.0.0
 
-# Logging & Monitoring
-python-json-logger==4.0.0
-rich==13.7.0
+# Data Validation & Schemas
+pydantic>=2.0.0
 
-# Data Export & Analysis
-openpyxl==3.1.5
-pyarrow==21.0.0
+# Terminal UI & Rich Output
+rich>=13.0.0
+colorlog>=6.0.0
+
+# Web UI & Communication
+Flask>=3.0.0
+Flask-SocketIO>=5.0.0
+python-socketio>=5.0.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Technical Analysis
+pandas-ta>=0.4.0
+ta>=0.11.0
 
 # Configuration & Environment
-python-dotenv==1.1.1
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
 
-# Note: Standard library dependencies (json, logging, threading, etc.)
-# are included with Python and don't need to be listed here.
+# System Monitoring
+psutil>=5.0.0
+
+# HTTP Requests
+requests>=2.31.0
+aiohttp>=3.9.0
