@@ -29,14 +29,16 @@ class AnchorManager:
     - Start-drop clamp (anchor >= start_price * (1 - max_drop%))
     """
 
-    def __init__(self, base_path: str = "state/anchors"):
+    def __init__(self, base_path: str = "state/anchors", load_on_start: bool = True):
         """
         Initialize AnchorManager.
 
         Args:
             base_path: Directory for anchor persistence (Mode 4 only)
+            load_on_start: Whether to load persisted anchors on startup (default: True with TTL check)
         """
         self.base_path = base_path
+        self.load_on_start = load_on_start
         Path(self.base_path).mkdir(parents=True, exist_ok=True)
 
         # Persistent anchors (Mode 4): {symbol: {"anchor": float, "ts": float}}
@@ -46,8 +48,11 @@ class AnchorManager:
         self._session_high: Dict[str, float] = {}
         self._session_start: Dict[str, float] = {}  # First price seen per symbol
 
-        self._load()
-        logger.info(f"AnchorManager initialized (base_path={self.base_path})")
+        if self.load_on_start:
+            self._load()
+            logger.info(f"AnchorManager initialized with persisted anchors (base_path={self.base_path})")
+        else:
+            logger.info(f"AnchorManager initialized with fresh start (base_path={self.base_path}, persistence disabled on startup)")
 
     def note_price(self, symbol: str, price: float, now: float) -> None:
         """
@@ -228,9 +233,10 @@ class AnchorManager:
 
     def _load(self) -> None:
         """
-        Load persisted anchors from disk (Mode 4 only).
+        Load persisted anchors from disk with TTL check (Mode 4 only).
 
-        Loads anchor data from JSON file if available.
+        Loads anchor data from JSON file if available, filtering out
+        anchors older than ANCHOR_MAX_AGE_HOURS.
         """
         path = Path(self.base_path) / "anchors.json"
         if not path.exists():
@@ -238,8 +244,38 @@ class AnchorManager:
 
         try:
             with path.open("r") as f:
-                self._anchors = json.load(f)
-            logger.info(f"Loaded {len(self._anchors)} persisted anchors from {path}")
+                loaded_anchors = json.load(f)
+
+            # Import config for TTL setting
+            import config
+            max_age_hours = getattr(config, "ANCHOR_MAX_AGE_HOURS", 24)
+            max_age_seconds = max_age_hours * 3600
+            now = time.time()
+
+            # Filter out stale anchors (older than max_age_hours)
+            valid_anchors = {}
+            discarded_count = 0
+
+            for symbol, anchor_data in loaded_anchors.items():
+                anchor_ts = anchor_data.get("ts", 0)
+                age_seconds = now - anchor_ts
+
+                if age_seconds <= max_age_seconds:
+                    valid_anchors[symbol] = anchor_data
+                    logger.debug(f"Loaded anchor for {symbol}: {anchor_data['anchor']:.6f} (age: {age_seconds/3600:.1f}h)")
+                else:
+                    discarded_count += 1
+                    logger.info(f"Discarded stale anchor for {symbol} (age: {age_seconds/3600:.1f}h > {max_age_hours}h)")
+
+            self._anchors = valid_anchors
+
+            if valid_anchors:
+                logger.info(f"Loaded {len(valid_anchors)} persisted anchors from {path} (discarded {discarded_count} stale)")
+            elif discarded_count > 0:
+                logger.info(f"All {discarded_count} anchors were stale (> {max_age_hours}h), starting fresh")
+            else:
+                logger.info("No anchors found in persistence file")
+
         except Exception as e:
             logger.warning(f"Failed to load anchors: {e}")
             self._anchors = {}
@@ -250,3 +286,29 @@ class AnchorManager:
         self._session_high.clear()
         self._session_start.clear()
         logger.info("Anchor state cleared")
+
+    def reset_anchor(self, symbol: str, price: float, now: float) -> None:
+        """
+        Reset anchor to specific price (called after buy fill).
+
+        This allows the anchor to be reset to the fill price after a successful buy,
+        enabling the drop trigger to work from the new entry price.
+
+        Args:
+            symbol: Trading symbol
+            price: New anchor price (typically the fill price)
+            now: Current timestamp
+        """
+        import config
+        mode = getattr(config, "DROP_TRIGGER_MODE", 4)
+
+        if mode == 4:
+            # Only reset in Mode 4 (Persistent mode)
+            self._anchors[symbol] = {
+                "anchor": float(price),
+                "ts": float(now)
+            }
+            logger.info(f"Anchor reset for {symbol}: {price:.6f} (post-buy, mode={mode})")
+        else:
+            # In other modes, anchor is recalculated automatically
+            logger.debug(f"Anchor reset skipped for {symbol} (mode={mode} does not use persistent anchors)")

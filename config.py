@@ -91,7 +91,8 @@ USE_ROBUST_MARKET_FETCH = True
 # V9_3 Anchor System (Mode 4 Clamps & Guards)
 USE_DROP_ANCHOR = True  # Enable anchor persistence (required for Mode 4)
 ANCHOR_UPDATES_WHEN_FLAT = True  # Update anchor even when no position held
-ANCHOR_STALE_MINUTES = 60  # Stale-Reset: Reset anchor if older than 60 min
+ANCHOR_STALE_MINUTES = 60  # Stale-Reset: Reset anchor if older than 60 min (during runtime)
+ANCHOR_MAX_AGE_HOURS = 24  # TTL: Discard anchors older than 24h on bot start (persistence filter)
 ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT = 0.5  # Over-Peak-Clamp: max 0.5% above session peak
 ANCHOR_MAX_START_DROP_PCT = 8.0  # Start-Drop-Clamp: anchor not >8% below start price
 

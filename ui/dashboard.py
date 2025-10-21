@@ -684,7 +684,7 @@ def run_dashboard(engine, portfolio, config_module):
     logger.info("Starting live dashboard...", extra={'event_type': 'DASHBOARD_START'})
 
     try:
-        with Live(layout, screen=True, redirect_stderr=False, refresh_per_second=2):
+        with Live(layout, screen=True, redirect_stderr=True, refresh_per_second=2):
             while True:
                 # Check for shutdown
                 if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():

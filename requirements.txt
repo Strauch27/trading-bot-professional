@@ -9,6 +9,7 @@ pydantic>=2.0.0
 # Terminal UI & Rich Output
 rich>=13.0.0
 colorlog>=6.0.0
+python-json-logger>=4.0.0
 
 # Web UI & Communication
 Flask>=3.0.0
@@ -20,7 +21,7 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # Technical Analysis
-pandas-ta>=0.4.0
+pandas-ta>=0.4.67b0
 ta>=0.11.0
 
 # Configuration & Environment

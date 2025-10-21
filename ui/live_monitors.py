@@ -320,7 +320,8 @@ class LiveHeartbeat:
             self._live = Live(
                 self._render(stats),
                 refresh_per_second=0.5,
-                console=None  # Use default console
+                console=None,  # Use default console
+                redirect_stderr=True
             )
             self._live.start()
         else:
@@ -645,7 +646,8 @@ class LiveDashboard:
             self._live = Live(
                 rendered,
                 refresh_per_second=0.5,
-                console=Console()
+                console=Console(),
+                redirect_stderr=True
             )
             self._live.start()
         else:

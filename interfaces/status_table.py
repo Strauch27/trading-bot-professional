@@ -254,7 +254,8 @@ def run_live_table(
             render_status_table(get_states_func(), show_idle=show_idle),
             console=console,
             refresh_per_second=refresh_hz,
-            screen=False  # Don't use alternate screen (allows scrollback)
+            screen=False,  # Don't use alternate screen (allows scrollback)
+            redirect_stderr=True
         ) as live:
             while True:
                 try:

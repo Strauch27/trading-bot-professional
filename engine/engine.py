@@ -1086,6 +1086,17 @@ class TradingEngine:
                         # NEW: Store for ExitEngine
                         self.snapshots[symbol] = snap
 
+                        # FIX: Update self.topcoins with snapshot data (Single Source of Truth)
+                        # Convert snapshot to coin_data format expected by buy_decision.py
+                        price_data = snap.get("price", {})
+                        self.topcoins[symbol] = {
+                            'bid': price_data.get('bid'),
+                            'ask': price_data.get('ask'),
+                            'last': price_data.get('last'),
+                            'volume': price_data.get('vol_24h', 0),
+                            'timestamp': entry['ts']
+                        }
+
                         # Track last snapshot timestamp
                         self._last_snapshot_ts = entry['ts']
 

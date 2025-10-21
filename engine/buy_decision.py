@@ -423,6 +423,17 @@ class BuyDecisionHandler:
             # Calculate position size
             quote_budget = self._calculate_position_size(symbol, current_price, usdt_balance)
             if not quote_budget:
+                logger.warning(
+                    f"BUY SKIP {symbol} - Position sizing returned None (likely missing market data or insufficient budget)",
+                    extra={
+                        'event_type': 'BUY_SKIP_NO_QUOTE_BUDGET',
+                        'symbol': symbol,
+                        'current_price': current_price,
+                        'usdt_balance': usdt_balance,
+                        'coin_data_empty': not bool(coin_data),
+                        'has_bid_ask': bool(coin_data and 'bid' in coin_data and 'ask' in coin_data) if coin_data else False
+                    }
+                )
                 return
 
             # Phase 1 (TODO 6): Risk Limits Check - BEFORE order placement
@@ -871,6 +882,18 @@ class BuyDecisionHandler:
             fee_quote = fees
 
             self.engine.pnl_tracker.on_fill(symbol, "BUY", avg_price, filled_amount)
+
+            # Reset anchor after buy fill (Mode 4 behavior)
+            if hasattr(self.engine, 'market_data') and hasattr(self.engine.market_data, 'anchor_manager'):
+                try:
+                    self.engine.market_data.anchor_manager.reset_anchor(
+                        symbol=symbol,
+                        price=avg_price,
+                        now=time.time()
+                    )
+                    logger.info(f"Anchor reset for {symbol} to {avg_price:.6f} (post-buy)")
+                except Exception as e:
+                    logger.warning(f"Failed to reset anchor for {symbol}: {e}")
 
             trade_fill_event = {
                 "event_type": "TRADE_FILL",
