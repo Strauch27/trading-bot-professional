@@ -111,6 +111,57 @@ class ShutdownCoordinator:
             'cleanup_failures': 0
         }
 
+        # Start heartbeat logger thread
+        self._heartbeat_interval = 30.0  # Log every 30 seconds
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_logger,
+            daemon=True,
+            name="ShutdownHeartbeatLogger"
+        )
+        self._heartbeat_thread.start()
+
+    def _heartbeat_logger(self) -> None:
+        """Background thread that logs shutdown coordinator heartbeat status"""
+        while not self._shutdown_event.is_set():
+            try:
+                # Wait for interval or shutdown signal
+                if self._shutdown_event.wait(timeout=self._heartbeat_interval):
+                    break  # Shutdown requested
+
+                # Collect component and thread status
+                with self._shutdown_lock:
+                    registered_components = list(self._components.keys())
+                    registered_threads = [
+                        {
+                            'name': t.name,
+                            'alive': t.is_alive(),
+                            'daemon': t.daemon
+                        }
+                        for t in self._threads
+                    ]
+
+                # Collect recent heartbeat activity
+                with self._hb_lock:
+                    recent_beats = list(self._beat_history)[-10:]  # Last 10 beats
+                    last_beat_age = time.time() - self._last_heartbeat if self._last_heartbeat else None
+
+                # Log SHUTDOWN_HEARTBEAT event
+                logger.info(
+                    "SHUTDOWN_HEARTBEAT",
+                    extra={
+                        'event_type': 'SHUTDOWN_HEARTBEAT',
+                        'registered_components': registered_components,
+                        'registered_threads': registered_threads,
+                        'recent_heartbeats': recent_beats,
+                        'last_heartbeat_age_s': last_beat_age,
+                        'shutdown_requested': self._shutdown_event.is_set(),
+                        'stats': dict(self._stats)
+                    }
+                )
+
+            except Exception as e:
+                logger.debug(f"Heartbeat logger error: {e}")
+
     def register_component(self, name: str, component: Any) -> None:
         """Register a component for shutdown management"""
         with self._shutdown_lock:

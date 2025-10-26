@@ -80,6 +80,9 @@ class JsonlLogger:
     def order_expired(self, **payload: Any) -> None:
         self.write("orders", {"event_type": "ORDER_EXPIRED", **payload})
 
+    def order_failed(self, **payload: Any) -> None:
+        self.write("orders", {"event_type": "ORDER_FAILED", **payload})
+
     # Trades ---------------------------------------------------------------
     def trade_open(self, **payload: Any) -> None:
         self.write("trades", {"event_type": "TRADE_OPEN", **payload})

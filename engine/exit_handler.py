@@ -223,8 +223,11 @@ class ExitHandler:
                 't': int(time.time()), 'reason': reason, 'pnl': realized_pnl
             })
 
+            # Get decision_id from position_data for tracing
+            decision_id = position_data.get('decision_id') if position_data else None
             logger.info(f"SELL FILLED {symbol} @{result.avg_price:.6f} x{result.filled_amount:.6f} "
-                       f"[{reason}] PnL: {realized_pnl:.2f}")
+                       f"[{reason}] PnL: {realized_pnl:.2f}",
+                       extra={'decision_id': decision_id} if decision_id else {})
 
             # Dashboard event
             try:

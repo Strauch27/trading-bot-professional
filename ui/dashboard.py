@@ -40,24 +40,52 @@ _last_price = None   # Last snapshot price
 
 class DashboardEventBus:
     """
-    Simple event bus for dashboard notifications.
+    Thread-safe event bus for dashboard notifications.
     Stores recent events for display in the "Last Event" section.
     """
 
     def __init__(self, max_events: int = 100):
+        import threading
         self.events = deque(maxlen=max_events)
         self.last_event = "Bot gestartet..."
+        self._lock = threading.Lock()  # Thread-safe access
 
     def emit(self, event_type: str, message: str):
-        """Emit an event to the dashboard."""
+        """Emit an event to the dashboard (thread-safe)."""
         timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
         event = f"[{timestamp}] [{event_type}] {message}"
-        self.events.append(event)
-        self.last_event = event
+
+        with self._lock:
+            self.events.append(event)
+            self.last_event = event
+
+        # Log dashboard events for correlation with backend actions
+        try:
+            import inspect
+            # Get caller information
+            frame = inspect.currentframe()
+            caller_frame = frame.f_back if frame else None
+            source = "unknown"
+            if caller_frame:
+                source = f"{caller_frame.f_code.co_filename}:{caller_frame.f_lineno}"
+
+            logger.info(
+                "DASH_EVENT",
+                extra={
+                    'event_type': 'DASH_EVENT',
+                    'dashboard_event_type': event_type,
+                    'message': message,
+                    'source': source,
+                    'timestamp': timestamp
+                }
+            )
+        except Exception as e:
+            logger.debug(f"Failed to log dashboard event: {e}")
 
     def get_last_event(self) -> str:
-        """Get the most recent event."""
-        return self.last_event
+        """Get the most recent event (thread-safe)."""
+        with self._lock:
+            return self.last_event
 
 
 # Global event bus instance
@@ -89,7 +117,7 @@ def update_snapshot_debug(symbol: str, price: float):
 
 def get_log_tail(n_lines: int = 20) -> List[str]:
     """
-    Read the last N lines from the most recent log file.
+    Read the last N lines from the most recent JSONL log files.
 
     Returns:
         List of log lines (may be fewer than n_lines if file is short)
@@ -97,14 +125,15 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
     try:
         # Get current working directory
         import os
+        import json
         cwd = os.getcwd()
 
-        # Try multiple log locations (absolute paths)
+        # Try multiple log locations (prioritize JSONL over legacy .log)
         log_patterns = [
-            os.path.join(cwd, "logs/trading_bot_*.log"),           # Legacy location
-            os.path.join(cwd, "sessions/*/logs/*.log"),            # New session-based location
-            os.path.join(cwd, "sessions/*/*.log"),                 # Alternative session location
-            "/tmp/bot_*.log",                                      # Temporary logs
+            os.path.join(cwd, "sessions/*/logs/*.jsonl"),          # Primary: JSONL logs in sessions
+            os.path.join(cwd, "logs/*.jsonl"),                     # Alternative: Root logs folder
+            os.path.join(cwd, "logs/trading_bot_*.log"),           # Legacy: Old .log format
+            os.path.join(cwd, "sessions/*/logs/*.log"),            # Legacy: Session .log
         ]
 
         log_files = []
@@ -116,20 +145,41 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
             return [
                 f"No log files found in {cwd}",
                 "Checked patterns:",
+                f"  {cwd}/sessions/*/logs/*.jsonl",
+                f"  {cwd}/logs/*.jsonl",
                 f"  {cwd}/logs/trading_bot_*.log",
-                f"  {cwd}/sessions/*/logs/*.log",
-                f"  {cwd}/sessions/*/*.log",
-                "  /tmp/bot_*.log"
             ]
 
         # Get most recent log file
         latest_log = max(log_files, key=lambda p: Path(p).stat().st_mtime)
+        is_jsonl = latest_log.endswith('.jsonl')
 
         # Read last N lines
         with open(latest_log, 'r', encoding='utf-8', errors='ignore') as f:
             lines = deque(f, maxlen=n_lines)
-            result = [f"[LOG] {latest_log} (last {n_lines} lines):"]
-            result.extend(list(lines))
+            result = [f"[LOG] {Path(latest_log).name} (last {n_lines} lines):"]
+
+            # Format JSONL entries nicely
+            if is_jsonl:
+                for line in lines:
+                    try:
+                        entry = json.loads(line.strip())
+                        timestamp = entry.get('timestamp', entry.get('time', ''))
+                        level = entry.get('level', 'INFO')
+                        message = entry.get('message', entry.get('msg', ''))
+                        event_type = entry.get('event_type', '')
+
+                        if event_type:
+                            formatted = f"{timestamp} [{level}] {event_type}: {message}"
+                        else:
+                            formatted = f"{timestamp} [{level}] {message}"
+                        result.append(formatted[:120])  # Truncate long lines
+                    except json.JSONDecodeError:
+                        result.append(line.strip()[:120])
+            else:
+                # Plain text logs
+                result.extend([line.strip()[:120] for line in lines])
+
             return result
 
     except Exception as e:
@@ -322,6 +372,37 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
 
         # Expose stale symbols for health monitoring
         setattr(engine, '_last_stale_snapshot_symbols', stale_symbols)
+
+        # Log stale snapshot warnings if threshold exceeded
+        stale_threshold = getattr(config_module, 'STALE_SNAPSHOT_WARN_THRESHOLD', 5)
+        if len(stale_symbols) >= stale_threshold:
+            logger.warning(
+                f"STALE_SNAPSHOTS: {len(stale_symbols)} symbols have stale market data (>{stale_ttl}s old)",
+                extra={
+                    'event_type': 'STALE_SNAPSHOTS_WARNING',
+                    'stale_count': len(stale_symbols),
+                    'stale_symbols': stale_symbols[:10],  # First 10
+                    'threshold': stale_threshold,
+                    'stale_ttl_s': stale_ttl
+                }
+            )
+
+            # Emit health event for monitoring systems
+            try:
+                from core.logger_factory import AUDIT_LOG, log_event
+                import logging as log_module
+                log_event(
+                    AUDIT_LOG(),
+                    "stale_snapshots_health",
+                    message=f"Stale snapshot health degradation: {len(stale_symbols)}/{len(drop_snapshot_store)} symbols stale",
+                    level=log_module.WARNING,
+                    stale_count=len(stale_symbols),
+                    total_symbols=len(drop_snapshot_store),
+                    stale_symbols=stale_symbols[:10],
+                    stale_ttl_s=stale_ttl
+                )
+            except Exception as e:
+                logger.debug(f"Failed to emit stale snapshot health event: {e}")
 
         if drops:
             first_drop = drops[0]
@@ -613,6 +694,12 @@ def make_footer_panel(last_event: str, health: Dict[str, Any]) -> Panel:
     if degraded_symbols:
         content.append("\n")
         content.append(Text(f"   slow: {', '.join(degraded_symbols[:3])}", style="magenta"))
+
+    # Display stale symbols (if any)
+    stale_symbols = health.get('stale_symbols', [])
+    if stale_symbols:
+        content.append("\n")
+        content.append(Text(f"   stale: {', '.join(stale_symbols[:3])}", style="yellow"))
 
     return Panel(content, border_style="yellow", expand=True)
 

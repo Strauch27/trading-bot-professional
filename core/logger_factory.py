@@ -446,7 +446,85 @@ def log_config_snapshot(config_module: Any, session_id: str = None) -> str:
         session_id=session_id
     )
 
+    # Save hash to file for next-run comparison
+    try:
+        import os
+        from pathlib import Path
+        session_dir = os.environ.get("BOT_SESSION_DIR", "sessions/current")
+        hash_file = Path(session_dir) / "config_hash.txt"
+        hash_file.parent.mkdir(parents=True, exist_ok=True)
+        hash_file.write_text(config_hash)
+    except Exception as e:
+        logger.debug(f"Failed to save config hash: {e}")
+
     return config_hash
+
+
+def log_config_diff(config_module: Any, current_hash: str, session_id: str = None) -> None:
+    """
+    Compare current config with previous run and log differences.
+
+    Loads the config hash from the last run, compares with current,
+    and emits a CONFIG_DIFF event at INFO level if drift is detected.
+
+    Args:
+        config_module: Config module (import config)
+        current_hash: Current config hash from log_config_snapshot()
+        session_id: Session ID for correlation
+    """
+    import os
+    from pathlib import Path
+
+    try:
+        # Try to load previous config hash
+        prev_session_dir = None
+        sessions_dir = Path("sessions")
+
+        if sessions_dir.exists():
+            # Find most recent session (excluding current)
+            current_session = os.environ.get("BOT_SESSION_DIR", "")
+            session_dirs = [
+                d for d in sorted(sessions_dir.iterdir(), reverse=True)
+                if d.is_dir() and str(d) != current_session
+            ]
+
+            if session_dirs:
+                prev_session_dir = session_dirs[0]
+                hash_file = prev_session_dir / "config_hash.txt"
+
+                if hash_file.exists():
+                    prev_hash = hash_file.read_text().strip()
+
+                    if prev_hash != current_hash:
+                        # Config has changed - log drift
+                        log_event(
+                            AUDIT_LOG(),
+                            "config_diff",
+                            message=f"Config drift detected: {prev_hash} -> {current_hash}",
+                            level=logging.INFO,
+                            prev_hash=prev_hash,
+                            current_hash=current_hash,
+                            prev_session=prev_session_dir.name,
+                            session_id=session_id
+                        )
+                        logger.info(f"CONFIG_DIFF: Drift detected from previous run (prev={prev_hash}, current={current_hash})")
+                    else:
+                        # No drift
+                        log_event(
+                            AUDIT_LOG(),
+                            "config_diff",
+                            message=f"Config unchanged from previous run (hash: {current_hash})",
+                            level=logging.INFO,
+                            prev_hash=prev_hash,
+                            current_hash=current_hash,
+                            drift=False,
+                            session_id=session_id
+                        )
+                        logger.debug(f"CONFIG_DIFF: No drift (hash: {current_hash})")
+                else:
+                    logger.debug(f"No previous config hash found in {prev_session_dir}")
+    except Exception as e:
+        logger.debug(f"Failed to calculate config diff: {e}")
 
 
 def log_config_change(

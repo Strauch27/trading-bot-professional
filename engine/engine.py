@@ -325,6 +325,7 @@ class TradingEngine:
         self.event_bus.subscribe("order.intent", self._on_order_intent)
         if self.reconciler:
             self.event_bus.subscribe("order.filled", self._on_order_filled)
+        self.event_bus.subscribe("order.failed", self._on_order_failed)
 
         # Exit Engine with Prioritized Rules
         self.exit_engine = ExitEngine(self, config)
@@ -462,6 +463,54 @@ class TradingEngine:
         except Exception as e:
             logger.debug(f"Intent state persist failed: {e}")
 
+    def clear_intent(self, intent_id: str, reason: str) -> bool:
+        """
+        Clear a pending buy intent and release its reserved budget.
+
+        This is the canonical method for removing intents from pending_buy_intents.
+        Called by:
+        - Stale intent cleanup cron
+        - Order router on failure (via order.filled event handler)
+        - Manual cleanup operations
+
+        Args:
+            intent_id: Intent ID to remove
+            reason: Reason for clearing (e.g., "stale_intent_cleanup", "order_router_release")
+
+        Returns:
+            True if intent was found and cleared, False if not found
+        """
+        metadata = self.pending_buy_intents.pop(intent_id, None)
+
+        if not metadata:
+            logger.debug(f"Intent {intent_id} not found in pending_buy_intents (already cleared or never existed)")
+            return False
+
+        # Extract metadata
+        symbol = metadata.get("symbol")
+        quote_budget = metadata.get("quote_budget", 0.0)
+        age_s = time.time() - metadata.get("start_ts", time.time())
+
+        # Release budget if reserved
+        if symbol and quote_budget > 0:
+            try:
+                self.portfolio.release_budget(
+                    quote_budget,
+                    symbol,
+                    reason=reason
+                )
+                logger.info(
+                    f"Cleared intent {intent_id}: symbol={symbol} budget=${quote_budget:.2f} "
+                    f"age={age_s:.1f}s reason={reason}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to release budget for intent {intent_id}: {e}")
+
+        # Persist state
+        self._persist_intent_state()
+
+        return True
+
     def _check_stale_intents(self):
         """
         P4: Check for and cleanup stale intents (intents stuck without fill).
@@ -495,31 +544,10 @@ class TradingEngine:
                     "decision_id": metadata.get("decision_id")
                 })
 
-                # Remove from pending
-                self.pending_buy_intents.pop(intent_id)
-
-                # Release budget (if still reserved)
-                symbol = metadata.get("symbol")
-                quote_budget = metadata.get("quote_budget", 0.0)
-
-                if symbol and quote_budget > 0:
-                    try:
-                        # Release budget back to portfolio
-                        self.portfolio.release_budget(
-                            quote_budget,
-                            symbol,
-                            reason="stale_intent_cleanup"
-                        )
-                        logger.info(
-                            f"Released ${quote_budget:.2f} budget for stale intent: {symbol} (age: {age_s:.0f}s)"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to release budget for stale intent {intent_id}: {e}")
+                # Use canonical clear_intent helper
+                self.clear_intent(intent_id, reason="stale_intent_cleanup")
 
         if stale_intents:
-            # Persist state after cleanup
-            self._persist_intent_state()
-
             # Log warning
             logger.warning(
                 f"Cleaned up {len(stale_intents)} stale intents (age > {stale_threshold_s}s)",
@@ -1174,6 +1202,41 @@ class TradingEngine:
 
         except Exception as e:
             logger.error(f"Order filled event handler error: {e}", exc_info=True)
+
+    def _on_order_failed(self, event_data: Dict):
+        """
+        Handle order.failed events from OrderRouter.
+
+        Clears the pending buy intent when an order completely fails.
+        This prevents stale intents from accumulating when orders cannot be filled.
+
+        Args:
+            event_data: Event payload with intent_id, symbol, exchange_error, etc.
+        """
+        try:
+            intent_id = event_data.get("intent_id")
+            if not intent_id:
+                logger.debug(f"order.failed event missing intent_id: {event_data}")
+                return
+
+            # Clear the pending intent using canonical helper
+            symbol = event_data.get("symbol", "UNKNOWN")
+            exchange_error = event_data.get("exchange_error", "")
+
+            cleared = self.clear_intent(intent_id, reason="order_failed")
+
+            if cleared:
+                logger.info(
+                    f"Cleared failed intent {intent_id}: symbol={symbol} "
+                    f"error={exchange_error[:100]}"
+                )
+            else:
+                logger.debug(
+                    f"Intent {intent_id} already cleared (race condition or partial fill)"
+                )
+
+        except Exception as e:
+            logger.error(f"Order failed event handler error: {e}", exc_info=True)
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price via Market Data Service"""

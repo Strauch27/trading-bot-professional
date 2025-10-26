@@ -13,10 +13,14 @@ NOTE: Vollständige Implementierungen können aus trading_legacy.py (Zeilen 353-
 import time
 import logging
 import ccxt
+import threading
 from typing import Optional, Tuple, Dict
 from .helpers import get_free
 
 logger = logging.getLogger(__name__)
+
+# Budget refresh cache to prevent blocking main thread
+_budget_cache = {"value": None, "timestamp": 0.0, "lock": threading.Lock()}
 
 
 def sync_active_order_and_state(exchange, symbol, held_assets, my_budget, settlement_manager):
@@ -170,6 +174,78 @@ def refresh_budget_from_exchange(exchange, my_budget, max_retries=3, delay=2.0) 
                            extra={'event_type': 'BUDGET_REFRESH_FAILED'})
 
     return my_budget
+
+
+def refresh_budget_from_exchange_safe(exchange, my_budget, timeout=5.0) -> float:
+    """
+    Timeout-protected wrapper for refresh_budget_from_exchange.
+
+    Prevents main thread from blocking on slow exchange calls by:
+    1. Running refresh in background thread with timeout
+    2. Returning cached value if timeout occurs
+    3. Updating cache on successful refresh
+
+    Args:
+        exchange: CCXT exchange instance
+        my_budget: Current budget fallback value
+        timeout: Maximum time to wait for refresh (default 5.0s)
+
+    Returns:
+        Refreshed budget from exchange, or cached/fallback value on timeout
+    """
+    global _budget_cache
+
+    # Container for result from background thread
+    result_container = {"value": my_budget, "success": False}
+
+    def _refresh_worker():
+        """Background worker that calls the blocking refresh function"""
+        try:
+            fresh_budget = refresh_budget_from_exchange(exchange, my_budget, max_retries=1, delay=0.5)
+            result_container["value"] = fresh_budget
+            result_container["success"] = True
+
+            # Update cache
+            with _budget_cache["lock"]:
+                _budget_cache["value"] = fresh_budget
+                _budget_cache["timestamp"] = time.time()
+
+        except Exception as e:
+            logger.warning(f"Budget refresh worker exception: {e}")
+
+    # Start background worker thread
+    worker = threading.Thread(target=_refresh_worker, daemon=True, name="BudgetRefreshWorker")
+    worker.start()
+
+    # Wait for completion with timeout
+    worker.join(timeout=timeout)
+
+    if worker.is_alive():
+        # Timeout occurred - return cached value if available
+        logger.warning(
+            f"Budget refresh timeout after {timeout}s - using cached value",
+            extra={"event_type": "BUDGET_REFRESH_TIMEOUT", "timeout_s": timeout}
+        )
+
+        with _budget_cache["lock"]:
+            if _budget_cache["value"] is not None:
+                cache_age_s = time.time() - _budget_cache["timestamp"]
+                logger.debug(f"Using cached budget value (age: {cache_age_s:.1f}s)")
+                return _budget_cache["value"]
+
+        # No cache available - return fallback
+        return my_budget
+
+    elif result_container["success"]:
+        # Refresh completed successfully
+        return result_container["value"]
+
+    else:
+        # Refresh failed - return cached or fallback
+        with _budget_cache["lock"]:
+            if _budget_cache["value"] is not None:
+                return _budget_cache["value"]
+        return my_budget
 
 
 def wait_for_balance_settlement(my_budget, expected_increase, settlement_manager, refresh_func,

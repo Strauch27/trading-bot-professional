@@ -247,7 +247,7 @@ USE_PREDICTIVE_BUYS = True
 BUY_LIMIT_PREMIUM_BPS = 8
 
 # Phase 7: Spread & Depth Guards
-MAX_SPREAD_BPS_ENTRY = 10  # Max Spread für Buy-Repricing (10 bps)
+MAX_SPREAD_BPS_ENTRY = 20  # Increased from 10 to 20 (0.2%) for volatile altcoins
 DEPTH_MIN_NOTIONAL_USD = 200  # Min kumulierte Depth (Notional)
 
 # =============================================================================
@@ -293,11 +293,11 @@ BUY_GTC_MIN_PARTIAL = 0.25
 BUY_GTC_WAIT_DYNAMIC = True
 USE_BUY_ESCALATION = True
 BUY_ESCALATION_STEPS = [
-    {"tif": "IOC", "premium_bps": 10, "max_attempts": 1},
-    {"tif": "IOC", "premium_bps": 30, "max_attempts": 1},
-    {"tif": "IOC", "premium_bps": 60, "max_attempts": 1},
+    {"tif": "IOC", "premium_bps": 10, "max_attempts": 2},  # Try IOC twice at 10bps
+    {"tif": "IOC", "premium_bps": 30, "max_attempts": 2},  # Try IOC twice at 30bps
+    {"tif": "GTC", "premium_bps": 50, "max_attempts": 1},  # Fallback to GTC at 50bps
 ]
-IOC_ORDER_TTL_MS = 600
+IOC_ORDER_TTL_MS = 2000  # Increased from 600ms to 2s for better fill rates
 ENTRY_LIMIT_OFFSET_BPS = 0  # 0 = deaktiviert
 ENTRY_ORDER_TIF = "IOC"
 
@@ -310,7 +310,7 @@ ALLOW_MARKET_FALLBACK_TTL = False
 # Depth-Sweep (Synthetischer Market mit Limit-IOC)
 USE_DEPTH_SWEEP = True
 SWEEP_ORDERBOOK_LEVELS = 20
-MAX_SLIPPAGE_BPS_ENTRY = 15
+MAX_SLIPPAGE_BPS_ENTRY = 30  # Increased from 15 to 30 (0.3%) for volatile altcoins
 MAX_SLIPPAGE_BPS_EXIT = 12
 SWEEP_REPRICE_ATTEMPTS = 4
 SWEEP_REPRICE_SLEEP_MS = 150
@@ -465,6 +465,7 @@ ENABLE_RICH_LOGGING = True  # Use Rich Console for colored structured logging
 CONSOLE_LEVEL = "INFO"  # Terminal: Nur wichtige Meldungen (INFO, WARNING, ERROR)
 SHOW_EVENT_TYPE_IN_CONSOLE = False  # Weniger Clutter im Terminal
 SHOW_THREAD_NAME_IN_CONSOLE = False  # Weniger Clutter im Terminal
+TRACE_SAMPLE_RATE = 0.1  # Sample 10% of high-frequency TRACE logs to reduce noise
 ENABLE_PNL_MONITOR = True
 VERBOSE_GUARD_LOGS = False  # Guards nur in File-Logs, nicht im Terminal
 LOG_MAX_BYTES = 50_000_000

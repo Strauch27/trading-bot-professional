@@ -343,10 +343,6 @@ def main():
     # Setup thread-safe signal handlers (replaces old approach)
     shutdown_coordinator.setup_signal_handlers()
 
-    # Legacy fallback (should not be needed with coordinator)
-    signal.signal(signal.SIGINT, legacy_signal_handler)
-    signal.signal(signal.SIGTERM, legacy_signal_handler)
-
     logger.info("🚀 Trading Bot wird gestartet...", extra={'event_type': 'BOT_INITIALIZING'})
     logger.debug(f"Session-Ordner: {SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': SESSION_DIR})
 
@@ -367,12 +363,36 @@ def main():
 
     # Phase 3: Set session ID and log config snapshot
     from core.trace_context import set_session_id
-    from core.logger_factory import AUDIT_LOG, log_event, log_config_snapshot
+    from core.logger_factory import AUDIT_LOG, log_event, log_config_snapshot, log_config_diff
 
     set_session_id(SESSION_ID)
 
     # Log complete config snapshot with categorization (Phase 3)
     config_hash = log_config_snapshot(config_module, session_id=SESSION_ID)
+
+    # Log config diff from previous run
+    log_config_diff(config_module, config_hash, session_id=SESSION_ID)
+
+    # Log CONFIG_OVERRIDES (environment-driven adjustments)
+    config_overrides = {}
+    # Check for common environment-driven overrides
+    if os.environ.get('ENABLE_LIVE_DASHBOARD') == 'False':
+        config_overrides['ENABLE_LIVE_DASHBOARD'] = 'False (from env)'
+    if os.environ.get('GLOBAL_TRADING') is not None:
+        config_overrides['GLOBAL_TRADING'] = f"{os.environ.get('GLOBAL_TRADING')} (from env)"
+    if os.environ.get('RESET_PORTFOLIO_ON_START') is not None:
+        config_overrides['RESET_PORTFOLIO_ON_START'] = f"{os.environ.get('RESET_PORTFOLIO_ON_START')} (from env)"
+
+    if config_overrides:
+        log_event(
+            AUDIT_LOG(),
+            "config_overrides",
+            message=f"Configuration overrides detected: {', '.join(config_overrides.keys())}",
+            level=logging.INFO,
+            overrides=config_overrides,
+            session_id=SESSION_ID
+        )
+        logger.info(f"CONFIG_OVERRIDES: {config_overrides}")
 
     # Log session start with config hash reference
     log_event(
@@ -530,6 +550,7 @@ def main():
         # Starte Dust-Sweep Thread
         dust_sweep_thread = threading.Thread(target=_dust_loop, daemon=True, name="DustSweeper")
         dust_sweep_thread.start()
+        shutdown_coordinator.register_thread(dust_sweep_thread)
         logger.debug("Periodischer Dust-Sweeper aktiviert",
                    extra={'event_type': 'DUST_SWEEP_ACTIVATED',
                           'interval_min': DUST_SWEEP_INTERVAL_MIN})
@@ -812,8 +833,8 @@ def main():
                 logger.warning(f"Failed to start Prometheus server: {e}",
                               extra={'event_type': 'PROMETHEUS_START_FAILED', 'error': str(e)})
 
-        # Rich Terminal Status Table (DISABLED - replaced by Live Dashboard)
-        ENABLE_RICH_TABLE = False  # Deactivated - use ENABLE_LIVE_DASHBOARD instead
+        # Rich Terminal Status Table (optional - can coexist with Live Dashboard)
+        ENABLE_RICH_TABLE = getattr(config_module, 'ENABLE_RICH_TABLE', False)
 
         if ENABLE_RICH_TABLE:
             try:
@@ -847,6 +868,7 @@ def main():
                     name="RichStatusTable"
                 )
                 rich_table_thread.start()
+                shutdown_coordinator.register_thread(rich_table_thread)
                 logger.info("Rich status table thread started",
                            extra={'event_type': 'RICH_TABLE_STARTED',
                                   'refresh_hz': RICH_TABLE_REFRESH_HZ,
@@ -887,6 +909,7 @@ def main():
                 name="LiveDropMonitor"
             )
             drop_monitor_thread_obj.start()
+            shutdown_coordinator.register_thread(drop_monitor_thread_obj)
             logger.info("Live drop monitor thread started",
                        extra={'event_type': 'DROP_MONITOR_STARTED',
                               'refresh_s': LIVE_DROP_MONITOR_REFRESH_S,
@@ -928,6 +951,7 @@ def main():
                 name="LiveDashboard"
             )
             dashboard_thread.start()
+            shutdown_coordinator.register_thread(dashboard_thread)
             logger.info("Live Dashboard thread started", extra={'event_type': 'DASHBOARD_STARTED'})
 
             # Give dashboard time to initialize before engine starts

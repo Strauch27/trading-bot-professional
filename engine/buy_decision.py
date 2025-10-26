@@ -57,7 +57,8 @@ class BuyDecisionHandler:
         self.engine.current_decision_id = decision_id
 
         # Log decision start with telemetry
-        logger.debug(f"[DECISION_START] {symbol} @ {current_price:.8f} | market_health={market_health}")
+        logger.debug(f"[DECISION_START] {symbol} @ {current_price:.8f} | market_health={market_health}",
+                    extra={'decision_id': decision_id})
 
         self.engine.jsonl_logger.decision_start(
             decision_id=decision_id,
@@ -144,7 +145,7 @@ class BuyDecisionHandler:
 
                 # CRITICAL: Log why buy is blocked for debugging
                 logger.info(f"BUY BLOCKED {symbol} → {','.join(failed_guards)} | price={current_price:.10f}",
-                           extra={'event_type':'GUARD_BLOCK_SUMMARY','symbol':symbol,'failed_guards':failed_guards})
+                           extra={'event_type':'GUARD_BLOCK_SUMMARY','symbol':symbol,'failed_guards':failed_guards,'decision_id':decision_id})
 
                 self.engine.jsonl_logger.guard_block(
                     decision_id=decision_id,
@@ -305,7 +306,8 @@ class BuyDecisionHandler:
                 decision_time = time.time() - decision_start_time
                 self.engine.monitoring.performance_metrics['decision_times'].append(decision_time)
 
-                logger.info(f"[BUY_TRIGGERED] {symbol} @ {current_price:.8f} | reason={signal_reason}")
+                logger.info(f"[BUY_TRIGGERED] {symbol} @ {current_price:.8f} | reason={signal_reason}",
+                           extra={'decision_id': decision_id})
 
                 self.engine.jsonl_logger.decision_end(
                     decision_id=decision_id,
@@ -395,7 +397,8 @@ class BuyDecisionHandler:
                     error_message=str(e)
                 )
 
-            logger.error(f"Error evaluating buy signal for {symbol}: {e}")
+            logger.error(f"Error evaluating buy signal for {symbol}: {e}",
+                        extra={'decision_id': decision_id})
             return None
 
     @trace_function(include_args=True, include_result=False)
@@ -407,7 +410,7 @@ class BuyDecisionHandler:
         usdt_balance = self.engine.portfolio.get_balance("USDT")
         trace_step("buy_candidate", symbol=symbol, price=current_price, budget=usdt_balance, signal=signal)
         logger.info(f"BUY CANDIDATE {symbol} price={current_price:.10f} budget={usdt_balance:.2f} signal={signal}",
-                   extra={'event_type':'BUY_CANDIDATE','symbol':symbol,'price':current_price,'budget':usdt_balance})
+                   extra={'event_type':'BUY_CANDIDATE','symbol':symbol,'price':current_price,'budget':usdt_balance,'decision_id':decision_id})
 
         # Console output for buy candidate visibility
         print(f"\n[BUY CANDIDATE] {symbol} @ {current_price:.6f} | Budget: ${usdt_balance:.2f} | Signal: {signal}\n", flush=True)
@@ -493,7 +496,7 @@ class BuyDecisionHandler:
 
             # CRITICAL: Log order details before placement
             logger.info(f"BUY ORDER {symbol} → amount={amount:.10f} value={quote_budget:.2f} price={current_price:.10f}",
-                       extra={'event_type':'BUY_ORDER_PREP','symbol':symbol,'amount':amount,'value':quote_budget,'price':current_price})
+                       extra={'event_type':'BUY_ORDER_PREP','symbol':symbol,'amount':amount,'value':quote_budget,'price':current_price,'decision_id':decision_id})
 
             # Dry-Run Preview
             if not self._handle_dry_run_preview(symbol, current_price, amount, quote_budget, signal, decision_id):
@@ -575,7 +578,8 @@ class BuyDecisionHandler:
                 reason="execution_error",
                 error=str(e)
             )
-            logger.error(f"Buy order execution error for {symbol}: {e}")
+            logger.error(f"Buy order execution error for {symbol}: {e}",
+                        extra={'decision_id': decision_id})
 
     def _calculate_position_size(self, symbol: str, current_price: float, usdt_balance: float) -> Optional[float]:
         """Calculate position size with budget checks"""

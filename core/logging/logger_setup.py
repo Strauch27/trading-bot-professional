@@ -1,14 +1,19 @@
 # logger_setup.py - Logging-Konfiguration und Error-Tracking
 import logging
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 import time
 import re
 import os
+import queue
+import signal
 from pythonjsonlogger import jsonlogger
 from collections import deque
 import traceback
 from datetime import datetime, timezone
 from config import LOG_FILE, run_id, run_timestamp, USE_STATUS_LINE
+
+# Global queue listener reference for cleanup
+_queue_listener = None
 
 # Import adaptive logging functions
 try:
@@ -37,6 +42,103 @@ class UTCJsonFormatter(jsonlogger.JsonFormatter):
             s = f"{t},{int(record.msecs):03d}"
         return s
 
+
+class TimeoutFormatter(logging.Formatter):
+    """
+    Formatter with timeout protection to prevent deadlocks.
+
+    If formatting takes longer than timeout_ms, returns a simplified message.
+    This prevents the logging subsystem from blocking the main thread.
+    """
+    def __init__(self, *args, timeout_ms=100, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timeout_ms = timeout_ms
+        self.timeout_count = 0
+
+    def format(self, record):
+        """Format with timeout protection"""
+        import signal
+        import sys
+
+        # Skip timeout on Windows (no alarm support)
+        if sys.platform == 'win32':
+            return super().format(record)
+
+        # Container for result
+        result = [None]
+        timed_out = [False]
+
+        def timeout_handler(signum, frame):
+            timed_out[0] = True
+            raise TimeoutError("Formatter timeout")
+
+        # Set alarm
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, self.timeout_ms / 1000.0)
+
+        try:
+            result[0] = super().format(record)
+        except TimeoutError:
+            self.timeout_count += 1
+            # Return minimal formatted message on timeout
+            result[0] = (
+                f"{record.levelname} - FORMATTER_TIMEOUT - "
+                f"{getattr(record, 'funcName', 'unknown')}:{getattr(record, 'lineno', 0)} - "
+                f"Message format exceeded {self.timeout_ms}ms (timeout #{self.timeout_count})"
+            )
+        except Exception as e:
+            # Fallback for any other formatting error
+            result[0] = f"{record.levelname} - FORMATTER_ERROR - {str(e)}"
+        finally:
+            # Cancel alarm and restore handler
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+        return result[0]
+
+
+class TimeoutUTCJsonFormatter(UTCJsonFormatter):
+    """UTCJsonFormatter with timeout protection"""
+    def __init__(self, *args, timeout_ms=100, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timeout_ms = timeout_ms
+        self.timeout_count = 0
+
+    def format(self, record):
+        """Format with timeout protection"""
+        import signal
+        import sys
+
+        # Skip timeout on Windows (no alarm support)
+        if sys.platform == 'win32':
+            return super().format(record)
+
+        result = [None]
+        timed_out = [False]
+
+        def timeout_handler(signum, frame):
+            timed_out[0] = True
+            raise TimeoutError("Formatter timeout")
+
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, self.timeout_ms / 1000.0)
+
+        try:
+            result[0] = super().format(record)
+        except TimeoutError:
+            self.timeout_count += 1
+            result[0] = (
+                f'{{"level":"{record.levelname}","event":"FORMATTER_TIMEOUT",'
+                f'"timeout_ms":{self.timeout_ms},"count":{self.timeout_count}}}'
+            )
+        except Exception as e:
+            result[0] = f'{{"level":"{record.levelname}","event":"FORMATTER_ERROR","error":"{str(e)}"}}'
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+        return result[0]
+
 # =================================================================================
 # Filter-Klassen
 # =================================================================================
@@ -59,6 +161,45 @@ class AddSessionIdFilter(logging.Filter):
         if session_id:
             record.session_id = session_id
         return True
+
+
+class TraceSampleFilter(logging.Filter):
+    """
+    Sample TRACE-level logs to reduce noise.
+
+    Only allows a fraction (sample_rate) of TRACE logs through.
+    Higher priority logs (DEBUG, INFO, WARNING, ERROR) always pass.
+    """
+    def __init__(self, sample_rate=0.1):
+        """
+        Args:
+            sample_rate: Fraction of TRACE logs to keep (0.0 to 1.0)
+                         0.1 = keep 10% of TRACE logs
+        """
+        super().__init__()
+        self.sample_rate = max(0.0, min(1.0, sample_rate))
+        self.counter = 0
+
+    def filter(self, record):
+        # Only sample TRACE level (5, lower than DEBUG which is 10)
+        if record.levelno > logging.DEBUG:
+            return True  # Allow all INFO and above
+
+        # For DEBUG and below, check if it's a noisy event type
+        event_type = getattr(record, 'event_type', '')
+        noisy_events = [
+            'MARKET_TICK', 'MARKET_UPDATE', 'PRICE_UPDATE',
+            'ORDERBOOK_UPDATE', 'FEATURE_UPDATE', 'SNAPSHOT_UPDATE'
+        ]
+
+        if event_type in noisy_events:
+            # Sample based on counter
+            self.counter += 1
+            # Simple modulo-based sampling
+            keep_every_n = max(1, int(1.0 / self.sample_rate))
+            return (self.counter % keep_every_n) == 0
+
+        return True  # Allow non-noisy DEBUG logs
 
 class ConsoleImportantInfoFilter(logging.Filter):
     """Filter für Console Handler - lässt nur wichtige INFOs durch"""
@@ -175,33 +316,84 @@ class ErrorTracker:
         return len(recent) >= threshold_5min
 
 # =================================================================================
-# Logger-Setup-Funktion
+# Queue-based Logging Cleanup
 # =================================================================================
-def setup_logger():
+def shutdown_queue_logging():
+    """Shutdown the queue listener gracefully"""
+    global _queue_listener
+    if _queue_listener:
+        try:
+            _queue_listener.stop()
+            _queue_listener = None
+        except Exception as e:
+            print(f"Error stopping queue listener: {e}")
+
+
+# =================================================================================
+# Logger-Setup-Funktion mit Queue-Handler (Thread-Safe)
+# =================================================================================
+def setup_logger(use_queue=True):
+    """
+    Setup logger with optional queue-based logging for thread safety.
+
+    Args:
+        use_queue: If True, uses QueueHandler/QueueListener to prevent
+                   blocking on slow I/O operations (default: True)
+    """
+    global _queue_listener
+
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
-    
+
     # Verhindere Handler-Duplikate bei mehrfachem Import
     if logger.handlers:
         return logger
-    
+
     # Stelle sicher, dass Log-Verzeichnis existiert
     log_dir = os.path.dirname(LOG_FILE)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
 
-    json_formatter = UTCJsonFormatter(
+    # Use TimeoutUTCJsonFormatter for safety
+    json_formatter = TimeoutUTCJsonFormatter(
         '%(asctime)s %(levelname)s %(run_id)s %(session_id)s %(message)s %(event_type)s',
         rename_fields={'levelname': 'level', 'asctime': 'timestamp'},
-        datefmt='%Y-%m-%dT%H:%M:%S.%fZ'
+        datefmt='%Y-%m-%dT%H:%M:%S.%fZ',
+        timeout_ms=100
     )
 
-    # Use RotatingFileHandler as the only file handler (delay=True for Windows compatibility)
-    rotating_handler = RotatingFileHandler(LOG_FILE, maxBytes=10_000_000, backupCount=5, 
-                                           encoding='utf-8', delay=True)
-    rotating_handler.setLevel(logging.DEBUG)
-    rotating_handler.setFormatter(json_formatter)
-    logger.addHandler(rotating_handler)
+    if use_queue:
+        # Create queue for asynchronous logging
+        log_queue = queue.Queue(maxsize=10000)  # Prevent memory exhaustion
+
+        # Create actual file handler (will run in background thread)
+        rotating_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=10_000_000, backupCount=5,
+            encoding='utf-8', delay=True
+        )
+        rotating_handler.setLevel(logging.DEBUG)
+        rotating_handler.setFormatter(json_formatter)
+
+        # Start queue listener in background thread
+        _queue_listener = QueueListener(
+            log_queue, rotating_handler,
+            respect_handler_level=True
+        )
+        _queue_listener.start()
+
+        # Add queue handler to logger (non-blocking)
+        queue_handler = QueueHandler(log_queue)
+        queue_handler.setLevel(logging.DEBUG)
+        logger.addHandler(queue_handler)
+    else:
+        # Direct file handler (original behavior, may block)
+        rotating_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=10_000_000, backupCount=5,
+            encoding='utf-8', delay=True
+        )
+        rotating_handler.setLevel(logging.DEBUG)
+        rotating_handler.setFormatter(json_formatter)
+        logger.addHandler(rotating_handler)
 
     # Import console configuration
     try:
@@ -248,7 +440,11 @@ def setup_logger():
     logger.addFilter(EnsureEventTypeFilter())
     logger.addFilter(AddRunIdFilter())
     logger.addFilter(AddSessionIdFilter())
-    
+
+    # Add trace sampling filter to reduce noise from high-frequency events
+    trace_sample_rate = getattr(__import__('config'), 'TRACE_SAMPLE_RATE', 0.1)
+    logger.addFilter(TraceSampleFilter(sample_rate=trace_sample_rate))
+
     return logger
 
 # =================================================================================

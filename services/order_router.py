@@ -20,6 +20,7 @@ import math
 import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
+import ccxt
 
 # P1: State Persistence
 from core.state_writer import DebouncedStateWriter
@@ -164,7 +165,9 @@ class OrderRouter:
         symbol: str,
         side: str,
         qty: float,
-        price: float
+        price: float,
+        exchange_error: Optional[str] = None,
+        intent_id: Optional[str] = None
     ) -> None:
         """
         Release reserved budget (on failure or partial cancel).
@@ -174,10 +177,12 @@ class OrderRouter:
             side: Order side
             qty: Quantity to release
             price: Price used for reservation
+            exchange_error: Exchange error message/code (if failure)
+            intent_id: Intent ID for tracing
         """
         try:
-            self.pf.release(symbol, side, qty, price)
-            logger.debug(f"Released budget: {symbol} {side} {qty}@{price}")
+            self.pf.release(symbol, side, qty, price, exchange_error=exchange_error, intent_id=intent_id)
+            logger.debug(f"Released budget: {symbol} {side} {qty}@{price} (intent={intent_id}, error={exchange_error})")
 
         except Exception as e:
             logger.error(f"Budget release error: {symbol} {side} {qty}@{price}: {e}")
@@ -235,6 +240,58 @@ class OrderRouter:
 
             return capped_price
 
+    def _log_order_context(
+        self,
+        intent_id: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        limit_px: Optional[float],
+        quote_budget: float,
+        attempt: int,
+        attempt_start_ts: float
+    ) -> None:
+        """
+        Log canonical ORDER_CONTEXT block with all execution constraints.
+
+        This creates a structured log entry capturing intent metadata, quotes,
+        slippage caps, and router config for each order attempt. Essential for
+        post-mortem analysis of execution failures.
+
+        Args:
+            intent_id: Unique intent identifier
+            symbol: Trading pair (e.g., "BTC/USDT")
+            side: Order side ("buy" or "sell")
+            qty: Order quantity
+            limit_px: Limit price (None for market orders)
+            quote_budget: Reserved quote currency budget
+            attempt: Current attempt number (1-based)
+            attempt_start_ts: Timestamp when attempt started
+        """
+        # Calculate notional value
+        notional = qty * (limit_px or 0.0) if limit_px else quote_budget
+
+        logger.info(
+            "ORDER_CONTEXT",
+            extra={
+                "event_type": "ORDER_CONTEXT",
+                "intent_id": intent_id,
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "limit_px": limit_px,
+                "quote_budget": quote_budget,
+                "notional": notional,
+                "tif": self.cfg.tif,
+                "slippage_bps": self.cfg.slippage_bps,
+                "min_notional": self.cfg.min_notional,
+                "max_retries": self.cfg.max_retries,
+                "retry_backoff_ms": self.cfg.retry_backoff_ms,
+                "attempt": attempt,
+                "attempt_start_ts": attempt_start_ts
+            }
+        )
+
     def _place_order(
         self,
         symbol: str,
@@ -246,6 +303,8 @@ class OrderRouter:
         """
         Place order via exchange wrapper.
 
+        Checks ORDER_FLOW_ENABLED kill-switch before placing orders.
+
         Args:
             symbol: Trading pair
             side: Order side
@@ -255,7 +314,17 @@ class OrderRouter:
 
         Returns:
             CCXT order object
+
+        Raises:
+            RuntimeError: If ORDER_FLOW_ENABLED is False (kill-switch activated)
         """
+        # Check ORDER_FLOW_ENABLED kill-switch
+        order_flow_enabled = getattr(config, 'ORDER_FLOW_ENABLED', True)
+        if not order_flow_enabled:
+            error_msg = f"ORDER_FLOW_ENABLED=False: Order placement disabled by kill-switch"
+            logger.warning(error_msg, extra={'symbol': symbol, 'side': side, 'qty': qty})
+            raise RuntimeError(error_msg)
+
         params = {
             "clientOrderId": client_order_id,
             "timeInForce": self.cfg.tif
@@ -375,23 +444,52 @@ class OrderRouter:
         last_price = self.pf.last_price(symbol) or limit_px or 0.0
 
         if last_price <= 0:
-            logger.error(f"Cannot determine price for {symbol}")
+            error_msg = f"Cannot determine price for {symbol}"
+            logger.error(error_msg, extra={'intent_id': intent_id})
             self.tl.write("order_audit", {
                 "intent_id": intent_id,
                 "state": "FAILED",
                 "reason": "no_price",
                 "timestamp": time.time()
             })
+
+            # Publish order.failed event to notify engine
+            if self.event_bus:
+                try:
+                    self.event_bus.publish("order.failed", {
+                        "intent_id": intent_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "reason": "no_price",
+                        "error": error_msg
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to publish order.failed event: {e}")
             return
 
         # State: RESERVE
         if not self._reserve_budget(symbol, side, qty, last_price):
+            error_msg = f"Budget reservation failed for {symbol}"
+            logger.error(error_msg, extra={'intent_id': intent_id})
             self.tl.write("order_audit", {
                 "intent_id": intent_id,
                 "state": "FAILED",
                 "reason": "reserve_failed",
                 "timestamp": time.time()
             })
+
+            # Publish order.failed event to notify engine
+            if self.event_bus:
+                try:
+                    self.event_bus.publish("order.failed", {
+                        "intent_id": intent_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "reason": "reserve_failed",
+                        "error": error_msg
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to publish order.failed event: {e}")
             return
 
         self.tl.write("order_audit", {
@@ -411,6 +509,7 @@ class OrderRouter:
         filled_qty = 0.0
         order_id = None
         last_status: Optional[Dict[str, Any]] = None
+        last_exchange_error: Optional[str] = None  # Track last error for budget release
         client_order_id = self._client_oid(intent_id)
         base_meta = {
             "intent_id": intent_id,
@@ -424,10 +523,24 @@ class OrderRouter:
 
         while attempt <= self.cfg.max_retries:
             attempt += 1
+            attempt_start_ts = time.time()  # Track latency per attempt
             remaining_qty = qty - filled_qty
 
             if remaining_qty <= 0:
                 break
+
+            # Log canonical ORDER_CONTEXT for this attempt
+            quote_budget = remaining_qty * (limit_px if limit_px else last_price)
+            self._log_order_context(
+                intent_id=intent_id,
+                symbol=symbol,
+                side=side,
+                qty=remaining_qty,
+                limit_px=limit_px,
+                quote_budget=quote_budget,
+                attempt=attempt,
+                attempt_start_ts=attempt_start_ts
+            )
 
             try:
                 # State: SENT
@@ -516,17 +629,45 @@ class OrderRouter:
                     logger.info(f"Partial fill: {order_id} ({filled_qty}/{qty})")
 
             except Exception as e:
-                # State: ERROR
+                # State: ERROR - Extract detailed exchange error information
+                exchange_error_code = None
+                exchange_error_msg = str(e)
+
+                # Extract exchange-specific error codes from CCXT exceptions
+                if isinstance(e, ccxt.BaseError):
+                    if hasattr(e, 'code'):
+                        exchange_error_code = e.code
+                    # For MEXC/other exchanges, error messages often contain error codes
+                    # Format: "mexc {"code":-1234,"msg":"...}"
+                    import re
+                    code_match = re.search(r'"code"\s*:\s*(-?\d+)', str(e))
+                    if code_match:
+                        exchange_error_code = code_match.group(1)
+
+                # Store for budget release
+                last_exchange_error = f"{type(e).__name__}:{exchange_error_code or 'N/A'}:{exchange_error_msg[:100]}"
+
+                # Calculate latency since order attempt started
+                attempt_latency_ms = (time.time() - attempt_start_ts) * 1000 if 'attempt_start_ts' in locals() else 0
+
                 self.tl.write("order_audit", {
                     "intent_id": intent_id,
                     "state": "ERROR",
-                    "error": str(e),
+                    "error": exchange_error_msg,
                     "error_type": type(e).__name__,
+                    "exchange_error_code": exchange_error_code,
                     "attempt": attempt,
+                    "latency_ms": attempt_latency_ms,
                     "timestamp": time.time()
                 })
 
-                logger.error(f"Order attempt {attempt} failed: {e}")
+                # CRITICAL: Log to ERROR level for visibility (not just order_audit)
+                logger.error(
+                    f"ORDER_FAILED intent={intent_id} symbol={symbol} side={side} qty={qty} "
+                    f"attempt={attempt}/{self.cfg.max_retries} error_type={type(e).__name__} "
+                    f"exchange_code={exchange_error_code} latency={attempt_latency_ms:.1f}ms "
+                    f"error='{exchange_error_msg}'"
+                )
 
                 if order_id:
                     self._order_meta.pop(order_id, None)
@@ -555,7 +696,11 @@ class OrderRouter:
         # Release unfilled budget
         unfilled_qty = qty - filled_qty
         if unfilled_qty > 0:
-            self._release_budget(symbol, side, unfilled_qty, last_price)
+            self._release_budget(
+                symbol, side, unfilled_qty, last_price,
+                exchange_error=last_exchange_error,
+                intent_id=intent_id
+            )
 
         # Final audit
         final_state = "PARTIAL_SUCCESS" if filled_qty > 0 else "FAILED_FINAL"
@@ -568,6 +713,36 @@ class OrderRouter:
             "attempts": attempt,
             "timestamp": time.time()
         })
+
+        # Write ORDER_FAILED event to orders.jsonl for complete failures
+        if final_state == "FAILED_FINAL":
+            self.tl.order_failed(
+                intent_id=intent_id,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                order_id=order_id,
+                filled_qty=filled_qty,
+                attempts=attempt,
+                exchange_error=last_exchange_error,
+                timestamp=time.time()
+            )
+
+            # Publish order.failed event for engine to cleanup pending intent
+            if self.event_bus:
+                try:
+                    self.event_bus.publish("order.failed", {
+                        "intent_id": intent_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "qty": qty,
+                        "order_id": order_id,
+                        "exchange_error": last_exchange_error,
+                        "attempts": attempt,
+                        "timestamp": time.time()
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to publish order.failed event: {e}")
 
         logger.warning(
             f"Intent {intent_id} completed with {final_state}: "

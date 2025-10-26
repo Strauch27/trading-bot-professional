@@ -90,6 +90,7 @@ from core.utils import (
 )
 from trading import (
     refresh_budget_from_exchange,
+    refresh_budget_from_exchange_safe,
     full_portfolio_reset
 )
 from trading.helpers import _get_free, _base_currency
@@ -490,8 +491,9 @@ class PortfolioManager:
         """Aktualisiert Budget von Exchange"""
         if not self.exchange:
             return self.my_budget
-            
-        actual_budget = refresh_budget_from_exchange(self.exchange, self.my_budget)
+
+        # Use timeout-protected version to prevent main thread blocking
+        actual_budget = refresh_budget_from_exchange_safe(self.exchange, self.my_budget, timeout=5.0)
         
         # Only log if there's a meaningful change
         delta = abs(actual_budget - (self.my_budget or 0.0))
@@ -1181,7 +1183,15 @@ class PortfolioManager:
             logger.error(f"Unexpected error in reserve(): {e}")
             return False
 
-    def release(self, symbol: str, side: str, qty: float, price: float) -> None:
+    def release(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        exchange_error: Optional[str] = None,
+        intent_id: Optional[str] = None
+    ) -> None:
         """
         Release reserved budget (on order failure or partial fill).
 
@@ -1192,13 +1202,22 @@ class PortfolioManager:
             side: "buy" or "sell"
             qty: Quantity to release
             price: Price used for notional calculation
+            exchange_error: Exchange error message/code (if failure)
+            intent_id: Intent ID for tracing
         """
         try:
             notional = qty * price
 
             if side == "buy":
                 # Release reserved quote currency
-                self.release_budget(notional, symbol=symbol, reason="order_router_release")
+                # Include exchange_error and intent_id in reason for observability
+                reason = "order_router_release"
+                if exchange_error and intent_id:
+                    reason = f"order_router_release|intent={intent_id}|error={exchange_error[:50]}"
+                elif intent_id:
+                    reason = f"order_router_release|intent={intent_id}"
+
+                self.release_budget(notional, symbol=symbol, reason=reason)
 
             else:  # sell
                 current_reserved = self.reserved_base.get(symbol, 0.0)
