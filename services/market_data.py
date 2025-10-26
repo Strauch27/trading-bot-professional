@@ -2260,14 +2260,21 @@ class MarketDataProvider:
                     loop_counter += 1
                     cycle_start = time.time()
 
-                    # ULTRA DEBUG (extended to first 10 loops)
-                    if loop_counter <= 10:
-                        try:
-                            with open("/tmp/market_data_loop.txt", "a") as f:
-                                f.write(f"  Loop iteration #{loop_counter} - Processing {len(symbol_batches)} batches...\n")
-                                f.flush()
-                        except:
-                            pass
+                    # CRITICAL FIX: Add continuous loop logging (not just first 10)
+                    # Log every 10th iteration for debugging
+                    if loop_counter % 10 == 0 or loop_counter <= 3:
+                        logger.info(
+                            f"MD_LOOP_ITERATION iteration={loop_counter} batches={len(symbol_batches)} _running={self._running}",
+                            extra={'event_type': 'MD_LOOP_ITERATION', 'iteration': loop_counter, 'running': self._running}
+                        )
+
+                    # ULTRA DEBUG (extended to ALL loops, with file rotation)
+                    try:
+                        with open("/tmp/market_data_loop.txt", "a") as f:
+                            f.write(f"  Loop iteration #{loop_counter} - Processing {len(symbol_batches)} batches...\n")
+                            f.flush()
+                    except:
+                        pass
 
                     # Process each batch with interval
                     all_results = {}
@@ -2301,18 +2308,17 @@ class MarketDataProvider:
                             if batch_sleep > 0:
                                 time.sleep(batch_sleep)
 
-                    # ULTRA DEBUG (extended to first 10 loops)
-                    if loop_counter <= 10:
-                        try:
-                            with open("/tmp/market_data_loop.txt", "a") as f:
-                                f.write(f"  Loop iteration #{loop_counter} - All batches processed\n")
-                                f.flush()
-                        except:
-                            pass
-
                     success_count = sum(1 for v in all_results.values() if v)
                     failed_count = sum(1 for v in all_results.values() if not v)
                     cycle_duration = time.time() - cycle_start
+
+                    # ULTRA DEBUG (extended to ALL loops)
+                    try:
+                        with open("/tmp/market_data_loop.txt", "a") as f:
+                            f.write(f"  Loop iteration #{loop_counter} - All batches processed (success={success_count}/{len(symbols)}, duration={cycle_duration:.2f}s)\n")
+                            f.flush()
+                    except:
+                        pass
 
                     # Per-cycle summary (if per-coin debugging enabled)
                     if getattr(config, 'MD_DEBUG_PER_COIN', False):
@@ -2427,18 +2433,57 @@ class MarketDataProvider:
                             }
                         )
 
+                except KeyboardInterrupt:
+                    logger.warning("MD_LOOP received KeyboardInterrupt - stopping gracefully")
+                    self._running = False
+                    break
+                except SystemExit as e:
+                    logger.warning(f"MD_LOOP received SystemExit({e}) - stopping")
+                    self._running = False
+                    break
                 except Exception as e:
-                    logger.error(f"Market data loop error: {e}", exc_info=True)
+                    logger.error(
+                        f"Market data loop error (iteration={loop_counter}): {e}",
+                        exc_info=True,
+                        extra={'event_type': 'MD_LOOP_CYCLE_ERROR', 'iteration': loop_counter}
+                    )
+                    # CRITICAL FIX: Don't stop on exceptions, just sleep and continue
                     time.sleep(poll_s)
 
-        except Exception as e:
-            logger.exception("MD_LOOP_FATAL")
-            logger.error(str(e))
-            logger.error(traceback.format_exc())
+            # If loop exits normally (self._running became False)
+            logger.info(f"Market data loop exited normally after {loop_counter} iterations (_running={self._running})")
+
+        except KeyboardInterrupt:
+            logger.warning("MD_LOOP_FATAL: KeyboardInterrupt in outer try")
             self._running = False
+        except SystemExit as e:
+            logger.warning(f"MD_LOOP_FATAL: SystemExit({e}) in outer try")
+            self._running = False
+        except Exception as e:
+            logger.exception("MD_LOOP_FATAL: Unhandled exception in outer try")
+            logger.error(f"Exception type: {type(e).__name__}", extra={'event_type': 'MD_LOOP_FATAL'})
+            logger.error(f"Exception message: {str(e)}")
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            self._running = False
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  FATAL ERROR: {type(e).__name__}: {e}\n")
+                    f.write(f"  Traceback:\n{traceback.format_exc()}\n")
+                    f.flush()
+            except:
+                pass
             return
         finally:
-            logger.info("Market data loop ended")
+            logger.info(f"Market data loop ended (finally block, loop_counter={loop_counter if 'loop_counter' in locals() else 'unknown'})")
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    import datetime
+                    f.write(f"{datetime.datetime.now()} - _loop() EXIT (finally block)\n")
+                    f.flush()
+            except:
+                pass
 
 
 # Utility functions for backwards compatibility
