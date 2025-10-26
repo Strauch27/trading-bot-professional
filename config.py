@@ -215,7 +215,7 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 # CRITICAL FIX (C-CONFIG-03): Consolidate duplicate poll interval parameters
-MD_POLL_MS = 1500  # Market data polling interval (1.5 seconds - balanced for 91 symbols)
+MD_POLL_MS = 30000  # Market data polling interval (30 seconds - reduced load, system tested at 6.5s avg)
 POLL_MS = MD_POLL_MS  # DEPRECATED: Use MD_POLL_MS instead (maintained for backward compatibility)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)

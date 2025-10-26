@@ -1,5 +1,5 @@
 Timeout (0:00:30)!
-Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
@@ -7,21 +7,378 @@ Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000301007000 [UIFallbackFeed] (most recent call first):
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 386 in _rate_limit
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 493 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1581 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 586 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 585 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1101 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1045 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 361 in raw_decode
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345 in decode
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 359 in loads
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 502 in on_json_response
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 641 in parse_json
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 571 in fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4709 in fetch2
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4724 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/types.py", line 35 in unbound_method
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1862 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 112 in _trace_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 212 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 450 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1527 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1623 in run
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017fd5b000 [TradingEngine-Main] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 935 in _main_loop
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1325 in do_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1369 in https_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464 in _call_chain
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504 in _open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487 in open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 42 in _http_get
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/retry.py", line 65 in wrapper
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 1253 in _poll_commands
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017ed4f000 [MarketDataLoop] (most recent call first):
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1609 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000202894800 (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 278 in wait_for_shutdown
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
+Timeout (0:00:30)!
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connection.py", line 565 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 534 in _make_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/adapters.py", line 644 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 703 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 589 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 556 in fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4709 in fetch2
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4724 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/types.py", line 35 in unbound_method
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1941 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 112 in _trace_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 204 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 450 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1581 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 716 in _fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data/coalescing.py", line 192 in get_or_fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 723 in get_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 813 in get_price
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1040 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1527 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1325 in do_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1369 in https_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464 in _call_chain
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504 in _open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487 in open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 42 in _http_get
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/retry.py", line 65 in wrapper
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 1253 in _poll_commands
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1609 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000202894800 (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 278 in wait_for_shutdown
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
+Timeout (0:00:30)!
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1581 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 586 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 585 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1101 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1045 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
@@ -46,26 +403,26 @@ Thread 0x000000017ed4f000 [MarketDataLoop] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1492 in update_market_data
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2249 in _loop
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1527 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017cd37000 [Thread-3] (most recent call first):
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017bd2b000 [LiveDashboard] (most recent call first):
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017ad1f000 [TelegramCommands] (most recent call first):
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
@@ -85,7 +442,7 @@ Thread 0x000000017ad1f000 [TelegramCommands] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000179d13000 [TradeCacheBulkProcessor] (most recent call first):
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
@@ -93,7 +450,7 @@ Thread 0x0000000179d13000 [TradeCacheBulkProcessor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000178d07000 [DebouncedStateWriter] (most recent call first):
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
@@ -101,13 +458,13 @@ Thread 0x0000000178d07000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000177cfb000 [Thread-2 (_rotation_worker)] (most recent call first):
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000176cef000 [DebouncedStateWriter] (most recent call first):
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
@@ -115,7 +472,7 @@ Thread 0x0000000176cef000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000175ce3000 [ConnectionHealthMonitor] (most recent call first):
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
@@ -123,7 +480,7 @@ Thread 0x0000000175ce3000 [ConnectionHealthMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000174cd7000 [ShutdownHeartbeatLogger] (most recent call first):
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
@@ -131,7 +488,7 @@ Thread 0x0000000174cd7000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000173ccb000 [MemoryManager] (most recent call first):
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
@@ -139,7 +496,7 @@ Thread 0x0000000173ccb000 [MemoryManager] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000172ba7000 [ShutdownHeartbeatLogger] (most recent call first):
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
@@ -147,7 +504,7 @@ Thread 0x0000000172ba7000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000170b8f000 [Thread-1 (_monitor)] (most recent call first):
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
@@ -163,7 +520,7 @@ Thread 0x0000000202894800 (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
 Timeout (0:00:30)!
-Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
@@ -171,57 +528,71 @@ Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000301007000 [UIFallbackFeed] (most recent call first):
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1579 in run
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1581 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017fd5b000 [TradingEngine-Main] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 3996 in iso8601
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 2086 in parse_ticker
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 6128 in parse_tickers
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1920 in fetch_tickers
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connection.py", line 565 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 534 in _make_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/adapters.py", line 644 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 703 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 589 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 556 in fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4709 in fetch2
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4724 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/types.py", line 35 in unbound_method
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1774 in fetch_ohlcv
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 112 in _trace_call
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 212 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 235 in fetch_ohlcv
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 450 in _execute_with_timeout
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 586 in <lambda>
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1492 in update_market_data
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 977 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 585 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1101 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1024 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017ed4f000 [MarketDataLoop] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1734 in update_market_data
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2249 in _loop
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1609 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017cd37000 [Thread-3] (most recent call first):
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017bd2b000 [LiveDashboard] (most recent call first):
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017ad1f000 [TelegramCommands] (most recent call first):
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
@@ -241,7 +612,7 @@ Thread 0x000000017ad1f000 [TelegramCommands] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000179d13000 [TradeCacheBulkProcessor] (most recent call first):
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
@@ -249,7 +620,7 @@ Thread 0x0000000179d13000 [TradeCacheBulkProcessor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000178d07000 [DebouncedStateWriter] (most recent call first):
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
@@ -257,13 +628,13 @@ Thread 0x0000000178d07000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000177cfb000 [Thread-2 (_rotation_worker)] (most recent call first):
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000176cef000 [DebouncedStateWriter] (most recent call first):
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
@@ -271,7 +642,7 @@ Thread 0x0000000176cef000 [DebouncedStateWriter] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000175ce3000 [ConnectionHealthMonitor] (most recent call first):
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
@@ -279,7 +650,7 @@ Thread 0x0000000175ce3000 [ConnectionHealthMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000174cd7000 [ShutdownHeartbeatLogger] (most recent call first):
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
@@ -287,7 +658,7 @@ Thread 0x0000000174cd7000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000173ccb000 [MemoryManager] (most recent call first):
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
@@ -295,7 +666,7 @@ Thread 0x0000000173ccb000 [MemoryManager] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000172ba7000 [ShutdownHeartbeatLogger] (most recent call first):
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
@@ -303,7 +674,7 @@ Thread 0x0000000172ba7000 [ShutdownHeartbeatLogger] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000170b8f000 [Thread-1 (_monitor)] (most recent call first):
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
@@ -319,7 +690,7 @@ Thread 0x0000000202894800 (most recent call first):
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
 Timeout (0:00:30)!
-Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
@@ -327,183 +698,369 @@ Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x0000000301007000 [UIFallbackFeed] (most recent call first):
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1623 in run
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1625 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017fd5b000 [TradingEngine-Main] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1560 in _get_code_position
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1576 in getframeinfo
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1630 in getouterframes
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1655 in stack
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 161 in log_step
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 420 in trace_step
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/buy_decision.py", line 121 in evaluate_buy_signal
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 406 in wrapper
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1361 in _evaluate_buy_opportunities
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 406 in wrapper
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 859 in _main_loop
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x000000017ed4f000 [MarketDataLoop] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1358 in update_market_data
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2249 in _loop
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x000000017cd37000 [Thread-3] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x000000017bd2b000 [LiveDashboard] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x000000017ad1f000 [TelegramCommands] (most recent call first):
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1325 in do_open
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1369 in https_open
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464 in _call_chain
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504 in _open
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487 in open
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187 in urlopen
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 42 in _http_get
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/retry.py", line 65 in wrapper
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 1253 in _poll_commands
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000179d13000 [TradeCacheBulkProcessor] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000178d07000 [DebouncedStateWriter] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000177cfb000 [Thread-2 (_rotation_worker)] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000176cef000 [DebouncedStateWriter] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000175ce3000 [ConnectionHealthMonitor] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000174cd7000 [ShutdownHeartbeatLogger] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000173ccb000 [MemoryManager] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000172ba7000 [ShutdownHeartbeatLogger] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000170b8f000 [Thread-1 (_monitor)] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1609 in _monitor
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000202894800 (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 278 in wait_for_shutdown
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
-Timeout (0:00:30)!
-Thread 0x0000000302013000 [HeartbeatMonitor] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
-
-Thread 0x0000000301007000 [UIFallbackFeed] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connection.py", line 565 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 534 in _make_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/adapters.py", line 644 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 703 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 589 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 556 in fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4709 in fetch2
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4724 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/types.py", line 35 in unbound_method
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1941 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 112 in _trace_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 204 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 450 in _execute_with_timeout
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
   File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1579 in run
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 716 in _fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data/coalescing.py", line 192 in get_or_fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 723 in get_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 813 in get_price
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1040 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017fd5b000 [TradingEngine-Main] (most recent call first):
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/linecache.py", line 104 in checkcache
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 960 in findsource
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1592 in getframeinfo
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1630 in getouterframes
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1655 in stack
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 161 in log_step
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 420 in trace_step
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/buy_decision.py", line 99 in evaluate_buy_signal
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 406 in wrapper
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1361 in _evaluate_buy_opportunities
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/debug_tracer.py", line 406 in wrapper
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 859 in _main_loop
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1527 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
   File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
 
-Thread 0x000000017ed4f000 [MarketDataLoop] (most recent call first):
-  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py"
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 656 in get_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 813 in get_price
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1270 in get_current_price
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/hybrid_engine.py", line 373 in get_current_price
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 219 in get_portfolio_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 784 in run_dashboard
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1325 in do_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1369 in https_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464 in _call_chain
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504 in _open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487 in open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 42 in _http_get
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/retry.py", line 65 in wrapper
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 1253 in _poll_commands
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1609 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000202894800 (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 278 in wait_for_shutdown
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
+Timeout (0:00:30)!
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connection.py", line 565 in getresponse
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 534 in _make_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/urllib3/connectionpool.py", line 787 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/adapters.py", line 644 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 703 in send
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/requests/sessions.py", line 589 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 556 in fetch
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4709 in fetch2
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/exchange.py", line 4724 in request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/base/types.py", line 35 in unbound_method
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/ccxt/mexc.py", line 1941 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 112 in _trace_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/exchange_tracer.py", line 204 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 450 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 571 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 570 in fetch_ticker
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1581 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 586 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 585 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1101 in fetch_ohlcv
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1045 in _update_market_conditions
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1004 in _update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 828 in _main_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017b67b000 [MarketDataLoop] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 447 in _execute_with_timeout
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 499 in _retry_request
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 579 in <lambda>
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 417 in _safe_ccxt_call
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/exchange.py", line 578 in fetch_tickers
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 1527 in update_market_data
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/market_data.py", line 2284 in _loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017a66f000 [Thread-3] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/venv/lib/python3.14/site-packages/rich/live.py", line 35 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000179663000 [LiveDashboard] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/ui/dashboard.py", line 806 in run_dashboard
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000178657000 [TelegramCommands] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1138 in read
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ssl.py", line 1304 in recv_into
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 292 in _read_status
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 331 in begin
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1430 in getresponse
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1325 in do_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1369 in https_open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464 in _call_chain
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504 in _open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487 in open
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187 in urlopen
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 42 in _http_get
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/adapters/retry.py", line 65 in wrapper
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/integrations/telegram/telegram_commands.py", line 1253 in _poll_commands
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017764b000 [TradeCacheBulkProcessor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/trade_cache.py", line 100 in bulk_processor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017663f000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000175633000 [Thread-2 (_rotation_worker)] (most recent call first):
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/logging/log_manager.py", line 107 in _rotation_worker
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000174627000 [DebouncedStateWriter] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/core/state_writer.py", line 125 in _writer_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017361b000 [ConnectionHealthMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/connection_recovery.py", line 366 in _health_monitor_loop
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017260f000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000171603000 [MemoryManager] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/memory_manager.py", line 247 in memory_monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x00000001704df000 [ShutdownHeartbeatLogger] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 129 in _heartbeat_logger
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000016e4c7000 [Thread-1 (_monitor)] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 369 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 202 in get
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1555 in dequeue
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/logging/handlers.py", line 1609 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x0000000202894800 (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 278 in wait_for_shutdown
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1124 in main
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/main.py", line 1379 in <module>
+Timeout (0:00:30)!
+Thread 0x000000017e69f000 [HeartbeatMonitor] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/services/shutdown_coordinator.py", line 518 in _monitor
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017d693000 [UIFallbackFeed] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 669 in wait
+  File "/Users/stenrauch/Downloads/Trading Bot Professional Git/trading-bot-professional/engine/engine.py", line 1625 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1023 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1081 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1043 in _bootstrap
+
+Thread 0x000000017c687000 [TradingEngine-Main] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/lib/python3.14/inspect.py", line 1560 in getsourcefile
+  File 

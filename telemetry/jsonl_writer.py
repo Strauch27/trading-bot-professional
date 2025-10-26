@@ -44,3 +44,19 @@ class JsonlWriter:
         except Exception:
             # Silent fail to prevent telemetry from disrupting main flow
             pass
+
+    def order_failed(self, **kwargs) -> None:
+        """
+        Log order failure event.
+
+        FIX: Added to prevent AttributeError in OrderRouter.
+        OrderRouter expects this method but JsonlWriter didn't have it.
+
+        Args:
+            **kwargs: Order failure details (intent_id, symbol, side, qty, order_id, etc.)
+        """
+        event = {
+            'event_type': 'ORDER_FAILED',
+            **kwargs
+        }
+        self.write('orders', event)

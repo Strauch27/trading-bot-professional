@@ -94,6 +94,11 @@ class DebugTracer:
             self.logger.removeHandler(handler)
 
         try:
+            # FIX: Check if LOG_DIR is valid before setting up file handler
+            if not LOG_DIR or not isinstance(LOG_DIR, (str, os.PathLike)):
+                logging.getLogger(__name__).debug("Debug tracer file handler skipped: LOG_DIR not initialized")
+                return
+
             os.makedirs(LOG_DIR, exist_ok=True)
             trace_log_file = os.path.join(LOG_DIR, "trace_steps.log")
             file_handler = logging.FileHandler(trace_log_file, encoding="utf-8")

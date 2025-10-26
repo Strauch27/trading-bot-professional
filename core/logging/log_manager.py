@@ -192,10 +192,19 @@ class LogManager:
     def _cleanup_old_logs(self):
         """Clean up old log files based on retention policy"""
         try:
+            # FIX: Check if base_log_dir is valid before cleanup
+            if not self.base_log_dir or not isinstance(self.base_log_dir, (str, os.PathLike)):
+                self.logger.debug("Log cleanup skipped: base_log_dir not initialized")
+                return
+
             cutoff_time = time.time() - (self.retention_days * 24 * 3600)
 
             # Find all session directories
             base_dir = os.path.dirname(self.base_log_dir)
+            if not base_dir or not os.path.exists(base_dir):
+                self.logger.debug(f"Log cleanup skipped: base directory {base_dir} does not exist")
+                return
+
             for item in os.listdir(base_dir):
                 if not item.startswith('session_'):
                     continue

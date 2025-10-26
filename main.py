@@ -1102,9 +1102,10 @@ def main():
         shutdown_coordinator.add_cleanup_callback(_pre_shutdown_log_flush)
 
         # Start heartbeat monitoring (optional - detects hung engine)
+        # FIX: Increased timeout from 300s (5 min) to 600s (10 min) to reduce false positives
         heartbeat_monitor = shutdown_coordinator.create_heartbeat_monitor(
             check_interval=30.0,
-            timeout_threshold=300.0  # 5 minutes
+            timeout_threshold=600.0  # 10 minutes (increased to match slow MD_POLL cycles)
         )
         heartbeat_monitor.start()
 
