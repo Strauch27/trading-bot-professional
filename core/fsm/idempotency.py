@@ -20,10 +20,10 @@ class IdempotencyStore:
     Thread-safe store for detecting duplicate events.
 
     Stores (symbol, event, order_id, timestamp_bucket) tuples.
-    Auto-expires entries after 5 minutes.
+    Auto-expires entries after 1 hour (CRITICAL FIX C-FSM-02: increased from 5 min).
     """
 
-    def __init__(self, expiry_seconds: int = 300):
+    def __init__(self, expiry_seconds: int = 3600):  # CRITICAL FIX (C-FSM-02): 1 hour instead of 5 min
         self._store: Set[Tuple] = set()
         self._expiry_map: Dict[Tuple, float] = {}  # fingerprint → expiry_time
         self._lock = threading.RLock()

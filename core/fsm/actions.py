@@ -116,6 +116,11 @@ def action_wait_for_fill(ctx: EventContext, coin_state: CoinState) -> None:
 
 def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: WAIT_FILL → POSITION"""
+    # CRITICAL FIX (C-FSM-04): Idempotency guard - prevent double application
+    if coin_state.amount > 0 and coin_state.entry_ts > 0:
+        logger.debug(f"action_open_position already applied for {ctx.symbol}, skipping")
+        return
+
     coin_state.amount = ctx.filled_qty or 0.0
     coin_state.entry_price = ctx.avg_price or 0.0
     coin_state.entry_ts = ctx.timestamp
@@ -281,6 +286,11 @@ def action_wait_for_sell(ctx: EventContext, coin_state: CoinState) -> None:
 
 def action_close_position(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: WAIT_SELL_FILL → POST_TRADE"""
+    # CRITICAL FIX (C-FSM-04): Idempotency guard - prevent double application
+    if coin_state.amount == 0.0 and coin_state.entry_price == 0.0 and coin_state.entry_ts == 0.0:
+        logger.debug(f"action_close_position already applied for {ctx.symbol}, skipping")
+        return
+
     realized_pnl = ((ctx.avg_price or 0.0) - coin_state.entry_price) * (ctx.filled_qty or 0.0)
 
     coin_state.note = f"position closed: PnL={realized_pnl:.4f}"

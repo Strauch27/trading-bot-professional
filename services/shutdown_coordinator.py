@@ -112,10 +112,11 @@ class ShutdownCoordinator:
         }
 
         # Start heartbeat logger thread
+        # CRITICAL FIX (C-SERV-05): Non-daemon thread with explicit join during shutdown
         self._heartbeat_interval = 30.0  # Log every 30 seconds
         self._heartbeat_thread = threading.Thread(
             target=self._heartbeat_logger,
-            daemon=True,
+            daemon=False,
             name="ShutdownHeartbeatLogger"
         )
         self._heartbeat_thread.start()
@@ -285,8 +286,13 @@ class ShutdownCoordinator:
             logger.info(f"Shutdown grace period: {self._join_grace_s}s")
             time.sleep(self._join_grace_s)
 
+        # CRITICAL FIX (C-SERV-04): Create snapshot to prevent race condition
+        # Modifying _threads list during iteration causes incomplete cleanup
+        with self._shutdown_lock:
+            threads_copy = list(self._threads)
+
         # Join all registered threads with timeout
-        for t in self._threads:
+        for t in threads_copy:
             if t.is_alive():
                 t.join(timeout=self._join_timeout_s)
                 if t.is_alive():
@@ -399,6 +405,16 @@ class ShutdownCoordinator:
     def _final_cleanup(self) -> None:
         """Perform final system cleanup"""
         try:
+            # CRITICAL FIX (C-SERV-05): Join heartbeat thread before final cleanup
+            # Heartbeat thread should exit gracefully when shutdown_event is set
+            if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+                logger.debug("Waiting for heartbeat thread to finish...")
+                self._heartbeat_thread.join(timeout=2.0)
+                if self._heartbeat_thread.is_alive():
+                    logger.warning("Heartbeat thread did not stop within timeout")
+                else:
+                    logger.debug("Heartbeat thread joined successfully")
+
             # Flush log handlers
             for handler in logging.getLogger().handlers:
                 try:

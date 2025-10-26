@@ -65,24 +65,45 @@ class IdempotencyStore:
         """
         Initialize idempotency store with SQLite backend.
 
+        CRITICAL FIX (C-INFRA-02): Use thread-local connections to prevent corruption.
+        Each thread gets its own connection with check_same_thread=True (safe default).
+
         Args:
             db_path: Path to SQLite database file
         """
         self.db_path = db_path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._local = threading.local()  # Thread-local storage for connections
 
         # Ensure directory exists
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self.db = sqlite3.connect(db_path, check_same_thread=False)
+        # Create schema on initial connection
         self._create_table()
 
-        logger.info(f"Idempotency store initialized: {db_path}")
+        logger.info(f"Idempotency store initialized with thread-local connections: {db_path}")
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """
+        Get thread-local database connection.
+
+        CRITICAL FIX (C-INFRA-02): Each thread gets its own connection.
+        Prevents database corruption from concurrent access.
+
+        Returns:
+            Thread-local SQLite connection
+        """
+        if not hasattr(self._local, 'db'):
+            # Create new connection for this thread (check_same_thread=True is safe)
+            self._local.db = sqlite3.connect(self.db_path, check_same_thread=True)
+            logger.debug(f"Created new SQLite connection for thread {threading.current_thread().name}")
+        return self._local.db
 
     def _create_table(self):
         """Create idempotency_keys table if not exists"""
         with self._lock:
-            self.db.execute("""
+            db = self._get_connection()
+            db.execute("""
                 CREATE TABLE IF NOT EXISTS idempotency_keys (
                     order_req_id TEXT PRIMARY KEY,
                     symbol TEXT NOT NULL,
@@ -97,22 +118,22 @@ class IdempotencyStore:
                     client_order_id TEXT
                 )
             """)
-            self.db.commit()
+            db.commit()
 
             # Create indexes for fast lookups
-            self.db.execute("""
+            db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_exchange_order_id
                 ON idempotency_keys(exchange_order_id)
             """)
-            self.db.execute("""
+            db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_created_at
                 ON idempotency_keys(created_at)
             """)
-            self.db.execute("""
+            db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_status
                 ON idempotency_keys(status)
             """)
-            self.db.commit()
+            db.commit()
 
     def register_order(
         self,
@@ -139,8 +160,10 @@ class IdempotencyStore:
             exchange_order_id (str) if duplicate (skip placement, return existing)
         """
         with self._lock:
+            db = self._get_connection()
+
             # Check for existing order
-            cursor = self.db.execute(
+            cursor = db.execute(
                 "SELECT exchange_order_id, status, created_at FROM idempotency_keys WHERE order_req_id = ?",
                 (order_req_id,)
             )
@@ -182,7 +205,7 @@ class IdempotencyStore:
 
             # Register new order (pending state)
             now = time.time()
-            self.db.execute(
+            db.execute(
                 """
                 INSERT INTO idempotency_keys
                 (order_req_id, symbol, side, amount, price, exchange_order_id, status, created_at, updated_at, completed_at, client_order_id)
@@ -190,7 +213,7 @@ class IdempotencyStore:
                 """,
                 (order_req_id, symbol, side, amount, price, now, now, client_order_id)
             )
-            self.db.commit()
+            db.commit()
 
             logger.debug(f"Registered new order request: {order_req_id} ({symbol} {side})")
 
@@ -211,13 +234,14 @@ class IdempotencyStore:
             status: Order status ("open", "filled", "canceled", "expired", "rejected", "failed")
         """
         with self._lock:
+            db = self._get_connection()
             now = time.time()
 
             # Determine if order is completed
             completed_statuses = {'filled', 'canceled', 'cancelled', 'expired', 'rejected', 'failed'}
             completed_at = now if status.lower() in completed_statuses else None
 
-            self.db.execute(
+            db.execute(
                 """
                 UPDATE idempotency_keys
                 SET exchange_order_id = ?, status = ?, updated_at = ?, completed_at = ?
@@ -225,7 +249,7 @@ class IdempotencyStore:
                 """,
                 (exchange_order_id, status, now, completed_at, order_req_id)
             )
-            self.db.commit()
+            db.commit()
 
             logger.debug(
                 f"Updated order status: {order_req_id} → {exchange_order_id} "
@@ -243,7 +267,8 @@ class IdempotencyStore:
             Dict with order details or None if not found
         """
         with self._lock:
-            cursor = self.db.execute(
+            db = self._get_connection()
+            cursor = db.execute(
                 "SELECT * FROM idempotency_keys WHERE order_req_id = ?",
                 (order_req_id,)
             )
@@ -277,7 +302,8 @@ class IdempotencyStore:
             Dict with order details or None if not found
         """
         with self._lock:
-            cursor = self.db.execute(
+            db = self._get_connection()
+            cursor = db.execute(
                 "SELECT * FROM idempotency_keys WHERE exchange_order_id = ?",
                 (exchange_order_id,)
             )
@@ -311,9 +337,10 @@ class IdempotencyStore:
             Number of records deleted
         """
         with self._lock:
+            db = self._get_connection()
             cutoff_time = time.time() - (max_age_days * 86400)
 
-            deleted = self.db.execute(
+            deleted = db.execute(
                 """
                 DELETE FROM idempotency_keys
                 WHERE completed_at IS NOT NULL AND completed_at < ?
@@ -321,7 +348,7 @@ class IdempotencyStore:
                 (cutoff_time,)
             ).rowcount
 
-            self.db.commit()
+            db.commit()
 
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old idempotency records (older than {max_age_days}d)")
@@ -336,13 +363,14 @@ class IdempotencyStore:
             Dict with counts by status
         """
         with self._lock:
-            cursor = self.db.execute(
+            db = self._get_connection()
+            cursor = db.execute(
                 "SELECT status, COUNT(*) FROM idempotency_keys GROUP BY status"
             )
             stats = {row[0]: row[1] for row in cursor.fetchall()}
 
             # Total count
-            cursor = self.db.execute("SELECT COUNT(*) FROM idempotency_keys")
+            cursor = db.execute("SELECT COUNT(*) FROM idempotency_keys")
             total = cursor.fetchone()[0]
 
             stats['total'] = total
@@ -350,10 +378,18 @@ class IdempotencyStore:
             return stats
 
     def close(self):
-        """Close database connection"""
+        """
+        Close all thread-local database connections.
+
+        CRITICAL FIX (C-INFRA-02): Close connections for all threads.
+        Note: This only closes the connection for the calling thread.
+        Other thread connections will be closed when those threads exit.
+        """
         with self._lock:
-            self.db.close()
-            logger.info("Idempotency store closed")
+            if hasattr(self._local, 'db'):
+                self._local.db.close()
+                delattr(self._local, 'db')
+                logger.info(f"Closed SQLite connection for thread {threading.current_thread().name}")
 
 
 # =============================================================================

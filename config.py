@@ -14,20 +14,129 @@ from datetime import datetime, timezone
 # ABSCHNITT 0: RUN IDENTITY & DIRECTORIES (automatisch, nicht ändern)
 # =============================================================================
 
-_now_utc = datetime.now(timezone.utc)
-run_timestamp_utc = _now_utc.strftime('%Y-%m-%d_%H-%M-%S')
-run_timestamp = _now_utc.strftime('%Y%m%d_%H%M%S')
-run_timestamp_readable = run_timestamp_utc
-run_id = str(uuid.uuid4())[:8]
+# CRITICAL FIX (C-CONFIG-01): Lazy initialization to prevent import-time side effects
+# These are initialized to None and set by init_runtime_config() called from main.py
+_now_utc = None
+run_timestamp_utc = None
+run_timestamp = None
+run_timestamp_readable = None
+run_id = None
+SESSION_DIR_NAME = None
+
+def init_runtime_config():
+    """
+    CRITICAL FIX (C-CONFIG-01): Initialize runtime configuration.
+
+    Must be called explicitly from main.py before using the bot.
+    Prevents import-time side effects that break tests, linting, and IDE indexing.
+    """
+    global _now_utc, run_timestamp_utc, run_timestamp, run_timestamp_readable, run_id, SESSION_DIR_NAME
+    global SESSION_DIR, LOG_DIR, STATE_DIR, REPORTS_DIR, SNAPSHOTS_DIR
+    global LOG_FILE, EVENTS_LOG, METRICS_LOG, MEXC_ORDERS_LOG, AUDIT_EVENTS_LOG, DROP_AUDIT_LOG, PHASE_LOG_FILE
+    global SNAPSHOTS_PARQUET, RUN_SUMMARY_JSON, RECONCILE_REPORT, CONFIG_BACKUP_PATH
+    global ENGINE_TRANSIENT_STATE_FILE, ORDER_ROUTER_META_FILE
+
+    if _now_utc is not None:
+        # Already initialized
+        return
+
+    _now_utc = datetime.now(timezone.utc)
+    run_timestamp_utc = _now_utc.strftime('%Y-%m-%d_%H-%M-%S')
+    run_timestamp = _now_utc.strftime('%Y%m%d_%H%M%S')
+    run_timestamp_readable = run_timestamp_utc
+    run_id = str(uuid.uuid4())[:8]
+    SESSION_DIR_NAME = f"session_{run_timestamp}"
+
+    # Initialize session directories
+    SESSION_DIR = os.path.join(BASE_DIR, "sessions", SESSION_DIR_NAME)
+    LOG_DIR = os.path.join(SESSION_DIR, "logs")
+    STATE_DIR = os.path.join(SESSION_DIR, "state")
+    REPORTS_DIR = os.path.join(SESSION_DIR, "reports")
+    SNAPSHOTS_DIR = os.path.join(SESSION_DIR, "snapshots")
+
+    # CRITICAL FIX (C-CONFIG-01): Initialize log file paths that depend on runtime vars
+    LOG_FILE = os.path.join(LOG_DIR, f"bot_log_{run_timestamp_readable}.jsonl")
+    EVENTS_LOG = os.path.join(LOG_DIR, f"events_{run_timestamp}.jsonl")
+    METRICS_LOG = os.path.join(LOG_DIR, f"metrics_{run_timestamp}.jsonl")
+    MEXC_ORDERS_LOG = os.path.join(LOG_DIR, f"mexc_orders_{run_timestamp}.jsonl")
+    AUDIT_EVENTS_LOG = os.path.join(LOG_DIR, f"audit_events_{run_timestamp}.jsonl")
+    DROP_AUDIT_LOG = os.path.join(LOG_DIR, f"drop_trigger_{run_timestamp}.jsonl")
+    PHASE_LOG_FILE = os.path.join(LOG_DIR, f"phase_events_{run_timestamp}.jsonl")
+
+    SNAPSHOTS_PARQUET = os.path.join(SNAPSHOTS_DIR, f"snapshots_{run_timestamp}.parquet")
+    RUN_SUMMARY_JSON = os.path.join(REPORTS_DIR, f"run_summary_{run_timestamp}.json")
+    RECONCILE_REPORT = os.path.join(REPORTS_DIR, f"reconcile_{run_timestamp}.json")
+    CONFIG_BACKUP_PATH = os.path.join(SESSION_DIR, "config_backup.py")
+    ENGINE_TRANSIENT_STATE_FILE = os.path.join(STATE_DIR, "engine_transient.json")
+    ORDER_ROUTER_META_FILE = os.path.join(STATE_DIR, "order_router_meta.json")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SESSION_DIR_NAME = f"session_{run_timestamp}"
-SESSION_DIR = os.path.join(BASE_DIR, "sessions", SESSION_DIR_NAME)
 
-LOG_DIR = os.path.join(SESSION_DIR, "logs")
-STATE_DIR = os.path.join(SESSION_DIR, "state")
-REPORTS_DIR = os.path.join(SESSION_DIR, "reports")
-SNAPSHOTS_DIR = os.path.join(SESSION_DIR, "snapshots")
+# CRITICAL FIX (C-CONFIG-01): Session directories are also lazily initialized
+SESSION_DIR = None
+LOG_DIR = None
+STATE_DIR = None
+REPORTS_DIR = None
+SNAPSHOTS_DIR = None
+
+# CRITICAL FIX (C-CONFIG-01): Log file paths also lazily initialized
+LOG_FILE = None
+EVENTS_LOG = None
+METRICS_LOG = None
+MEXC_ORDERS_LOG = None
+AUDIT_EVENTS_LOG = None
+DROP_AUDIT_LOG = None
+PHASE_LOG_FILE = None
+SNAPSHOTS_PARQUET = None
+RUN_SUMMARY_JSON = None
+RECONCILE_REPORT = None
+CONFIG_BACKUP_PATH = None
+ENGINE_TRANSIENT_STATE_FILE = None
+ORDER_ROUTER_META_FILE = None
+
+# CRITICAL FIX (C-CONFIG-02): Thread-safe runtime overrides
+import threading
+_config_overrides = {}
+_config_lock = threading.RLock()
+
+def set_config_override(key: str, value) -> None:
+    """
+    CRITICAL FIX (C-CONFIG-02): Thread-safe config override.
+
+    Allows runtime config changes without mutating globals.
+    Use this instead of directly assigning to config.* variables.
+
+    Args:
+        key: Config variable name (e.g., 'GLOBAL_TRADING')
+        value: New value
+    """
+    with _config_lock:
+        _config_overrides[key] = value
+
+def get_config(key: str, default=None):
+    """
+    CRITICAL FIX (C-CONFIG-02): Thread-safe config getter.
+
+    Checks runtime overrides first, then falls back to module-level default.
+
+    Args:
+        key: Config variable name
+        default: Default if key not found
+
+    Returns:
+        Config value (override if set, otherwise module default)
+    """
+    with _config_lock:
+        if key in _config_overrides:
+            return _config_overrides[key]
+
+    # Fall back to module-level attribute
+    return globals().get(key, default)
+
+def clear_config_overrides() -> None:
+    """Clear all runtime config overrides (useful for testing)."""
+    with _config_lock:
+        _config_overrides.clear()
 
 CONFIG_VERSION = 1
 MIGRATIONS = {}
@@ -51,7 +160,8 @@ GLOBAL_TRADING = True  # True = Live Trading, False = Nur Beobachten
 
 # Portfolio Reset beim Start (nur für Testing!)
 # ⚠️ ACHTUNG: Verkauft ALLE Assets beim Start - nur für Tests aktivieren!
-RESET_PORTFOLIO_ON_START = True  # True = Verkaufe alles beim Start, False = Normal (empfohlen)
+# Requires FORCE_PORTFOLIO_RESET=1 environment variable for safety
+RESET_PORTFOLIO_ON_START = False  # True = Verkaufe alles beim Start, False = Normal (empfohlen)
 
 # =============================================================================
 # 2. EXIT STRATEGIE
@@ -76,12 +186,13 @@ ATR_MIN_SAMPLES = 15
 
 # V9_3 Drop Trigger Settings
 DROP_TRIGGER_VALUE = 0.985  # Trigger at -1.5% drop from anchor (0.985 = ~-1.5%)
+# CRITICAL FIX (C-CONFIG-03): Single source of truth for drop trigger mode
 DROP_TRIGGER_MODE = 4  # 1=Session-High, 2=Rolling-High, 3=Hybrid, 4=Persistent (recommended)
 DROP_TRIGGER_LOOKBACK_MIN = 5  # Rolling-High window (minutes) for Mode 2/3
 
 # Legacy settings (kept for compatibility)
 LOOKBACK_S = 120  # 2min Lookback-Fenster
-MODE = 4  # Mode 4: Drop-Trigger ohne Impuls
+MODE = DROP_TRIGGER_MODE  # DEPRECATED: Use DROP_TRIGGER_MODE instead (maintained for backward compatibility)
 CONFIRM_TICKS = 0  # Sofort scharf
 HYSTERESIS_BPS = 5  # Hysteresis-Puffer (5 BPS)
 DEBOUNCE_S = 3  # Minimale Entprellung
@@ -103,8 +214,9 @@ DROP_PERSIST_WINDOWS = True  # Persistiere RollingWindows zwischen Restarts
 DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
-POLL_MS = 300  # Market data poll interval in milliseconds
+# CRITICAL FIX (C-CONFIG-03): Consolidate duplicate poll interval parameters
 MD_POLL_MS = 1500  # Market data polling interval (1.5 seconds - balanced for 91 symbols)
+POLL_MS = MD_POLL_MS  # DEPRECATED: Use MD_POLL_MS instead (maintained for backward compatibility)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
 PERSIST_WINDOWS = True  # Persist rolling windows to disk
@@ -117,7 +229,9 @@ MD_USE_WEBSOCKET = False  # True = WebSocket primary, False = HTTP Polling
 MD_BATCH_POLLING = True  # Enable batch-based polling for HTTP mode
 MD_BATCH_SIZE = 13  # 91 symbols → 7 batches (13 symbols per batch)
 MD_BATCH_INTERVAL_MS = 150  # 150ms between batches (was 1000ms - too slow!)
-MD_CACHE_TTL_MS = 2500  # Soft-TTL for ticker cache (ms)
+MD_CACHE_TTL_MS = 5000  # Hard TTL for ticker cache (ms)
+MD_CACHE_SOFT_TTL_MS = 2000  # Soft TTL (serves stale while refreshing)
+MD_CACHE_MAX_SIZE = 2000  # Max cached tickers
 MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
 
 # Per-Coin Market Data Debugging
@@ -146,6 +260,14 @@ MD_WS_FALLBACK_INTERVAL_MS = 10000  # HTTP fallback interval when WebSocket fail
 
 # Debug Drops - Detailed Logging for Drop% Debugging
 DEBUG_DROPS = True  # Enable detailed drop% debug logging with counters and watchdog
+
+# Engine / Dashboard diagnostics
+ENGINE_DEBUG_TRACE = False  # If True, emit verbose engine start traces
+ENGINE_DEBUG_TRACE_FILE = "/tmp/engine_trace.log"
+DASHBOARD_LOG_CALLER = False  # Log caller info for dashboard events (expensive)
+
+# Shutdown coordinator heartbeat
+SHUTDOWN_HEARTBEAT_INTERVAL_S = 30.0
 
 # UI Fallback Feed - Direct ticker polling for Dashboard when snapshot bus fails
 UI_FALLBACK_FEED = True  # TEMPORARY WORKAROUND: Enable direct polling fallback until market_data.start() issue is fixed
@@ -192,7 +314,9 @@ EXIT_TP_MARKET = True  # Take profit as market order
 # 4. POSITION MANAGEMENT
 # =============================================================================
 
-MAX_TRADES = 10  # Maximal 10 Positionen gleichzeitig
+# CRITICAL FIX (C-CONFIG-03): Single source of truth for max concurrent positions
+MAX_CONCURRENT_POSITIONS = 10  # Maximum concurrent positions (primary parameter)
+MAX_TRADES = MAX_CONCURRENT_POSITIONS  # DEPRECATED: Use MAX_CONCURRENT_POSITIONS instead
 POSITION_SIZE_USDT = 25.0  # 25 USDT pro Kauf
 ALLOW_AUTO_SIZE_UP = True  # Menge leicht erhöhen bei MinNotional
 MAX_AUTO_SIZE_UP_BPS = 500  # Max. +500 bps Notional-Erhöhung
@@ -472,14 +596,10 @@ LOG_MAX_BYTES = 50_000_000
 LOG_BACKUP_COUNT = 5
 WRITE_SNAPSHOTS = True
 
-LOG_FILE = os.path.join(LOG_DIR, f"bot_log_{run_timestamp_readable}.jsonl")
-EVENTS_LOG = os.path.join(LOG_DIR, f"events_{run_timestamp}.jsonl")
-METRICS_LOG = os.path.join(LOG_DIR, f"metrics_{run_timestamp}.jsonl")
-MEXC_ORDERS_LOG = os.path.join(LOG_DIR, f"mexc_orders_{run_timestamp}.jsonl")
-AUDIT_EVENTS_LOG = os.path.join(LOG_DIR, f"audit_events_{run_timestamp}.jsonl")
+# CRITICAL FIX (C-CONFIG-01): LOG_FILE paths now initialized in init_runtime_config()
+# (removed import-time assignments that depended on run_timestamp)
 ENABLE_DROP_TRIGGER_MINUTELY = True
 DROP_AUDIT_INTERVAL_S = 60
-DROP_AUDIT_LOG = os.path.join(LOG_DIR, f"drop_trigger_{run_timestamp}.jsonl")
 
 # Adaptive Debug
 DEBUG_MODE = "TRADING"
@@ -490,9 +610,7 @@ DEBUG_MARKET_DATA_SAMPLING = 10
 DEBUG_PERFORMANCE_AGGREGATION_SECONDS = 60
 DEBUG_ENABLE_LOG_COMPRESSION = True
 DEBUG_LOG_RETENTION_DAYS = 30
-SNAPSHOTS_PARQUET = os.path.join(SNAPSHOTS_DIR, f"snapshots_{run_timestamp}.parquet")
-RUN_SUMMARY_JSON = os.path.join(REPORTS_DIR, f"run_summary_{run_timestamp}.json")
-RECONCILE_REPORT = os.path.join(REPORTS_DIR, f"reconcile_{run_timestamp}.json")
+# CRITICAL FIX (C-CONFIG-01): SNAPSHOTS_PARQUET, RUN_SUMMARY_JSON, RECONCILE_REPORT now initialized in init_runtime_config()
 
 # Monitoring
 HEARTBEAT_INTERVAL_S = 60
@@ -519,7 +637,7 @@ FSM_ENABLED = True  # False = Legacy engine (default), True = Use FSM_MODE
 FSM_MODE = "legacy"  # Options: "legacy", "fsm", or "both" (parallel validation)
 
 # Phase Event Logging (JSONL audit trail for all phase transitions)
-PHASE_LOG_FILE = os.path.join(LOG_DIR, f"phase_events_{run_timestamp}.jsonl")
+# CRITICAL FIX (C-CONFIG-01): PHASE_LOG_FILE now initialized in init_runtime_config()
 PHASE_LOG_BUFFER_SIZE = 8192  # Write buffer size
 
 # Rich Terminal Status Table (live FSM visualization)
@@ -557,12 +675,11 @@ STATE_FILE_HELD = os.path.join(BASE_DIR, "held_assets.json")
 STATE_FILE_OPEN_BUYS = os.path.join(BASE_DIR, "open_buy_orders.json")
 HISTORY_FILE = os.path.join(BASE_DIR, "trade_history.csv")
 DROP_ANCHORS_FILE = os.path.join(BASE_DIR, "drop_anchors.json")
-CONFIG_BACKUP_PATH = os.path.join(SESSION_DIR, "config_backup.py")
+# CRITICAL FIX (C-CONFIG-01): CONFIG_BACKUP_PATH now initialized in init_runtime_config()
 
 # Intent System & Order Router State Management (P1)
 # Debounced persistence to reduce I/O load
-ENGINE_TRANSIENT_STATE_FILE = os.path.join(STATE_DIR, "engine_transient.json")
-ORDER_ROUTER_META_FILE = os.path.join(STATE_DIR, "order_router_meta.json")
+# CRITICAL FIX (C-CONFIG-01): ENGINE_TRANSIENT_STATE_FILE, ORDER_ROUTER_META_FILE now initialized in init_runtime_config()
 STATE_PERSIST_INTERVAL_S = 10.0  # Write state every 10s (debounced)
 STATE_PERSIST_ON_SHUTDOWN = True  # Always persist on clean shutdown
 INTENT_STALE_THRESHOLD_S = 60  # Intent considered stale after 60s
@@ -593,8 +710,8 @@ MAX_PORTFOLIO_RISK_PCT = 0.05
 SESSION_GRANULARITY = "minute"
 BUY_ESCALATION_EXTRA_BPS = 20
 ALLOW_MARKET_FALLBACK = True
-MAX_TRADES_CONCURRENT = MAX_TRADES
-MAX_CONCURRENT_POSITIONS = MAX_TRADES
+# DEPRECATED: Aliases removed - use MAX_CONCURRENT_POSITIONS directly
+# MAX_TRADES_CONCURRENT and MAX_CONCURRENT_POSITIONS are now the same variable
 FEE_RT = FEE_RATE
 RUN_ID = run_id
 RUN_TIMESTAMP_UTC = run_timestamp_utc

@@ -186,16 +186,20 @@ class ExitEngine:
         Returns:
             Exit signal dict for Intent assembly, or None if no exit
         """
-        pos = self.engine.portfolio.positions.get(sym)
-        if not pos:
-            raw_pos = self.engine.positions.get(sym)
-            if raw_pos:
-                qty = float(raw_pos.get("amount", 0.0) or 0.0)
-                avg_price = float(raw_pos.get("buying_price", 0.0) or 0.0)
-                opened_ts = float(raw_pos.get("time", time.time()) or time.time())
-                pos = SimpleNamespace(qty=qty, avg_price=avg_price, opened_ts=opened_ts)
+        # CRITICAL FIX (C-ENG-03): Protect state access with lock to prevent race conditions
+        # Read positions and snapshots atomically to avoid stale data / AttributeError
+        with self.engine._lock:
+            pos = self.engine.portfolio.positions.get(sym)
+            if not pos:
+                raw_pos = self.engine.positions.get(sym)
+                if raw_pos:
+                    # Create a copy to avoid holding lock during evaluation
+                    qty = float(raw_pos.get("amount", 0.0) or 0.0)
+                    avg_price = float(raw_pos.get("buying_price", 0.0) or 0.0)
+                    opened_ts = float(raw_pos.get("time", time.time()) or time.time())
+                    pos = SimpleNamespace(qty=qty, avg_price=avg_price, opened_ts=opened_ts)
 
-        snap = self.engine.snapshots.get(sym)
+            snap = self.engine.snapshots.get(sym)
 
         if not pos or not snap or pos.qty == 0:
             return None

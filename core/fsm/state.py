@@ -232,6 +232,20 @@ def set_phase(
     if len(st.phase_history) > 100:
         st.phase_history = st.phase_history[-100:]
 
+    # CRITICAL FIX (C-FSM-01): Persist state after phase change for crash recovery
+    try:
+        from core.fsm.snapshot import get_snapshot_manager
+        snapshot_mgr = get_snapshot_manager()
+        snapshot_mgr.save_snapshot(st.symbol, st)
+    except Exception as persist_error:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            f"Failed to persist FSM state for {st.symbol}: {persist_error}",
+            exc_info=True
+        )
+        # Don't fail the transition, but log the error
+
     # Log event (JSONL)
     if log:
         try:

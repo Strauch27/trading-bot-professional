@@ -37,8 +37,8 @@ except ImportError:
 # Einheitlicher Config-Import + Alias
 import config as config_module  # config.py liegt im Projektwurzelordner
 
-# Importiere alle Config-Werte für lokale Nutzung
-from config import *
+# CRITICAL FIX (C-MAIN-01): Remove wildcard import to prevent namespace pollution
+# All config variables are now accessed via config_module.VARIABLE for clarity
 from scripts import config_lint
 from core.logging.logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
 
@@ -69,9 +69,10 @@ def _ensure_runtime_dirs():
     without causing side-effects during import (which affected tests,
     tools, linter, and IDE indexing).
     """
-    # Config-Werte sind bereits über 'from config import *' verfügbar
-
-    for directory in (SESSION_DIR, LOG_DIR, STATE_DIR, REPORTS_DIR, SNAPSHOTS_DIR):
+    # CRITICAL FIX (C-MAIN-01): Access config via module reference
+    for directory in (config_module.SESSION_DIR, config_module.LOG_DIR,
+                      config_module.STATE_DIR, config_module.REPORTS_DIR,
+                      config_module.SNAPSHOTS_DIR):
         pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
 
 
@@ -127,11 +128,12 @@ def setup_exchange():
         allowed_methods=frozenset(['GET', 'POST'])
     )
 
-    # Konservatives Connection-Pooling (verhindert TLS-Race-Conditions)
+    # CRITICAL FIX (C-MAIN-06): Proper connection pooling to prevent TLS race conditions
+    # Single connection caused contention; using reasonable pool sizes for concurrent access
     adapter = HTTPAdapter(
         max_retries=retry_strategy,
-        pool_connections=1,  # Nur 1 Connection-Pool
-        pool_maxsize=1       # Max 1 Connection pro Pool
+        pool_connections=4,   # Connection pools per host (4 for concurrent market data + orders)
+        pool_maxsize=10       # Max connections per pool (allows concurrent requests)
     )
 
     session.mount('https://', adapter)
@@ -172,7 +174,7 @@ def setup_exchange():
 
         # Optional: load_markets Dump für Exchange-Tracing (einmal pro Session)
         try:
-            markets_dump_path = os.path.join(SESSION_DIR, "logs", "load_markets.json")
+            markets_dump_path = os.path.join(config_module.SESSION_DIR, "logs", "load_markets.json")
             os.makedirs(os.path.dirname(markets_dump_path), exist_ok=True)
             with open(markets_dump_path, "w", encoding="utf-8") as fh:
                 json.dump(exchange.markets, fh, ensure_ascii=False, indent=2)
@@ -233,16 +235,16 @@ def setup_topcoins(exchange):
 def backup_state_files():
     """Erstellt Backup der State-Dateien im Session-State-Ordner"""
     # Backup-Ordner ist jetzt STATE_DIR im Session-Ordner
-    backup_dir = os.path.join(STATE_DIR, "initial_backups")
+    backup_dir = os.path.join(config_module.STATE_DIR, "initial_backups")
     os.makedirs(backup_dir, exist_ok=True)
-    
-    if os.path.exists(STATE_FILE_HELD):
-        backup_path = os.path.join(backup_dir, f"held_assets_backup_{run_timestamp}.json")
-        shutil.copy2(STATE_FILE_HELD, backup_path)
+
+    if os.path.exists(config_module.STATE_FILE_HELD):
+        backup_path = os.path.join(backup_dir, f"held_assets_backup_{config_module.run_timestamp}.json")
+        shutil.copy2(config_module.STATE_FILE_HELD, backup_path)
         logger.debug(f"State-Backup: held_assets -> {backup_path}")
-    if os.path.exists(STATE_FILE_OPEN_BUYS):
-        backup_path = os.path.join(backup_dir, f"open_buy_orders_backup_{run_timestamp}.json")
-        shutil.copy2(STATE_FILE_OPEN_BUYS, backup_path)
+    if os.path.exists(config_module.STATE_FILE_OPEN_BUYS):
+        backup_path = os.path.join(backup_dir, f"open_buy_orders_backup_{config_module.run_timestamp}.json")
+        shutil.copy2(config_module.STATE_FILE_OPEN_BUYS, backup_path)
         logger.debug(f"State-Backup: open_buys -> {backup_path}")
 
     logger.debug("State-Backups im Session-Ordner erstellt", extra={'event_type': 'STATE_BACKUP_CREATED', 'backup_dir': backup_dir})
@@ -279,12 +281,9 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
                        extra={'event_type': 'OBSERVE_MODE_LOW_BUDGET',
                              'budget': portfolio.my_budget,
                              'required': safe_min_budget})
-            global global_trading
-            global_trading = False
-            config_module.global_trading = False
-            config_module.GLOBAL_TRADING = False
-            if hasattr(config_module, 'GLOBAL_TRADING'):
-                config_module.GLOBAL_TRADING = False
+            # CRITICAL FIX (C-MAIN-02): Remove unsafe global mutation, use thread-safe override
+            config_module.set_config_override('GLOBAL_TRADING', False)
+            config_module.set_config_override('global_trading', False)
     return True
 
 
@@ -298,7 +297,7 @@ def main():
 
     # Create stackdump file in session directory for debugging
     try:
-        stackdump_file = pathlib.Path(SESSION_DIR) / "stackdump.txt"
+        stackdump_file = pathlib.Path(config_module.SESSION_DIR) / "stackdump.txt"
         stackdump_file.parent.mkdir(parents=True, exist_ok=True)
         # Handle offen halten!
         global STACKDUMP_FP
@@ -313,15 +312,38 @@ def main():
 
     # Legacy exception handler as fallback
     def legacy_exception_handler(exc_type, exc_value, exc_traceback):
+        # CRITICAL FIX (C-MAIN-04): Multi-level protection against infinite recursion
         try:
             logger.exception("UNHANDLED_EXCEPTION", exc_info=(exc_type, exc_value, exc_traceback))
         except Exception:
-            # Ultra-defensive: If logging itself crashes, fall back to original hook
-            pass
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            # Ultra-defensive: If logging itself crashes, fall back to stderr
+            try:
+                import traceback
+                sys.stderr.write("ERROR: Exception handler failed, writing to stderr:\n")
+                traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+            except Exception:
+                # Last resort: simple message to stderr
+                try:
+                    sys.stderr.write(f"CRITICAL: Exception handler completely failed: {exc_type.__name__}: {exc_value}\n")
+                except Exception:
+                    pass  # Give up gracefully
+
+        # Call original hook with protection
+        try:
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        except Exception:
+            # Even the original hook failed - write to stderr as last resort
+            try:
+                sys.stderr.write("ERROR: sys.__excepthook__ failed\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
 
     # Keep legacy handler as secondary backup (Phase 1 hook is primary)
     # sys.excepthook = legacy_exception_handler  # Commented out - Phase 1 hook takes precedence
+
+    # ---- CRITICAL FIX (C-CONFIG-01): Initialize runtime config before using it ----
+    config_module.init_runtime_config()
 
     # ---- Runtime Directories (no side-effects during import) ----
     _ensure_runtime_dirs()
@@ -344,19 +366,19 @@ def main():
     shutdown_coordinator.setup_signal_handlers()
 
     logger.info("🚀 Trading Bot wird gestartet...", extra={'event_type': 'BOT_INITIALIZING'})
-    logger.debug(f"Session-Ordner: {SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': SESSION_DIR})
+    logger.debug(f"Session-Ordner: {config_module.SESSION_DIR}", extra={'event_type': 'SESSION_DIR', 'path': config_module.SESSION_DIR})
 
     # Extract session ID from session directory
-    SESSION_ID = Path(SESSION_DIR).name  # e.g. 'session_20250907_190217'
+    SESSION_ID = Path(config_module.SESSION_DIR).name  # e.g. 'session_20250907_190217'
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
 
     # Display Rich Banner with Session Info
     START_ISO = dt_datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    MODE_FOR_BANNER = "LIVE" if GLOBAL_TRADING else "OBSERVE"
+    MODE_FOR_BANNER = "LIVE" if config_module.GLOBAL_TRADING else "OBSERVE"
     banner(
         app_name="Trading Bot",
         mode=MODE_FOR_BANNER,
-        session_dir=SESSION_DIR,
+        session_dir=config_module.SESSION_DIR,
         session_id=SESSION_ID,
         start_iso=START_ISO
     )
@@ -453,12 +475,9 @@ def main():
         logger.debug("Exchange tracing wrapper activated (Phase 1 structured logging)")
 
     if not has_api_keys:
-        global global_trading
-        global_trading = False
-        config_module.global_trading = False
-        config_module.GLOBAL_TRADING = False
-        if hasattr(config_module, 'GLOBAL_TRADING'):
-            config_module.GLOBAL_TRADING = False
+        # CRITICAL FIX (C-MAIN-02): Remove unsafe global mutation, use thread-safe override
+        config_module.set_config_override('GLOBAL_TRADING', False)
+        config_module.set_config_override('global_trading', False)
     
     # Topcoins Setup
     try:
@@ -511,11 +530,24 @@ def main():
                     # Gedrosselte Preis-Abfrage: Batch von max 50 Symbolen, mit Cache und Sleep
                     try:
                         from services.market_data import fetch_ticker_cached
-                        # Verwende topcoins_keys statt nicht-existierendem SYMBOLS
-                        symbols_list = getattr(config_module, 'topcoins_keys', [])
+                        symbol_set = set()
 
-                        # Nur aktive Symbole, max 50 pro Sweep-Zyklus, konvertiere zu "BTC/USDT" Format
-                        symbols = [s.replace("USDT", "/USDT") for s in symbols_list[:50]] if symbols_list else []
+                        # Runtime-loaded markets
+                        if topcoins:
+                            symbol_set.update(topcoins.keys())
+
+                        # Include currently held assets (may contain symbols not in topcoins)
+                        held_assets = getattr(portfolio, 'held_assets', {}) if portfolio else {}
+                        for held_symbol in held_assets.keys():
+                            if "/" in held_symbol:
+                                symbol_set.add(held_symbol)
+                            else:
+                                symbol_set.add(f"{held_symbol}/USDT")
+
+                        symbols_list = list(symbol_set)
+
+                        # Nur aktive Symbole, max 50 pro Sweep-Zyklus
+                        symbols = symbols_list[:50] if symbols_list else []
                         prices = {}
 
                         for symbol in symbols:
@@ -548,9 +580,11 @@ def main():
                                  extra={'event_type': 'DUST_SWEEP_ERROR', 'error': str(e)})
 
         # Starte Dust-Sweep Thread
-        dust_sweep_thread = threading.Thread(target=_dust_loop, daemon=True, name="DustSweeper")
+        # CRITICAL FIX (C-MAIN-05): Non-daemon thread with proper shutdown coordination
+        dust_sweep_thread = threading.Thread(target=_dust_loop, daemon=False, name="DustSweeper")
         dust_sweep_thread.start()
         shutdown_coordinator.register_thread(dust_sweep_thread)
+        shutdown_coordinator.register_component("dust_sweeper", dust_sweeper)
         logger.debug("Periodischer Dust-Sweeper aktiviert",
                    extra={'event_type': 'DUST_SWEEP_ACTIVATED',
                           'interval_min': DUST_SWEEP_INTERVAL_MIN})
@@ -595,7 +629,7 @@ def main():
         portfolio.sanity_check_and_reconcile(preise)
     
     # Drop-Anchors initialisieren wenn BACKFILL_MINUTES=0 und Mode 4
-    if BACKFILL_MINUTES == 0 and DROP_TRIGGER_MODE == 4 and USE_DROP_ANCHOR:
+    if config_module.BACKFILL_MINUTES == 0 and config_module.DROP_TRIGGER_MODE == 4 and config_module.USE_DROP_ANCHOR:
         # Setze initiale Anchors für alle Coins ohne persistente Anchors
         current_ts = dt_datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         initialized_anchors = 0
@@ -613,10 +647,24 @@ def main():
             logger.debug(f"Initiale Drop-Anchors für {initialized_anchors} Coins gesetzt (BACKFILL_MINUTES=0)",
                        extra={'event_type': 'DROP_ANCHORS_INITIALIZED',
                               'count': initialized_anchors,
-                              'mode': DROP_TRIGGER_MODE})
+                              'mode': config_module.DROP_TRIGGER_MODE})
     
     # Portfolio Reset wenn konfiguriert
     if reset_portfolio_on_start and exchange:
+        reset_env_confirmed = os.getenv("CONFIRM_PORTFOLIO_RESET", "").upper() == "YES"
+        cli_force_reset = any(arg == "--force-reset" for arg in sys.argv)
+        if not (reset_env_confirmed or cli_force_reset):
+            logger.error(
+                "RESET_PORTFOLIO_ON_START=True, aber keine Bestätigung gefunden. "
+                "Setze CONFIRM_PORTFOLIO_RESET=YES oder starte mit --force-reset.",
+                extra={'event_type': 'PORTFOLIO_RESET_BLOCKED'}
+            )
+            sys.exit(1)
+        logger.warning(
+            "Portfolio-Reset wird ausgeführt (alle Positionen werden liquidiert).",
+            extra={'event_type': 'PORTFOLIO_RESET_CONFIRMED',
+                   'confirmation_source': 'env' if reset_env_confirmed else 'cli'}
+        )
         portfolio.perform_startup_reset(preise)
     
     # Budget pruefen
@@ -862,9 +910,10 @@ def main():
                         logger.warning(f"Rich status table error: {e}",
                                       extra={'event_type': 'RICH_TABLE_ERROR', 'error': str(e)})
 
+                # CRITICAL FIX (C-MAIN-05): Non-daemon thread with proper shutdown coordination
                 rich_table_thread = threading.Thread(
                     target=status_table_thread,
-                    daemon=True,
+                    daemon=False,
                     name="RichStatusTable"
                 )
                 rich_table_thread.start()
@@ -903,9 +952,10 @@ def main():
                     logger.warning(f"Live drop monitor error: {e}",
                                   extra={'event_type': 'DROP_MONITOR_ERROR', 'error': str(e)})
 
+            # CRITICAL FIX (C-MAIN-05): Non-daemon thread with proper shutdown coordination
             drop_monitor_thread_obj = threading.Thread(
                 target=drop_monitor_thread,
-                daemon=True,
+                daemon=False,
                 name="LiveDropMonitor"
             )
             drop_monitor_thread_obj.start()
@@ -944,10 +994,11 @@ def main():
             from ui.dashboard import run_dashboard
             import threading
 
+            # CRITICAL FIX (C-MAIN-05): Non-daemon thread with proper shutdown coordination
             dashboard_thread = threading.Thread(
                 target=run_dashboard,
                 args=(engine, portfolio, config_module),
-                daemon=True,
+                daemon=False,
                 name="LiveDashboard"
             )
             dashboard_thread.start()
@@ -1025,8 +1076,8 @@ def main():
             logger.debug("Heartbeat telemetry disabled (ENABLE_HEARTBEAT_TELEMETRY=False)",
                        extra={'event_type': 'HEARTBEAT_TELEMETRY_DISABLED'})
 
-        # Register additional cleanup callbacks
-        shutdown_coordinator.add_cleanup_callback(lambda: logger.info("Pre-shutdown log flush"))
+        # Register additional cleanup callbacks (use direct function reference for better logging)
+        shutdown_coordinator.add_cleanup_callback(_pre_shutdown_log_flush)
 
         # Start heartbeat monitoring (optional - detects hung engine)
         heartbeat_monitor = shutdown_coordinator.create_heartbeat_monitor(
@@ -1234,10 +1285,10 @@ def main():
         # Execute coordinated shutdown
         logger.info("🔚 Executing coordinated shutdown...", extra={'event_type': 'COORDINATED_SHUTDOWN_START'})
 
-        # Register final cleanup callbacks
-        shutdown_coordinator.add_cleanup_callback(lambda: _telegram_shutdown_cleanup())
-        shutdown_coordinator.add_cleanup_callback(lambda: _telegram_shutdown_summary())
-        shutdown_coordinator.add_cleanup_callback(lambda: _error_summary_cleanup())
+        # Register final cleanup callbacks (use direct function references for better logging)
+        shutdown_coordinator.add_cleanup_callback(_telegram_shutdown_cleanup)
+        shutdown_coordinator.add_cleanup_callback(_telegram_shutdown_summary)
+        shutdown_coordinator.add_cleanup_callback(_error_summary_cleanup)
 
         # Execute graceful shutdown
         shutdown_success = shutdown_coordinator.execute_graceful_shutdown()
@@ -1297,8 +1348,10 @@ def _error_summary_cleanup():
         logger.warning(f"Error getting error summary: {e}")
 
 
+def _pre_shutdown_log_flush():
+    """Cleanup callback for pre-shutdown log flush"""
+    logger.info("Pre-shutdown log flush")
+
+
 if __name__ == "__main__":
     main()
-
-
-

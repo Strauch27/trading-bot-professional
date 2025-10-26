@@ -129,6 +129,7 @@ class TradingEngine:
         # Drop Snapshot Store (Long-term solution)
         self.drop_snapshot_store: Dict[str, Dict[str, Any]] = {}  # symbol -> {'snapshot': ..., 'ts': float}
         self._last_snapshot_ts: float = 0.0
+        self._last_snapshot_cleanup_ts: float = 0.0  # Track last cleanup time for H-ENG-02 fix
 
         # Ensure BTC/USDT is in watchlist for market conditions
         if self.topcoins and "BTC/USDT" not in self.topcoins:
@@ -497,7 +498,8 @@ class TradingEngine:
                 self.portfolio.release_budget(
                     quote_budget,
                     symbol,
-                    reason=reason
+                    reason=reason,
+                    intent_id=intent_id
                 )
                 logger.info(
                     f"Cleared intent {intent_id}: symbol={symbol} budget=${quote_budget:.2f} "
@@ -579,62 +581,79 @@ class TradingEngine:
                     except Exception as telegram_error:
                         logger.debug(f"Telegram alert failed: {telegram_error}")
 
+    def _cleanup_inactive_snapshots(self):
+        """
+        CRITICAL FIX (H-ENG-02): Periodic cleanup of drop_snapshot_store.
+
+        Removes snapshots for symbols no longer in the watchlist to prevent
+        unbounded memory growth when watchlist changes.
+        """
+        # Run cleanup every 5 minutes
+        CLEANUP_INTERVAL_S = 300
+        now = time.time()
+
+        if now - self._last_snapshot_cleanup_ts < CLEANUP_INTERVAL_S:
+            return
+
+        self._last_snapshot_cleanup_ts = now
+
+        with self._lock:
+            # Get current watchlist symbols
+            active_symbols = set(self.topcoins.keys()) if self.topcoins else set()
+
+            # Find inactive symbols in snapshot store
+            stored_symbols = set(self.drop_snapshot_store.keys())
+            inactive_symbols = stored_symbols - active_symbols
+
+            if inactive_symbols:
+                for symbol in inactive_symbols:
+                    del self.drop_snapshot_store[symbol]
+
+                logger.info(
+                    f"Cleaned up {len(inactive_symbols)} inactive symbols from drop_snapshot_store",
+                    extra={
+                        'event_type': 'SNAPSHOT_STORE_CLEANUP',
+                        'removed_count': len(inactive_symbols),
+                        'removed_symbols': list(inactive_symbols)[:10],  # Log max 10
+                        'active_symbols_count': len(active_symbols),
+                        'remaining_stored': len(self.drop_snapshot_store)
+                    }
+                )
+
     # =================================================================
     # MAIN ENGINE LOOP - PURE ORCHESTRATION
     # =================================================================
 
     def start(self):
         """Start the trading engine"""
-        # ULTRA DEBUG: Write to file to prove this is called
-        try:
-            with open("/tmp/engine_start_called.txt", "a") as f:
-                import datetime
-                f.write(f"{datetime.datetime.now()} - TradingEngine.start() ENTRY\n")
-                f.flush()
-        except:
-            pass
-
-        print("[TRADING_ENGINE] start() called")  # DEBUG: Direct console output
         logger.info("=== ENGINE.START() CALLED ===")
 
+        # Check for double-start and raise error to prevent race conditions
         if self.running:
-            logger.warning("Engine already running")
-            return
+            # Check if main thread is still alive
+            thread_alive = self.main_thread and self.main_thread.is_alive()
+            if thread_alive:
+                error_msg = "Engine is already running. Use stop() before restarting."
+                logger.error(error_msg, extra={'event_type': 'ENGINE_DOUBLE_START_ATTEMPT'})
+                raise RuntimeError(error_msg)
+            else:
+                # Thread died but running flag still set - allow restart after cleanup
+                logger.warning(
+                    "Engine marked as running but main thread is dead. Allowing restart after cleanup.",
+                    extra={'event_type': 'ENGINE_DEAD_THREAD_RESTART'}
+                )
+                self.running = False
+                # Continue with normal startup
 
-        print("[TRADING_ENGINE] Starting Trading Engine...")  # DEBUG: Direct console output
         logger.info("=== ENGINE.START() - Setting up market data ===")
 
         # Start market data loop (only once)
-        # ULTRA DEBUG: Write to file
-        try:
-            with open("/tmp/engine_start_called.txt", "a") as f:
-                f.write(f"  _md_started={self._md_started}, has market_data={hasattr(self, 'market_data')}\n")
-                f.flush()
-        except:
-            pass
-
         logger.info(f"=== ENGINE.START() - _md_started={self._md_started}, has market_data={hasattr(self, 'market_data')} ===")
         if not self._md_started:
             if hasattr(self, 'market_data') and hasattr(self.market_data, 'start'):
                 try:
-                    # ULTRA DEBUG: Write before market_data.start()
-                    try:
-                        with open("/tmp/engine_start_called.txt", "a") as f:
-                            f.write(f"  Calling market_data.start()...\n")
-                            f.flush()
-                    except:
-                        pass
-
                     self.market_data.start()
                     self._md_started = True
-
-                    # ULTRA DEBUG: Write after market_data.start()
-                    try:
-                        with open("/tmp/engine_start_called.txt", "a") as f:
-                            f.write(f"  market_data.start() completed\n")
-                            f.flush()
-                    except:
-                        pass
 
                     # Thread-Liveness prüfen
                     t = getattr(self.market_data, "_thread", None)
@@ -850,6 +869,12 @@ class TradingEngine:
                             self._check_stale_intents()
                         except Exception as stale_error:
                             logger.error(f"Stale intent check failed: {stale_error}")
+
+                        # H-ENG-02: Periodic cleanup of inactive snapshots
+                        try:
+                            self._cleanup_inactive_snapshots()
+                        except Exception as cleanup_error:
+                            logger.error(f"Snapshot cleanup failed: {cleanup_error}")
 
                         try:
                             equity = self._calculate_current_equity()
@@ -1310,8 +1335,13 @@ class TradingEngine:
             trace_step("evaluating_symbols", symbols_count=len(self.topcoins),
                       positions_count=len(self.positions))
 
-            # Evaluate each symbol
-            for symbol, coin_data in self.topcoins.items():
+            # CRITICAL FIX (C-ENG-01): Create snapshot to prevent race condition
+            # If topcoins dict is modified during iteration, RuntimeError occurs
+            with self._lock:
+                topcoins_snapshot = list(self.topcoins.items())
+
+            # Evaluate each symbol (safe to iterate snapshot without lock)
+            for symbol, coin_data in topcoins_snapshot:
                 trace_step("evaluate_symbol_start", symbol=symbol)
 
                 if symbol in self.positions:

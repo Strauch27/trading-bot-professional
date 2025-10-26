@@ -93,6 +93,18 @@ class FSMachine:
         # Step 4: Update phase
         coin_state.phase = next_phase
 
+        # CRITICAL FIX (C-FSM-01): Persist state after transition for crash recovery
+        try:
+            from core.fsm.snapshot import get_snapshot_manager
+            snapshot_mgr = get_snapshot_manager()
+            snapshot_mgr.save_snapshot(ctx.symbol, coin_state)
+        except Exception as persist_error:
+            logger.error(
+                f"Failed to persist FSM state for {ctx.symbol}: {persist_error}",
+                exc_info=True
+            )
+            # Don't fail the transition, but log the error
+
         # Step 5: Mark as processed
         self.idempotency_store.mark_processed(ctx)
 
@@ -160,6 +172,17 @@ class FSMachine:
         coin_state.phase = Phase.ERROR
         coin_state.error_count += 1
         coin_state.last_error = str(error)
+
+        # CRITICAL FIX (C-FSM-01): Persist ERROR state for crash recovery
+        try:
+            from core.fsm.snapshot import get_snapshot_manager
+            snapshot_mgr = get_snapshot_manager()
+            snapshot_mgr.save_snapshot(ctx.symbol, coin_state)
+        except Exception as persist_error:
+            logger.error(
+                f"Failed to persist ERROR state for {ctx.symbol}: {persist_error}",
+                exc_info=True
+            )
 
         # Log error
         try:

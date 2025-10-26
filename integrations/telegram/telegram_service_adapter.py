@@ -477,15 +477,16 @@ class TelegramServiceAdapter:
         try:
             import config
 
+            # CRITICAL FIX (C-CONFIG-02): Use thread-safe override instead of direct mutation
             if param == "dt":
-                config.DROP_TRIGGER_VALUE = value
-                config.drop_trigger_value = value
+                config.set_config_override('DROP_TRIGGER_VALUE', value)
+                config.set_config_override('drop_trigger_value', value)
             elif param == "tp":
-                config.TAKE_PROFIT_THRESHOLD = value
-                config.take_profit_threshold = value
+                config.set_config_override('TAKE_PROFIT_THRESHOLD', value)
+                config.set_config_override('take_profit_threshold', value)
             elif param == "sl":
-                config.STOP_LOSS_THRESHOLD = value
-                config.stop_loss_threshold = value
+                config.set_config_override('STOP_LOSS_THRESHOLD', value)
+                config.set_config_override('stop_loss_threshold', value)
             else:
                 return False
 

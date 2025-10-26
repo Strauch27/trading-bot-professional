@@ -235,6 +235,19 @@ class RotatingJSONLWriter:
 
             return stats
 
+    def close(self) -> None:
+        """
+        CRITICAL FIX (C-SERV-03): Explicit cleanup for resource management.
+
+        While file handles are closed after each write via context managers,
+        this method provides explicit cleanup hook for shutdown coordination
+        and future enhancements (e.g., buffering).
+        """
+        with self._lock:
+            # Clear current file reference
+            self.current_file = None
+            logger.debug(f"RotatingJSONLWriter closed: {self.prefix}")
+
 
 class MultiStreamJSONLWriter:
     """
@@ -311,6 +324,21 @@ class MultiStreamJSONLWriter:
                 name: writer.get_statistics()
                 for name, writer in self.writers.items()
             }
+
+    def close_all(self) -> None:
+        """
+        CRITICAL FIX (C-SERV-03): Close all writers explicitly.
+
+        Ensures proper cleanup of all managed streams during shutdown.
+        """
+        with self._lock:
+            for name, writer in self.writers.items():
+                try:
+                    writer.close()
+                except Exception as e:
+                    logger.error(f"Failed to close writer {name}: {e}")
+            self.writers.clear()
+            logger.debug(f"MultiStreamJSONLWriter closed all streams")
 
 
 # Utility function for reading JSONL files

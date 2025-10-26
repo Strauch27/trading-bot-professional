@@ -810,4 +810,10 @@ def run_dashboard(engine, portfolio, config_module):
     except Exception as e:
         logger.error(f"Dashboard crashed: {e}", exc_info=True)
     finally:
+        # CRITICAL FIX (C-UI-01): Explicit terminal restore to prevent state leak
+        # Rich Live with screen=True may leave terminal in corrupted state on crash
+        import sys
+        sys.stdout.write("\033[?1049l")  # Exit alternate screen
+        sys.stdout.write("\033[0m")      # Reset all attributes
+        sys.stdout.flush()
         logger.info("Dashboard stopped", extra={'event_type': 'DASHBOARD_STOPPED'})

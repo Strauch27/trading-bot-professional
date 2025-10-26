@@ -436,6 +436,58 @@ class ExchangeAdapter(ExchangeInterface):
             except Exception:
                 pass
 
+    def _execute_with_timeout(self, func, *args, **kwargs):
+        """
+        CRITICAL FIX (C-ADAPTER-01): Execute request with timeout outside lock.
+
+        Prevents complete trading halt when network calls hang while holding _http_lock.
+        Uses thread-based timeout to detect hung requests and raise TimeoutError.
+
+        Args:
+            func: Function to execute (ccxt call)
+            *args, **kwargs: Arguments for the function
+
+        Returns:
+            Result from func
+
+        Raises:
+            TimeoutError: If request exceeds timeout
+            Exception: Any exception from func
+        """
+        result_container = {'result': None, 'error': None, 'completed': False}
+
+        def run_with_lock():
+            """Worker thread that acquires lock and runs request"""
+            try:
+                with self._http_lock:
+                    # ccxt akzeptiert "params={'timeout': sec}" je nach Methode
+                    if "params" in kwargs and isinstance(kwargs["params"], dict):
+                        kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
+                    result_container['result'] = func(*args, **kwargs)
+                    result_container['completed'] = True
+            except Exception as e:
+                result_container['error'] = e
+                result_container['completed'] = True
+
+        # Spawn worker thread with daemon=True (will be killed on process exit)
+        worker = threading.Thread(target=run_with_lock, daemon=True)
+        worker.start()
+
+        # Wait for completion with timeout
+        worker.join(timeout=self._timeout_s)
+
+        # Check if thread completed
+        if not result_container['completed']:
+            error_msg = f"Request exceeded timeout ({self._timeout_s}s) - worker thread still running"
+            logger.error(error_msg, extra={'event_type': 'HTTP_TIMEOUT'})
+            raise TimeoutError(error_msg)
+
+        # Check for errors
+        if result_container['error']:
+            raise result_container['error']
+
+        return result_container['result']
+
     def _retry_request(self, func, *args, **kwargs):
         """
         Führt Request mit Retry-Logic und Connection Recovery aus.
@@ -474,14 +526,9 @@ class ExchangeAdapter(ExchangeInterface):
 
                 # Begrenzt gleichzeitige TLS-Handshakes für Stabilität
                 with self._http_slots:
-                    # KRITISCH: Alle ccxt-Calls müssen serialisiert werden!
-                    # Verhindert Access Violations durch parallele OpenSSL/HTTP-Zugriffe
-                    with self._http_lock:
-                        # ccxt akzeptiert "params={'timeout': sec}" je nach Methode;
-                        # fallback: client hat globales Timeout; hier defensiv erzwingen
-                        if "params" in kwargs and isinstance(kwargs["params"], dict):
-                            kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
-                        result = func(*args, **kwargs)
+                    # CRITICAL FIX (C-ADAPTER-01): Use timeout wrapper to prevent lock deadlock
+                    # Execute with timeout enforcement outside lock to prevent trading halt
+                    result = self._execute_with_timeout(func, *args, **kwargs)
 
                 # Mark successful request in connection recovery
                 if self._connection_recovery:
@@ -504,16 +551,19 @@ class ExchangeAdapter(ExchangeInterface):
                 # >>> NEU: Timestamp-/recvWindow-Fehler abfangen und Zeit resyncen
                 if ('recvwindow' in msg) or ('timestamp' in msg and 'outside' in msg):
                     try:
-                        with self._http_lock:  # ccxt nicht threadsicher
+                        # CRITICAL FIX (C-ADAPTER-01): Use timeout wrapper for time sync
+                        def time_sync():
                             # großzügigeres Fenster und aktiver Zeitabgleich
                             if hasattr(self.exchange, 'options'):
                                 self.exchange.options['recvWindow'] = max(30000, self.exchange.options.get('recvWindow', 0) or 0)
                             if hasattr(self.exchange, 'load_time_difference'):
                                 self.exchange.load_time_difference()
+
+                        self._execute_with_timeout(time_sync)
+
                         # nach dem Resync sofort 1x direkt erneut versuchen
                         self._rate_limit()
-                        with self._http_lock:
-                            return func(*args, **kwargs)
+                        return self._execute_with_timeout(func, *args, **kwargs)
                     except Exception as e2:
                         last_error = e2  # weiter unten normal weiter-retryen
 

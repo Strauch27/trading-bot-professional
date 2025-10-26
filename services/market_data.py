@@ -321,9 +321,9 @@ class MarketDataProvider:
     def __init__(
         self,
         exchange_adapter,
-        ticker_cache_ttl: float = 5.0,
-        ticker_soft_ttl: float = 2.0,
-        max_cache_size: int = 1000,
+        ticker_cache_ttl: Optional[float] = None,
+        ticker_soft_ttl: Optional[float] = None,
+        max_cache_size: Optional[int] = None,
         max_bars_per_symbol: int = 1000,
         audit_log_dir: Optional[Path] = None,
         enable_audit: bool = False,
@@ -349,13 +349,33 @@ class MarketDataProvider:
             event_bus: Event bus for publishing drop snapshots (optional)
         """
         self.exchange_adapter = exchange_adapter
+
+        # Resolve cache configuration from config if not provided
+        import config as _cfg
+        if ticker_cache_ttl is None:
+            ticker_cache_ttl = getattr(_cfg, 'MD_CACHE_TTL_MS', 5000) / 1000.0
+        if ticker_soft_ttl is None:
+            ticker_soft_ttl = getattr(_cfg, 'MD_CACHE_SOFT_TTL_MS', 2000) / 1000.0
+        if max_cache_size is None:
+            max_cache_size = getattr(_cfg, 'MD_CACHE_MAX_SIZE', 2000)
+
         self.ticker_cache = TickerCache(ticker_cache_ttl, ticker_soft_ttl, max_cache_size)
+        logger.info(
+            "Ticker cache configured",
+            extra={
+                'event_type': 'MD_CACHE_CFG',
+                'hard_ttl_s': ticker_cache_ttl,
+                'soft_ttl_s': ticker_soft_ttl,
+                'max_items': max_cache_size
+            }
+        )
         self.ohlcv_history = OHLCVHistory(max_bars_per_symbol)
         self._lock = RLock()
         self._statistics = {
             'ticker_requests': 0,
             'ticker_cache_hits': 0,
             'ticker_stale_hits': 0,
+            'ticker_cache_misses': 0,
             'ohlcv_requests': 0,
             'ohlcv_bars_stored': 0,
             'ohlcv_partial_candles_removed': 0,
@@ -645,6 +665,9 @@ class MarketDataProvider:
 
                             # Serve stale data immediately
                             return ticker
+
+                    else:
+                        self._statistics['ticker_cache_misses'] += 1
 
                 # Cache miss - fetch from exchange
                 try:
@@ -1642,6 +1665,26 @@ class MarketDataProvider:
             )
             self._last_health_log_ts = now_health
 
+            cache_report = {
+                'hits': self._statistics['ticker_cache_hits'],
+                'stale_hits': self._statistics['ticker_stale_hits'],
+                'misses': self._statistics['ticker_cache_misses']
+            }
+            logger.info(
+                "MD cache stats: hits=%s stale=%s miss=%s",
+                cache_report['hits'],
+                cache_report['stale_hits'],
+                cache_report['misses'],
+                extra={
+                    'event_type': 'MD_CACHE_STATS',
+                    **cache_report
+                }
+            )
+            # Reset counters after reporting to keep deltas meaningful
+            self._statistics['ticker_cache_hits'] = 0
+            self._statistics['ticker_stale_hits'] = 0
+            self._statistics['ticker_cache_misses'] = 0
+
             # Optional: Export health stats to JSONL
             export_dir = getattr(config, 'MARKET_DATA_HEALTH_EXPORT_DIR', None)
             if export_dir:
@@ -1981,6 +2024,19 @@ class MarketDataProvider:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5.0)
 
+            # CRITICAL FIX (C-SERV-02): Verify thread stopped successfully
+            if self._thread.is_alive():
+                logger.error(
+                    "Market data thread failed to stop within 5s timeout - thread leak detected!",
+                    extra={
+                        'event_type': 'THREAD_LEAK',
+                        'thread_name': self._thread.name,
+                        'thread_id': self._thread.ident
+                    }
+                )
+                # Consider this a critical error that should be investigated
+                # The thread will be orphaned and continue running in background
+
         # V9_3: Save rolling windows per symbol (defensive)
         if self.rw_manager and self.rw_manager.persist:
             try:
@@ -2000,6 +2056,31 @@ class MarketDataProvider:
                 self.anchor_manager.save()
             except Exception as e:
                 logger.warning(f"Failed to save anchors on shutdown: {e}")
+
+        # CRITICAL FIX (C-SERV-03): Close all JSONL writers explicitly
+        try:
+            # Close per-symbol tick writers
+            for symbol, writer in list(self.tick_writers.items()):
+                try:
+                    writer.close()
+                except Exception as e:
+                    logger.error(f"Failed to close tick writer for {symbol}: {e}")
+
+            # Close aggregate writers
+            for writer_name, writer in [
+                ("snapshot", self.snapshot_writer),
+                ("windows", self.windows_writer),
+                ("anchors", self.anchors_writer)
+            ]:
+                if writer:
+                    try:
+                        writer.close()
+                    except Exception as e:
+                        logger.error(f"Failed to close {writer_name} writer: {e}")
+
+            logger.debug("All JSONL writers closed", extra={'event_type': 'JSONL_WRITERS_CLOSED'})
+        except Exception as e:
+            logger.error(f"Error during JSONL writer cleanup: {e}")
 
         logger.info("Market data loop stopped")
 

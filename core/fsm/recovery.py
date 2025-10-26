@@ -54,13 +54,29 @@ class RecoveryManager:
 
                 # Restore from snapshot
                 if self.snapshot_manager.restore_state(symbol, coin_state):
+                    # CRITICAL FIX (C-FSM-03): Validate recovered state before accepting
                     self.recovered_states[symbol] = coin_state
-                    recovered_count += 1
+                    validation_result = self.validate_recovered_state(symbol)
 
-                    logger.info(
-                        f"Recovered {symbol}: {coin_state.phase.name} "
-                        f"(amount={coin_state.amount:.6f}, entry={coin_state.entry_price:.4f})"
-                    )
+                    if validation_result['valid']:
+                        recovered_count += 1
+                        logger.info(
+                            f"Recovered {symbol}: {coin_state.phase.name} "
+                            f"(amount={coin_state.amount:.6f}, entry={coin_state.entry_price:.4f})"
+                        )
+                    else:
+                        # State is invalid - reset to IDLE
+                        logger.warning(
+                            f"Invalid state recovered for {symbol}: {validation_result['issues']} "
+                            f"- resetting to IDLE"
+                        )
+                        from core.fsm.fsm_enums import Phase
+                        coin_state.phase = Phase.IDLE
+                        coin_state.amount = 0.0
+                        coin_state.entry_price = 0.0
+                        coin_state.entry_ts = 0.0
+                        # Still count as recovered (but reset)
+                        recovered_count += 1
                 else:
                     failed_count += 1
 

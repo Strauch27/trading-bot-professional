@@ -122,6 +122,8 @@ class GzTimedHandler(TimedRotatingFileHandler):
 
 # Global logger cache
 _logger_cache: Dict[tuple, logging.Logger] = {}
+# CRITICAL FIX (C-INFRA-03): Lock for thread-safe cache access
+_logger_cache_lock = threading.Lock()
 
 
 def _make_handler(file_path: str, backup_count: int = 14) -> logging.Handler:
@@ -169,22 +171,24 @@ def get_logger(name: str, file_path: str, backup_count: int = 14) -> logging.Log
     """
     key = (name, file_path)
 
-    # Return cached logger if exists
-    if key in _logger_cache:
-        return _logger_cache[key]
+    # CRITICAL FIX (C-INFRA-03): Thread-safe cache check and creation
+    with _logger_cache_lock:
+        # Return cached logger if exists
+        if key in _logger_cache:
+            return _logger_cache[key]
 
-    # Create new logger
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False  # Don't propagate to root logger
+        # Create new logger (inside lock to prevent duplicate creation)
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False  # Don't propagate to root logger
 
-    # Add handler
-    handler = _make_handler(file_path, backup_count)
-    logger.addHandler(handler)
+        # Add handler
+        handler = _make_handler(file_path, backup_count)
+        logger.addHandler(handler)
 
-    # Cache and return
-    _logger_cache[key] = logger
-    return logger
+        # Cache and return
+        _logger_cache[key] = logger
+        return logger
 
 
 # Convenience logger getters (lazy initialization)

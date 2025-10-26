@@ -68,8 +68,10 @@ class EventBus:
             topic: Topic name
             payload: Event data to send to subscribers
         """
+        # CRITICAL FIX (C-INFRA-01): Create shallow copy to prevent deadlock
+        # If callback modifies subscribers during iteration, we get race condition
         with self._lock:
-            callbacks = self.subscribers.get(topic, [])
+            callbacks = list(self.subscribers.get(topic, []))
 
         # Call callbacks outside lock to prevent deadlocks
         for callback in callbacks:

@@ -261,6 +261,10 @@ class PortfolioManager:
         self.reserved_base: Dict[str, float] = {}
         self.active_reservations: Dict[str, Dict] = {}  # symbol -> reservation metadata
 
+        # CRITICAL FIX (C-PORT-01): Add missing verified_budget attribute
+        # Used by settlement manager for budget health monitoring
+        self.verified_budget: float = 0.0
+
         # Position Lifecycle & PnL Management (NEW - Reconciliation System)
         self.positions: Dict[str, Position] = {}  # symbol -> Position
         self.last_prices: Dict[str, float] = {}  # symbol -> last_price for marking
@@ -433,7 +437,7 @@ class PortfolioManager:
             )
             
             # Immer State synchronisieren nach Reset-Versuch
-            refresh_func = lambda: refresh_budget_from_exchange(self.exchange, self.my_budget)
+            refresh_func = lambda: refresh_budget_from_exchange_safe(self.exchange, self.my_budget, timeout=5.0)
             
             # Warte auf alle Settlements
             if self.settlement_manager.get_total_pending() > 0:
@@ -636,11 +640,13 @@ class PortfolioManager:
         self.held_assets[symbol] = data
         self.save_state()
         
-    @synchronized_budget
     def on_partial_fill(self, symbol: str, client_order_id: str,
                         filled_quote: float, orig_quote: float):
         """Release budget on partial fill (thread-safe with _budget_lock)
-        
+
+        CRITICAL FIX (C-PORT-02): save_state() called OUTSIDE budget lock to prevent deadlock.
+        Lock hierarchy: Never hold _budget_lock when acquiring _state_lock.
+
         Args:
             symbol: Trading pair
             client_order_id: The clientOrderId of the order
@@ -649,25 +655,30 @@ class PortfolioManager:
         """
         if orig_quote <= 0:
             return
-            
-        # Calculate how much to release
-        fill_ratio = filled_quote / orig_quote
-        reserved = self.reserved_quote.get(symbol, 0.0)
-        release = reserved * (1 - fill_ratio)  # Release unfilled portion
-        
-        if release > 0:
-            self.reserved_quote[symbol] = max(0.0, reserved - release)
-            self.my_budget += release  # Return to available budget
-            
-            log_event("BUDGET_RELEASED_PARTIAL", symbol=symbol, context={
-                "clientOrderId": client_order_id,
-                "released_usdt": float(release),
-                "filled_quote": float(filled_quote),
-                "orig_quote": float(orig_quote),
-                "fill_ratio": float(fill_ratio)
-            })
-            
-            # Persist state
+
+        # Perform budget operations under lock, then release before save_state()
+        need_save = False
+        with self._budget_lock:
+            # Calculate how much to release
+            fill_ratio = filled_quote / orig_quote
+            reserved = self.reserved_quote.get(symbol, 0.0)
+            release = reserved * (1 - fill_ratio)  # Release unfilled portion
+
+            if release > 0:
+                self.reserved_quote[symbol] = max(0.0, reserved - release)
+                self.my_budget += release  # Return to available budget
+                need_save = True
+
+                log_event("BUDGET_RELEASED_PARTIAL", symbol=symbol, context={
+                    "clientOrderId": client_order_id,
+                    "released_usdt": float(release),
+                    "filled_quote": float(filled_quote),
+                    "orig_quote": float(orig_quote),
+                    "fill_ratio": float(fill_ratio)
+                })
+
+        # CRITICAL: Persist state OUTSIDE budget lock to prevent lock hierarchy violation
+        if need_save:
             self.save_state()
     
     @synchronized_budget
@@ -711,7 +722,13 @@ class PortfolioManager:
         })
     
     @synchronized_budget
-    def release_budget(self, quote_amount: float, symbol: str | None = None, reason: str = "unknown"):
+    def release_budget(
+        self,
+        quote_amount: float,
+        symbol: str | None = None,
+        reason: str = "unknown",
+        intent_id: str | None = None
+    ):
         """Gibt reserviertes Budget wieder frei
         
         Args:
@@ -736,16 +753,26 @@ class PortfolioManager:
                     reservation['timestamp'] = time.time()
                     self.active_reservations[symbol] = reservation
         
-        log_event("BUDGET_RELEASED", context={
+        context = {
             "released": float(quote_amount),
             "total_reserved": float(self.reserved_budget),
             "available": float(self.my_budget - self.reserved_budget),
             "symbol": symbol,
             "reason": reason
-        })
+        }
+        if intent_id:
+            context["intent_id"] = intent_id
+
+        log_event("BUDGET_RELEASED", context=context)
     
     @synchronized_budget
-    def commit_budget(self, quote_amount: float, symbol: str | None = None, order_id: str = None):
+    def commit_budget(
+        self,
+        quote_amount: float,
+        symbol: str | None = None,
+        order_id: str = None,
+        intent_id: str | None = None
+    ):
         """Committet reserviertes Budget nach erfolgreicher Order
         
         Args:
@@ -771,13 +798,17 @@ class PortfolioManager:
                     reservation['timestamp'] = time.time()
                     self.active_reservations[symbol] = reservation
         
-        log_event("BUDGET_COMMITTED", context={
+        commit_context = {
             "committed": float(quote_amount),
             "remaining_budget": float(self.my_budget),
             "reserved": float(self.reserved_budget),
             "symbol": symbol,
             "order_id": order_id
-        })
+        }
+        if intent_id:
+            commit_context["intent_id"] = intent_id
+
+        log_event("BUDGET_COMMITTED", context=commit_context)
     
     @synchronized('_budget_lock')
     def get_free_usdt(self) -> float:
@@ -1344,24 +1375,33 @@ class PortfolioManager:
             elif pos.state == "OPEN" and self._is_reducing(trades):
                 pos.state = "PARTIAL_EXIT"
 
-            # Budget and reservation adjustments based on fills
+            # CRITICAL FIX (C-PORT-03): Partial fill budget leak fixed
+            # Only commit what was actually spent (cost + fees), not the full reservation
             if buy_quote_total > 0:
                 reserved_for_symbol = self.reserved_quote.get(symbol, 0.0)
-                commit_amount = min(reserved_for_symbol, buy_quote_total)
+
+                # Calculate actual total cost including fees
+                actual_cost = buy_quote_total + buy_fees
+
+                # Only commit what was actually spent, up to the reservation
+                commit_amount = min(reserved_for_symbol, actual_cost)
 
                 if commit_amount > 0:
                     self.commit_budget(commit_amount, symbol=symbol)
 
+                # Release any surplus reservation (important for partial fills)
                 surplus_reserved = max(0.0, reserved_for_symbol - commit_amount)
                 if surplus_reserved > 0:
-                    self.release_budget(surplus_reserved, symbol=symbol, reason="fill_adjustment")
+                    self.release_budget(surplus_reserved, symbol=symbol, reason="partial_fill_surplus")
 
-                extra_cost = max(0.0, buy_quote_total - reserved_for_symbol)
+                # Handle case where actual cost exceeds reservation (slippage)
+                extra_cost = max(0.0, actual_cost - reserved_for_symbol)
                 if extra_cost > 0:
+                    logger.warning(
+                        f"Actual cost ({actual_cost:.2f}) exceeded reservation ({reserved_for_symbol:.2f}) by {extra_cost:.2f} USDT",
+                        extra={'event_type': 'BUDGET_SLIPPAGE_OVERAGE', 'symbol': symbol, 'overage': extra_cost}
+                    )
                     self.my_budget = max(0.0, self.my_budget - extra_cost)
-
-                if buy_fees > 0:
-                    self.my_budget = max(0.0, self.my_budget - buy_fees)
 
             if sell_qty_total > 0:
                 reserved_base_amt = self.reserved_base.get(symbol, 0.0)

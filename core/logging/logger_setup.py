@@ -10,7 +10,26 @@ from pythonjsonlogger import jsonlogger
 from collections import deque
 import traceback
 from datetime import datetime, timezone
-from config import LOG_FILE, run_id, run_timestamp, USE_STATUS_LINE
+# CRITICAL FIX (C-CONFIG-01): Handle lazy initialization from config
+try:
+    from config import LOG_FILE, run_id, run_timestamp, USE_STATUS_LINE
+    # Provide fallbacks if config hasn't been initialized yet
+    if LOG_FILE is None:
+        LOG_FILE = os.path.join(os.getcwd(), "logs", "bot_log.jsonl")
+    if run_id is None:
+        import uuid
+        run_id = str(uuid.uuid4())[:8]
+    if run_timestamp is None:
+        from datetime import datetime, timezone
+        run_timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+except ImportError:
+    # Fallback for tooling
+    LOG_FILE = os.path.join(os.getcwd(), "logs", "bot_log.jsonl")
+    import uuid
+    run_id = str(uuid.uuid4())[:8]
+    from datetime import datetime, timezone as _tz
+    run_timestamp = datetime.now(_tz.utc).strftime('%Y%m%d_%H%M%S')
+    USE_STATUS_LINE = False
 
 # Global queue listener reference for cleanup
 _queue_listener = None

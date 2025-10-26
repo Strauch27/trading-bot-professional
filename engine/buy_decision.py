@@ -23,6 +23,10 @@ from core.trace_context import Trace
 from core.logger_factory import DECISION_LOG, ORDER_LOG, log_event
 from decision.assembler import assemble as assemble_intent
 
+# Risk management imports (avoid hot-path imports)
+from core.risk_limits import RiskLimitChecker
+from core.event_schemas import RiskLimitsEval
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +45,9 @@ class BuyDecisionHandler:
             engine: Main TradingEngine instance for accessing services
         """
         self.engine = engine
+
+        # Initialize risk checker once (avoid hot-path instantiation)
+        self.risk_checker = RiskLimitChecker(engine.portfolio, config)
 
     @trace_function(include_args=False, include_result=True)
     def evaluate_buy_signal(self, symbol: str, coin_data: Dict, current_price: float,
@@ -439,13 +446,10 @@ class BuyDecisionHandler:
                 )
                 return
 
-            # Phase 1 (TODO 6): Risk Limits Check - BEFORE order placement
+            # Phase 1: Risk Limits Check - BEFORE order placement
+            # Note: RiskLimitChecker is initialized once in __init__ to avoid hot-path overhead
             try:
-                from core.risk_limits import RiskLimitChecker
-                from core.event_schemas import RiskLimitsEval
-
-                risk_checker = RiskLimitChecker(self.engine.portfolio, config)
-                all_passed, limit_checks = risk_checker.check_limits(symbol, quote_budget)
+                all_passed, limit_checks = self.risk_checker.check_limits(symbol, quote_budget)
 
                 risk_eval = RiskLimitsEval(
                     symbol=symbol,
@@ -534,6 +538,28 @@ class BuyDecisionHandler:
                     "ask": coin_data.get('ask') if coin_data else None
                 }
             }
+
+            # CRITICAL FIX (H-ENG-01): Enforce capacity limit on pending_buy_intents
+            MAX_PENDING_INTENTS = 100  # Prevent unbounded memory growth
+            if len(self.engine.pending_buy_intents) >= MAX_PENDING_INTENTS:
+                # Evict oldest intent to make room
+                oldest_intent = min(
+                    self.engine.pending_buy_intents.items(),
+                    key=lambda x: x[1].get('start_ts', float('inf'))
+                )
+                oldest_id, oldest_meta = oldest_intent
+                logger.warning(
+                    f"Pending intents at capacity ({MAX_PENDING_INTENTS}), "
+                    f"evicting oldest intent {oldest_id} for {oldest_meta.get('symbol')}",
+                    extra={
+                        'event_type': 'INTENT_CAPACITY_EVICTION',
+                        'evicted_id': oldest_id,
+                        'evicted_symbol': oldest_meta.get('symbol'),
+                        'age_s': time.time() - oldest_meta.get('start_ts', time.time())
+                    }
+                )
+                self.engine.clear_intent(oldest_id, reason="capacity_eviction")
+
             self.engine.pending_buy_intents[intent.intent_id] = intent_metadata
 
             # P1: Persist intent state (debounced)

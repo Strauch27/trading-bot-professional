@@ -243,8 +243,13 @@ class HybridEngine:
             return states
 
         try:
+            # CRITICAL FIX (C-ENG-02): Create snapshot to prevent race condition
+            # Position dict can be modified during iteration by exit handler
+            with self.legacy_engine._lock:
+                positions_snapshot = list(self.legacy_engine.positions.items())
+
             # Convert legacy positions to CoinStates
-            for symbol, position_data in self.legacy_engine.positions.items():
+            for symbol, position_data in positions_snapshot:
                 st = CoinState(symbol=symbol)
 
                 # Map legacy position to FSM state

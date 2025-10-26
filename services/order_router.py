@@ -18,6 +18,7 @@ This is the SINGLE execution path for all trading orders.
 import time
 import math
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import ccxt
@@ -91,6 +92,9 @@ class OrderRouter:
         self.tl = telemetry
         self.cfg = config
         self.event_bus = event_bus
+
+        # CRITICAL FIX (C-SERV-01): Add lock for thread-safe state persistence
+        self._meta_lock = threading.RLock()
 
         # Idempotency: track seen intent IDs
         self._seen: set = set()
@@ -354,7 +358,9 @@ class OrderRouter:
             symbol: Trading pair
             order_id: Exchange order ID
         """
-        metadata = self._order_meta.pop(order_id, {})
+        # CRITICAL FIX (C-SERV-01): Protect metadata access
+        with self._meta_lock:
+            metadata = self._order_meta.pop(order_id, {})
         # P1: Persist metadata after removal (debounced)
         self._persist_meta_state()
 
@@ -419,6 +425,32 @@ class OrderRouter:
         limit_px = intent.get("limit_price")
         reason = intent.get("reason", "UNKNOWN")
 
+        # Enforce ORDER_FLOW kill-switch before doing anything costly
+        if not getattr(config, 'ORDER_FLOW_ENABLED', True):
+            error_msg = "ORDER_FLOW_ENABLED=False: Order placement disabled by kill-switch"
+            logger.warning(
+                error_msg,
+                extra={'intent_id': intent_id, 'symbol': symbol, 'side': side}
+            )
+            self.tl.write("order_audit", {
+                "intent_id": intent_id,
+                "state": "FAILED",
+                "reason": "order_flow_disabled",
+                "timestamp": time.time()
+            })
+            if self.event_bus:
+                try:
+                    self.event_bus.publish("order.failed", {
+                        "intent_id": intent_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "reason": "order_flow_disabled",
+                        "error": error_msg
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to publish order.failed event: {e}")
+            return
+
         # Idempotency check
         if intent_id in self._seen:
             logger.debug(f"Intent {intent_id} already processed (idempotent)")
@@ -439,6 +471,33 @@ class OrderRouter:
         })
 
         logger.info(f"Processing intent {intent_id}: {symbol} {side} {qty} (reason={reason})")
+
+        # Check ORDER_FLOW_ENABLED kill-switch early (before budget reservation)
+        order_flow_enabled = getattr(config, 'ORDER_FLOW_ENABLED', True)
+        if not order_flow_enabled:
+            error_msg = f"ORDER_FLOW_ENABLED=False: Order execution disabled by kill-switch"
+            logger.warning(error_msg, extra={'intent_id': intent_id, 'symbol': symbol, 'side': side})
+            self.tl.write("order_audit", {
+                "intent_id": intent_id,
+                "state": "FAILED",
+                "reason": "kill_switch_disabled",
+                "error": error_msg,
+                "timestamp": time.time()
+            })
+
+            # Publish order.failed event to notify engine
+            if self.event_bus:
+                try:
+                    self.event_bus.publish("order.failed", {
+                        "intent_id": intent_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "reason": "kill_switch_disabled",
+                        "error": error_msg
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to publish order.failed event: {e}")
+            return
 
         # Get last price for slippage guard and reservation
         last_price = self.pf.last_price(symbol) or limit_px or 0.0
@@ -551,7 +610,9 @@ class OrderRouter:
                     meta = dict(base_meta)
                     meta.update({"attempt": attempt, "filled_qty": filled_qty})
                     meta["start_ts"] = time.time()  # Fix: Set timestamp for recovery filtering
-                    self._order_meta[order_id] = meta
+                    # CRITICAL FIX (C-SERV-01): Protect metadata write
+                    with self._meta_lock:
+                        self._order_meta[order_id] = meta
                     # P1: Persist metadata (debounced)
                     self._persist_meta_state()
 
@@ -816,11 +877,14 @@ class OrderRouter:
             if not self._meta_state_writer:
                 return
 
-            state = {
-                "order_meta": self._order_meta,
-                "last_update": time.time()
-            }
+            # CRITICAL FIX (C-SERV-01): Protect _order_meta access with lock
+            with self._meta_lock:
+                state = {
+                    "order_meta": dict(self._order_meta),  # Create copy inside lock
+                    "last_update": time.time()
+                }
 
+            # Update outside lock to avoid holding lock during I/O
             self._meta_state_writer.update(state)
 
         except Exception as e:

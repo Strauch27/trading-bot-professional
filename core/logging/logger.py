@@ -14,6 +14,12 @@ except ImportError:  # Fallback for tooling
     LOG_DIR = os.path.join(os.getcwd(), "logs")
     SESSION_DIR = os.getcwd()
 
+# CRITICAL FIX (C-CONFIG-01): Handle lazy initialization - LOG_DIR may be None before init_runtime_config()
+if LOG_DIR is None:
+    LOG_DIR = os.path.join(os.getcwd(), "logs")
+if SESSION_DIR is None:
+    SESSION_DIR = os.getcwd()
+
 _DEFAULT_BASE_DIR = os.path.join(LOG_DIR, "jsonl")
 
 
