@@ -507,18 +507,19 @@ class MarketDataProvider:
                 )
                 logger.debug("Windows stream writer initialized")
 
-                # Anchors stream
-                self.anchors_writer = RotatingJSONLWriter(
-                    base_dir=f"{base_path}/anchors",
-                    prefix="anchors",
-                    max_mb=max_file_mb
-                )
-                logger.debug("Anchors stream writer initialized")
+                # Anchors stream - DISABLED (use JSON persistence only)
+                # self.anchors_writer = RotatingJSONLWriter(
+                #     base_dir=f"{base_path}/anchors",
+                #     prefix="anchors",
+                #     max_mb=max_file_mb
+                # )
+                # logger.debug("Anchors stream writer initialized")
+                self.anchors_writer = None  # Use JSON persistence only (anchor_manager.save())
 
                 logger.info(
-                    f"4-Stream JSONL persistence enabled: "
+                    f"3-Stream JSONL persistence enabled: "
                     f"ticks={persist_ticks}, snapshots={persist_snapshots}, "
-                    f"windows=True, anchors=True (max_mb={max_file_mb})"
+                    f"windows=True (anchors use JSON only, max_mb={max_file_mb})"
                 )
         else:
             # Default values when drop tracking is disabled (prevent AttributeError in _loop())
@@ -1924,25 +1925,25 @@ class MarketDataProvider:
             # Persist anchors (legacy + JSONL)
             if self.anchor_manager:
                 try:
-                    self.anchor_manager.save()  # Legacy JSON persistence
+                    self.anchor_manager.save()  # JSON persistence (single file)
                 except Exception as e:
-                    logger.debug(f"Failed to persist anchors (legacy): {e}")
+                    logger.debug(f"Failed to persist anchors (JSON): {e}")
 
-                # V9_3: JSONL persistence for anchors
-                if self.anchors_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
-                    try:
-                        for symbol, anchor_data in self.anchor_manager._anchors.items():
-                            anchor_obj = {
-                                "ts": now,
-                                "symbol": symbol,
-                                "anchor": anchor_data.get("anchor"),
-                                "anchor_ts": anchor_data.get("ts"),
-                                "session_peak": self.anchor_manager.get_session_peak(symbol),
-                                "session_start": self.anchor_manager.get_session_start(symbol)
-                            }
-                            self.anchors_writer.append(anchor_obj)
-                    except Exception as e:
-                        logger.debug(f"Failed to persist anchors (JSONL): {e}")
+                # V9_3: JSONL persistence for anchors - DISABLED (use JSON only)
+                # if self.anchors_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
+                #     try:
+                #         for symbol, anchor_data in self.anchor_manager._anchors.items():
+                #             anchor_obj = {
+                #                 "ts": now,
+                #                 "symbol": symbol,
+                #                 "anchor": anchor_data.get("anchor"),
+                #                 "anchor_ts": anchor_data.get("ts"),
+                #                 "session_peak": self.anchor_manager.get_session_peak(symbol),
+                #                 "session_start": self.anchor_manager.get_session_start(symbol)
+                #             }
+                #             self.anchors_writer.append(anchor_obj)
+                #     except Exception as e:
+                #         logger.debug(f"Failed to persist anchors (JSONL): {e}")
 
         co.beat("md_update_end")
 
@@ -2104,7 +2105,7 @@ class MarketDataProvider:
             for writer_name, writer in [
                 ("snapshot", self.snapshot_writer),
                 ("windows", self.windows_writer),
-                ("anchors", self.anchors_writer)
+                # ("anchors", self.anchors_writer)  # Disabled - anchors use JSON only
             ]:
                 if writer:
                     try:
