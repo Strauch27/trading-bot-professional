@@ -10,11 +10,11 @@ Contains utility functions for trading operations:
 - Base currency extraction
 """
 
-import re
 import logging
-from typing import Optional
-from config import min_order_buffer, DUST_FACTOR
-from core.utils import get_symbol_limits, floor_to_step
+import re
+
+from config import DUST_FACTOR, min_order_buffer
+from core.utils import floor_to_step, get_symbol_limits
 
 logger = logging.getLogger(__name__)
 

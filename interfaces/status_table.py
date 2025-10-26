@@ -4,15 +4,16 @@ Rich Terminal Status Table
 Live-updating terminal UI showing FSM state for all symbols.
 """
 
-from rich.table import Table
-from rich.live import Live
+import logging
+import time
+from typing import Callable, Dict
+
 from rich.console import Console
-from rich.text import Text
+from rich.live import Live
+from rich.table import Table
+
 from core.fsm.phases import Phase
 from core.fsm.state import CoinState
-from typing import Dict, Callable
-import time
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ def render_status_table(states: Dict[str, CoinState], show_idle: bool = False) -
     )
 
     # Add rows
-    now = time.time()
+    time.time()
     for st in sorted_states:
         # Age
         age_s = int(st.age_seconds())
@@ -187,7 +188,7 @@ def format_pnl(pnl: float) -> str:
     elif pnl < 0:
         return f"[red]{pnl:.2f}[/]"
     else:
-        return f"[dim]0.00[/]"
+        return "[dim]0.00[/]"
 
 
 def format_age(seconds: int) -> str:

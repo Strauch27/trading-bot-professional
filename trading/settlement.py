@@ -10,11 +10,12 @@ Contains functions for:
 NOTE: Vollständige Implementierungen können aus trading_legacy.py (Zeilen 353-746) kopiert werden.
 """
 
-import time
 import logging
-import ccxt
 import threading
-from typing import Optional, Tuple, Dict
+import time
+
+import ccxt
+
 from .helpers import get_free
 
 logger = logging.getLogger(__name__)
@@ -28,8 +29,9 @@ def sync_active_order_and_state(exchange, symbol, held_assets, my_budget, settle
        Returns (status, order_dict) where status is one of None/'filled'/'partial'/'open'.
        Note: my_budget parameter is kept for compatibility but not modified internally.
     """
-    from .helpers import base_currency
     from utils import save_trade_history
+
+    from .helpers import base_currency
 
     data = held_assets.get(symbol)
     if not data:
@@ -160,7 +162,7 @@ def refresh_budget_from_exchange(exchange, my_budget, max_retries=3, delay=2.0) 
             # Speichere Zeit des letzten Erfolgs
             refresh_budget_from_exchange.last_success = time.time()
             return my_budget
-        except Exception as e:
+        except Exception:
             if attempt < max_retries - 1:
                 logger.warning(f"Budget-Refresh fehlgeschlagen (Versuch {attempt+1}/{max_retries}), warte {delay}s...",
                              extra={'event_type': 'BUDGET_REFRESH_RETRY'})

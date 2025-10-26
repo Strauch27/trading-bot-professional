@@ -7,8 +7,8 @@ Uses 2-phase commit pattern.
 """
 
 import logging
-from typing import Optional, Dict
 from contextlib import contextmanager
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

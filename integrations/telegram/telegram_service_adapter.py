@@ -6,11 +6,10 @@ Provides unified access to all engine services for Telegram integration.
 Ensures consistent data access and proper error handling.
 """
 
-import time
 import logging
-from typing import Dict, List, Tuple, Optional, Any
-from datetime import datetime
+import time
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +330,7 @@ class TelegramServiceAdapter:
                     passing=passing if passing is not None else False,
                     current_value=btc_change,
                     threshold=threshold,
-                    reason=None if passing else f"BTC change too low"
+                    reason=None if passing else "BTC change too low"
                 ))
 
             # Falling Coins Filter
@@ -346,7 +345,7 @@ class TelegramServiceAdapter:
                     passing=passing if passing is not None else False,
                     current_value=falling_pct,
                     threshold=threshold,
-                    reason=None if passing else f"Too many coins falling"
+                    reason=None if passing else "Too many coins falling"
                 ))
 
             # Add other guards as needed...

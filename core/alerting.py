@@ -33,11 +33,11 @@ Usage:
 """
 
 import logging
-import time
 import threading
-from typing import Callable, Dict, List, Optional
+import time
 from dataclasses import dataclass
 from enum import Enum
+from typing import Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ def create_default_alerts(telegram_bot=None) -> AlertManager:
     # Rule 5: Exchange Connection Lost
     alert_manager.add_rule(AlertRule(
         name="exchange_connection_lost",
-        condition=lambda ctx: ctx.get('exchange_connected', True) == False,
+        condition=lambda ctx: not ctx.get('exchange_connected', True),
         severity=AlertSeverity.CRITICAL,
         message_template="Exchange connection lost! Bot may be unable to trade.",
         cooldown_seconds=120  # 2 minutes

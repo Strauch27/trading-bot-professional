@@ -5,8 +5,8 @@ FSM Phase Audit Logging
 Logs every phase transition with full context for debugging and compliance.
 """
 
-import time
 import logging
+import time
 from typing import Optional
 
 from core.fsm.fsm_events import EventContext
@@ -35,7 +35,7 @@ def log_phase_transition(
     - Timing information
     """
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
     except ImportError:
         logger.debug("AUDIT_LOG not available, skipping audit log")
         return
@@ -92,7 +92,7 @@ def log_phase_transition(
 def log_phase_entry(symbol: str, phase: Phase, coin_state: CoinState):
     """Log entry into a phase"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         log_event(
             AUDIT_LOG(),
@@ -110,7 +110,7 @@ def log_phase_entry(symbol: str, phase: Phase, coin_state: CoinState):
 def log_phase_exit(symbol: str, phase: Phase, coin_state: CoinState, reason: str):
     """Log exit from a phase"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         # Calculate phase duration
         phase_duration = coin_state.age_seconds()
@@ -138,7 +138,7 @@ def log_order_attempt(
 ):
     """Log order placement attempt"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         log_event(
             AUDIT_LOG(),
@@ -167,7 +167,7 @@ def log_order_result(
 ):
     """Log order result (filled/cancelled/timeout)"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         log_event(
             AUDIT_LOG(),
@@ -194,7 +194,7 @@ def log_position_snapshot(
 ):
     """Log position state snapshot (for periodic monitoring)"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         state_data = getattr(coin_state, 'fsm_data', None)
 
@@ -235,7 +235,7 @@ def log_error_recovery(
 ):
     """Log error and recovery action"""
     try:
-        from core.logger_factory import log_event, AUDIT_LOG
+        from core.logger_factory import AUDIT_LOG, log_event
 
         log_event(
             AUDIT_LOG(),

@@ -23,12 +23,13 @@ Example:
 """
 
 from __future__ import annotations
+
+import logging
 import threading
 import time
-from typing import Dict, Callable, TypeVar, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 

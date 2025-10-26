@@ -4,11 +4,11 @@ Konsolidiert realized/unrealized PnL, Fees, Win-Rate und Session-Metriken.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+
 import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 
 @dataclass

@@ -11,10 +11,10 @@ Consolidates all exit logic with deterministic rule prioritization:
 Generates exit signals for OrderRouter execution.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Dict
 import time
+from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Dict, Optional
 
 
 @dataclass

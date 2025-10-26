@@ -14,19 +14,18 @@ This serves as both documentation and a working integration example
 for the complete trading lifecycle with FSM-based execution.
 """
 
-import time
 import logging
-from typing import Dict, Optional
+import time
+from typing import Dict
 
 import config
-from decision.assembler import assemble as assemble_entry_intent
+from core.portfolio.portfolio import PortfolioManager
 from decision.exit_assembler import assemble as assemble_exit_intent
 from engine.exit_engine import ExitEngine
+from interfaces.exchange_wrapper import ExchangeWrapper
 from services.order_router import OrderRouter, RouterConfig
 from services.reconciler import Reconciler
-from core.portfolio.portfolio import PortfolioManager
 from telemetry.jsonl_writer import JsonlWriter
-from interfaces.exchange_wrapper import ExchangeWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +284,8 @@ def demo_complete_lifecycle():
     - Exit: Position → ExitEngine → ExitIntent → OrderRouter → Position Close
     """
     import ccxt
-    from core.utils import SettlementManager, DustSweeper
+
+    from core.utils import SettlementManager
 
     logger.info("=" * 80)
     logger.info("COMPLETE LIFECYCLE INTEGRATION DEMO")

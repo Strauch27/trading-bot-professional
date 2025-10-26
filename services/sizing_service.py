@@ -1,16 +1,22 @@
-from dataclasses import dataclass
-from typing import Tuple, Optional
 import logging
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 from config import (
-    FEE_RATE, MIN_ORDER_BUFFER, ALLOW_AUTO_SIZE_UP, MAX_AUTO_SIZE_UP_BPS,
-    MAX_AUTO_SIZE_UP_ABS_USDT, POSITION_SIZE_USDT, MAX_PER_SYMBOL_USD,
-    MIN_SLOT_USDT
+    ALLOW_AUTO_SIZE_UP,
+    FEE_RATE,
+    MAX_AUTO_SIZE_UP_ABS_USDT,
+    MAX_AUTO_SIZE_UP_BPS,
+    MAX_PER_SYMBOL_USD,
+    MIN_ORDER_BUFFER,
+    MIN_SLOT_USDT,
+    POSITION_SIZE_USDT,
 )
 from core.utils import (
-    get_symbol_limits,
-    quantize_price,
-    quantize_amount,
     compute_affordable_qty,
+    get_symbol_limits,
+    quantize_amount,
+    quantize_price,
 )
 
 logger = logging.getLogger(__name__)

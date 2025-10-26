@@ -3,11 +3,11 @@ Exit Management Service (Drop 4)
 Centralized exit logic extraction from engine.py
 """
 
-import time
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+import time
+from dataclasses import dataclass
 from threading import RLock
-from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

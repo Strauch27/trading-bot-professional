@@ -10,8 +10,8 @@ Contains:
 
 import logging
 import os
-from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import config
 
@@ -99,7 +99,6 @@ def create_mock_trading_engine(initial_prices: Dict[str, float] = None):
     """Factory function to create mock trading engine for testing"""
 
     # Import here to avoid circular dependency
-    from .engine import TradingEngine
     from adapters.exchange import MockExchange
 
     if initial_prices is None:

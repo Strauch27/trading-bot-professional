@@ -11,11 +11,10 @@ Provides thread-safe JSONL persistence with:
 """
 
 import json
-import time
 import logging
+from datetime import datetime
 from pathlib import Path
 from threading import RLock
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -338,7 +337,7 @@ class MultiStreamJSONLWriter:
                 except Exception as e:
                     logger.error(f"Failed to close writer {name}: {e}")
             self.writers.clear()
-            logger.debug(f"MultiStreamJSONLWriter closed all streams")
+            logger.debug("MultiStreamJSONLWriter closed all streams")
 
 
 # Utility function for reading JSONL files

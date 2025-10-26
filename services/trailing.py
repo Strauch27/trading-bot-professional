@@ -3,10 +3,10 @@ Trailing Stop Service - Thread-safe trailing stop management
 Extrahiert aus engine.py für bessere Modularität und Testbarkeit.
 """
 
+import logging
 import threading
 import time
 from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 

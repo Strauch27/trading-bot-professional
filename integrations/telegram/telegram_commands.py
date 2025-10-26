@@ -3,26 +3,25 @@ Telegram Command Server für Trading Bot
 Robuster Command Router mit Auth-Checks und Confirmation-Flow
 """
 
+import glob
+import html
+import json
+import logging
+import os
+import re
+import shutil
 import threading
 import time
-import json
-import urllib.request
 import urllib.error
-import os
-from adapters.retry import with_backoff
-import glob
-import math
-import shutil
-import locale
-import html
+import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Tuple
+
+from adapters.retry import with_backoff
 from integrations.telegram.telegram_notify import tg
 from integrations.telegram.telegram_service_adapter import TelegramServiceAdapter
-import re
-import logging
-import tempfile
+
 logger = logging.getLogger(__name__)
 
 # Thread-safe global references
@@ -76,9 +75,9 @@ def _parse_threshold(s: str, param_type: str = None) -> float:
     """
     if not s or not isinstance(s, str):
         raise ValidationError("Parameter darf nicht leer sein")
-    
+
     s = s.strip().lower()
-    
+
     try:
         if s.endswith("%"):
             # Remove % and handle locale-specific decimal separators
@@ -101,9 +100,9 @@ def _validate_threshold(value: float, param_type: str) -> float:
     """Enhanced threshold validation with proper ranges"""
     if not isinstance(value, (int, float)):
         raise ValidationError(f"Parameter muss eine Zahl sein, erhalten: {type(value)}")
-    
+
     value = float(value)
-    
+
     # Enhanced range validation
     if param_type == "tp":
         if not (1.0001 <= value <= 1.10):  # Max 10% TP
@@ -116,7 +115,7 @@ def _validate_threshold(value: float, param_type: str) -> float:
             raise ValidationError(f"Drop Trigger außerhalb erlaubtem Bereich [0.85, 0.9999]: {value:.6f}")
     else:
         raise ValidationError(f"Unbekannter Parameter-Typ: {param_type}")
-    
+
     return value
 
 
@@ -205,7 +204,7 @@ def _positions_text() -> str:
                 "current_price": position.current_price,
                 "unrealized_pnl": position.unrealized_pnl
             }
-    except (AttributeError, TypeError, KeyError) as e:
+    except (AttributeError, TypeError, KeyError):
         # Failed to parse position data
         pos = {}
     if not pos:
@@ -291,61 +290,61 @@ def _persist_thresholds_atomic() -> bool:
     try:
         import config as C
         config_path = C.__file__
-        
+
         # Create backup before modification
         backup_path = _create_config_backup(config_path)
-        
+
         # Read current config
         with open(config_path, "r", encoding="utf-8") as f:
             original_content = f.read()
-        
+
         # Prepare new values with validation
         new_values = {
             'TAKE_PROFIT_THRESHOLD': float(C.TAKE_PROFIT_THRESHOLD),
             'STOP_LOSS_THRESHOLD': float(C.STOP_LOSS_THRESHOLD),
             'DROP_TRIGGER_VALUE': float(C.DROP_TRIGGER_VALUE)
         }
-        
+
         # Validate ranges before writing
         _validate_threshold(new_values['TAKE_PROFIT_THRESHOLD'], 'tp')
         _validate_threshold(new_values['STOP_LOSS_THRESHOLD'], 'sl')
         _validate_threshold(new_values['DROP_TRIGGER_VALUE'], 'dt')
-        
+
         # Apply regex replacements
         modified_content = original_content
         for param, value in new_values.items():
             pattern = rf"^{param}\s*=\s*[0-9\.\-]+"
             replacement = f"{param} = {value}"
             new_content = re.sub(pattern, replacement, modified_content, count=1, flags=re.MULTILINE)
-            
+
             # Verify replacement worked
             if new_content == modified_content:
                 raise ConfigurationError(f"Failed to update {param} in config file")
             modified_content = new_content
-        
+
         # Atomic write with temporary file
         temp_path = config_path + ".tmp"
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
                 f.write(modified_content)
-            
+
             # Atomic move
             if os.name == 'nt':  # Windows
                 if os.path.exists(config_path):
                     os.remove(config_path)
             os.rename(temp_path, config_path)
-            
-            logger.info(f"CONFIG_SAVED thresholds successfully (backup: {backup_path})", 
+
+            logger.info(f"CONFIG_SAVED thresholds successfully (backup: {backup_path})",
                        extra={"event_type": "CONFIG_SAVED", "backup_path": backup_path,
                               "values": new_values})
             return True
-            
+
         except Exception as e:
             # Cleanup temp file on error
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             raise ConfigurationError(f"Failed to write config file: {e}")
-            
+
     except Exception as e:
         logger.error(f"Config persistence failed: {e}", exc_info=True)
         raise ConfigurationError(f"Configuration save failed: {e}")
@@ -402,7 +401,7 @@ def _on_callback(cid: str, mid: int, cb_id: str, data: str):
                             reply_markup=_kb_main(), escape=False)
             tg.answer_callback(cb_id, text=f"Retarget: {mode}")
             return
-        
+
         if data == "SAVE_CONFIG":
             try:
                 success = _persist_thresholds_atomic()
@@ -640,19 +639,19 @@ def _cmd_confirm(cid: str, args: list):
     if not args or args[0] != "panic":
         _reply(cid, "ℹ️ Nichts zu bestätigen.")
         return
-    
+
     with _global_lock:
         exp = _pending_conf.get((cid, "panic"), 0)
         if time.time() > exp:
             _reply(cid, "⌛ Bestätigungsfenster abgelaufen.")
             return
-        
+
         # Clear confirmation before execution
         _pending_conf.pop((cid, "panic"), None)
-    
+
     # Execute panic sell
     _reply(cid, "🚨 <b>PANIC SELL WIRD AUSGEFÜHRT</b>", escape=False)
-    
+
     try:
         success, message = _execute_panic_sell("PANIC_SELL_TELEGRAM")
         _reply(cid, f"<b>{message}</b>", escape=False)
@@ -669,16 +668,16 @@ def _cmd_logs(cid: str, args: list):
             "sessions/*/logs/*.log",
             "*.log"
         ]
-        
+
         files = []
         for pattern in log_patterns:
             files.extend(glob.glob(pattern))
-        
+
         if files:
             # Sort by modification time and get latest
             files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
             latest_log = files[0]
-            
+
             # Send document
             if tg.send_document(latest_log, caption="Letztes Log"):
                 _reply(cid, f"📄 Log gesendet: {os.path.basename(latest_log)}")
@@ -699,15 +698,15 @@ def _parse_set_command(text: str) -> Tuple[str, str]:
     """
     if not text or not isinstance(text, str):
         raise ValidationError("Kommando darf nicht leer sein")
-    
+
     t = text.strip()
-    
+
     # Enhanced regex pattern for flexible parsing
     pattern = r"^/set\s+(tp|sl|dt)\s*([+\-]?\d+(?:[.,]\d+)?%?)\s*$"
     m = re.match(pattern, t, re.I)
     if m:
         return m.group(1).lower(), m.group(2).strip()
-    
+
     # Fallback parsing with better error messages
     parts = t.split(maxsplit=2)
     if len(parts) < 2:
@@ -725,11 +724,10 @@ def _apply_runtime_params(tp=None, sl=None, dt=None):
     Live patch: config (UPPER + lowercase aliases) and imported module globals.
     Recomputes trailing parameters if needed.
     """
-    import importlib, sys
     import config as C
-    
+
     changed = {}
-    
+
     if tp is not None:
         C.TAKE_PROFIT_THRESHOLD = float(tp)
         C.take_profit_threshold = float(tp)
@@ -747,7 +745,7 @@ def _apply_runtime_params(tp=None, sl=None, dt=None):
             T.take_profit_threshold = float(tp)
         except Exception: pass
         changed["tp"] = float(tp)
-    
+
     if sl is not None:
         C.STOP_LOSS_THRESHOLD = float(sl)
         C.stop_loss_threshold = float(sl)
@@ -764,7 +762,7 @@ def _apply_runtime_params(tp=None, sl=None, dt=None):
             T.stop_loss_threshold = float(sl)
         except Exception: pass
         changed["sl"] = float(sl)
-    
+
     if dt is not None:
         C.DROP_TRIGGER_VALUE = float(dt)
         C.drop_trigger_value = float(dt)
@@ -782,7 +780,7 @@ def _apply_runtime_params(tp=None, sl=None, dt=None):
         except Exception:
             pass
         changed["dt"] = float(dt)
-    
+
     # Recalculate derived trailing parameters if needed
     try:
         if getattr(C, "USE_RELATIVE_TRAILING", False):
@@ -804,7 +802,7 @@ def _apply_runtime_params(tp=None, sl=None, dt=None):
                     except Exception: pass
     except Exception:
         pass
-    
+
     return changed
 
 def _format_params_msg():
@@ -857,9 +855,9 @@ def _format_top_drops_msg(drops: list):
     """Format top drops für Telegram display"""
     if not drops:
         return "📊 <b>TOP DROPS</b>\n\n❌ Keine Drop-Daten verfügbar oder keine Drops gefunden."
-    
+
     lines = ["📉 <b>TOP DROPS & SIGNALE</b>\n"]
-    
+
     try:
         import config as C
         trigger_pct = (1.0 - float(C.DROP_TRIGGER_VALUE)) * 100.0
@@ -867,7 +865,7 @@ def _format_top_drops_msg(drops: list):
     except (ImportError, AttributeError, ValueError):
         # Config not available or invalid value
         pass
-    
+
     signal_count = 0
     for i, drop in enumerate(drops[:10], 1):
         symbol = drop['symbol']
@@ -876,7 +874,7 @@ def _format_top_drops_msg(drops: list):
         is_signal = drop['is_signal']
         is_holding = drop['is_holding']
         has_buy_order = drop['has_buy_order']
-        
+
         # Icon basierend auf Status
         if is_holding:
             status_icon = "💰"  # Already holding
@@ -888,24 +886,24 @@ def _format_top_drops_msg(drops: list):
             status_icon = "⚡"  # Medium signal
         else:
             status_icon = "📉"  # Just a drop
-            
+
         # Format signal strength
         strength_bar = "🟩" * min(int(signal_strength * 5), 5)
         if len(strength_bar) < 5:
             strength_bar += "⬜" * (5 - len(strength_bar))
-            
+
         lines.append(
             f"{i:2d}. {status_icon} <b>{symbol}</b> {drop_pct:+.1f}%\n"
             f"    💪 {strength_bar} {signal_strength:.1f}x\n"
             f"    💰 {drop['current_price']:.6f} ← {drop['anchor_price']:.6f}"
         )
-        
+
         if is_signal:
             signal_count += 1
-    
+
     if signal_count > 0:
         lines.insert(-len(drops), f"\n🎯 <b>{signal_count} AKTIVE SIGNALE</b>\n")
-    
+
     lines.append(f"\n🕐 Letzte Aktualisierung: {datetime.now().strftime('%H:%M:%S')}")
     return "\n".join(lines)
 
@@ -913,11 +911,11 @@ def _get_current_signals():
     """Holt aktuelle Buy-Signale basierend auf Drop-Triggern"""
     if not _engine:
         return []
-        
+
     try:
         drops = _get_top_drops(20)  # Mehr Daten für Signal-Analyse
         signals = []
-        
+
         for drop in drops:
             if drop['is_signal'] and not drop['is_holding'] and not drop['has_buy_order']:
                 # Add additional signal metrics
@@ -925,11 +923,11 @@ def _get_current_signals():
                 signal['potential_profit'] = abs(drop['drop_pct']) * 0.5  # Geschätzte Erholung
                 signal['risk_score'] = min(drop['signal_strength'], 3.0)  # Risk-basiert auf Stärke
                 signals.append(signal)
-        
+
         # Sortiere nach Signal-Stärke
         signals.sort(key=lambda x: x['signal_strength'], reverse=True)
         return signals[:8]  # Top 8 Signale
-        
+
     except Exception as e:
         logger.error(f"Error getting current signals: {e}")
         return []
@@ -938,16 +936,16 @@ def _format_signals_msg(signals: list):
     """Format aktuelle Signale für Telegram"""
     if not signals:
         return "🎯 <b>AKTUELLE SIGNALE</b>\n\n✅ Keine aktiven Buy-Signale gefunden.\nAlle Trigger-Bedingungen erfüllt oder bereits investiert."
-    
+
     lines = ["🎯 <b>AKTUELLE BUY-SIGNALE</b>\n"]
-    
+
     for i, signal in enumerate(signals[:8], 1):
         symbol = signal['symbol']
         drop_pct = signal['drop_pct']
         strength = signal['signal_strength']
         potential = signal['potential_profit']
         risk = signal['risk_score']
-        
+
         # Risk-Level
         if risk <= 1.5:
             risk_icon = "🟢"
@@ -958,16 +956,16 @@ def _format_signals_msg(signals: list):
         else:
             risk_icon = "🔴"
             risk_text = "HIGH"
-            
+
         lines.append(
             f"{i}. 🔥 <b>{symbol}</b> {drop_pct:+.1f}%\n"
             f"   📈 Potential: +{potential:.1f}% | {risk_icon} {risk_text}\n"
             f"   💪 Stärke: {strength:.1f}x | 💰 {signal['current_price']:.6f}"
         )
-    
-    lines.append(f"\n💡 Bot kauft automatisch bei weiterem Drop")
+
+    lines.append("\n💡 Bot kauft automatisch bei weiterem Drop")
     lines.append(f"🕐 Update: {datetime.now().strftime('%H:%M:%S')}")
-    
+
     return "\n".join(lines)
 
 def _cmd_params(cid: str, args: list):
@@ -980,7 +978,7 @@ def _cmd_menu(cid: str, args: list):
 
 def _cmd_set(cid: str, args: list):
     """Set trading parameters at runtime with enhanced validation"""
-    
+
     try:
         # Enhanced parameter parsing with better error handling
         if len(args) >= 1 and re.match(r'^(tp|sl|dt)[+\-]?\d', args[0], re.I):
@@ -995,33 +993,33 @@ def _cmd_set(cid: str, args: list):
             v = args[1]
         else:
             raise ValidationError("Syntax: /set tp|sl|dt <wert>\nBeispiele: /set tp +0.6%, /set sl -0.5%, /set dt -2%")
-        
+
         # Get before values for comparison
         import config as C
         before_values = {
             "tp": C.TAKE_PROFIT_THRESHOLD,
-            "sl": C.STOP_LOSS_THRESHOLD, 
+            "sl": C.STOP_LOSS_THRESHOLD,
             "dt": C.DROP_TRIGGER_VALUE
         }
-        
+
         # Parse and validate the new value
         new_val = _parse_threshold(v, k)
         validated_val = _validate_threshold(new_val, k)
-        
+
         # Capture before state for display
-        before = _format_params_msg()
-        
+        _format_params_msg()
+
         # Apply runtime parameters with thread safety
         with _global_lock:
-            changed = _apply_runtime_params(
+            _apply_runtime_params(
                 tp=validated_val if k == "tp" else None,
                 sl=validated_val if k == "sl" else None,
                 dt=validated_val if k == "dt" else None
             )
-        
+
         # Capture after state for display
         after = _format_params_msg()
-        
+
         # Enhanced logging with more context
         old_val = before_values[k]
         logger.info(
@@ -1034,17 +1032,17 @@ def _cmd_set(cid: str, args: list):
                 "changed_by": "telegram"
             }
         )
-        
+
         # Enhanced success message
         change_pct = _pct_str_from_factor(k, validated_val)
         param_name = {"tp": "Take Profit", "sl": "Stop Loss", "dt": "Drop Trigger"}[k]
-        
+
         _reply(cid, f"✅ <b>{param_name} erfolgreich geändert</b>\n\n"
                     f"<b>Neuer Wert:</b> {change_pct} ({validated_val:.6f})\n\n"
                     f"<b>Aktuelle Parameter:</b>\n{after}\n\n"
-                    f"ℹ️ <i>Änderungen gelten für neue Trades. Nutze /retarget für offene Positionen.</i>", 
+                    f"ℹ️ <i>Änderungen gelten für neue Trades. Nutze /retarget für offene Positionen.</i>",
                escape=False)
-               
+
     except ValidationError as e:
         _reply(cid, f"❌ <b>Validierungsfehler:</b> {html.escape(str(e))}", escape=False)
     except TelegramCommandError as e:
@@ -1099,10 +1097,10 @@ def _cmd_stop(cid: str, args: list):
     # Auth check
     if not _is_authorized(cid):
         return _reply(cid, "⛔ Nicht autorisiert.")
-    
+
     # Set confirmation requirement (30s validity)
     _pending_conf[(cid, "stop")] = time.time() + 30
-    
+
     kb = {
         "inline_keyboard": [
             [{"text": "🛑 Ja, beenden", "callback_data": "CONFIRM:STOP"},
@@ -1178,37 +1176,37 @@ register_command("logs", _cmd_logs, "Letztes Log senden")
 def start_telegram_command_server(engine):
     """Start the Telegram command polling server with thread safety"""
     global _engine, _command_thread, _stop_flag
-    
+
     with _global_lock:
         if not tg.is_configured():
             return False
-        
+
         if _command_thread and _command_thread.is_alive():
             logger.warning("Telegram command server already running")
             return True
-            
+
         _engine = engine
         _service_adapter = TelegramServiceAdapter(engine)
         _stop_flag = False
-        
+
         # Start polling thread (daemon=False for proper cleanup)
         _command_thread = threading.Thread(target=_poll_commands, daemon=False, name="TelegramCommands")
         _command_thread.start()
-        
+
         logger.info("Telegram command server started", extra={"event_type": "TELEGRAM_SERVER_STARTED"})
         return True
 
 def stop_telegram_command_server():
     """Stop the command server with proper cleanup"""
     global _stop_flag, _command_thread
-    
+
     with _global_lock:
         if not _command_thread:
             return
-            
+
         _stop_flag = True
         logger.info("Stopping Telegram command server", extra={"event_type": "TELEGRAM_SERVER_STOPPING"})
-    
+
     # Join outside of lock to avoid deadlock
     if _command_thread:
         _command_thread.join(timeout=10)
@@ -1221,8 +1219,7 @@ def _poll_commands():
     """Enhanced polling for Telegram commands with better error handling"""
     offset = 0
     error_count = 0
-    max_errors = 10
-    
+
     # Try to load saved offset
     offset_file = Path(".telegram_offset")
     try:
@@ -1231,9 +1228,9 @@ def _poll_commands():
             logger.info(f"Loaded Telegram offset: {offset}")
     except Exception as e:
         logger.warning(f"Could not load Telegram offset: {e}")
-    
+
     logger.info("Starting Telegram command polling loop")
-    
+
     while not _stop_flag:
         try:
             # Heartbeat for telegram polling
@@ -1244,7 +1241,7 @@ def _poll_commands():
             # Check stop flag frequently
             if _stop_flag:
                 break
-                
+
             # Get updates from Telegram with timeout-safe HTTP
             url = f"https://api.telegram.org/bot{tg.bot_token}/getUpdates"
             params = f"?offset={offset}&timeout=30"
@@ -1261,18 +1258,18 @@ def _poll_commands():
                 logger.warning("TELEGRAM_POLL_ERROR", extra={"err": str(e)[:200]})
                 time.sleep(2)
                 continue
-                
+
                 updates = data.get("result", [])
                 if updates:
                     logger.debug(f"Processing {len(updates)} Telegram updates")
-                
+
                 for update in updates:
                     if _stop_flag:
                         break
-                        
+
                     try:
                         offset = update["update_id"] + 1
-                        
+
                         # Save offset atomically
                         try:
                             with _global_lock:
@@ -1281,7 +1278,7 @@ def _poll_commands():
                                 tmp_file.replace(offset_file)
                         except Exception as e:
                             logger.warning(f"Failed to save offset: {e}")
-                        
+
                         # Process message commands
                         message = update.get("message", {})
                         if message:
@@ -1296,15 +1293,15 @@ def _poll_commands():
                                 if not _is_authorized(cid):
                                     _reply(cid, "⛔ Nicht autorisiert.")
                                     continue
-                                
+
                                 # Parse command and args
                                 parts = text[1:].split()
                                 cmd = parts[0].lower() if parts else ""
                                 args = parts[1:] if len(parts) > 1 else []
-                                
-                                logger.info(f"Processing command: /{cmd} from {cid}", 
+
+                                logger.info(f"Processing command: /{cmd} from {cid}",
                                            extra={"event_type": "TELEGRAM_COMMAND", "command": cmd, "chat_id": cid})
-                                
+
                                 # Handle command with error handling
                                 if cmd in COMMANDS:
                                     try:
@@ -1318,7 +1315,7 @@ def _poll_commands():
                                     logger.info(f"Unknown command: {cmd}")
                                     _cmd_help(cid, [])
                                 continue
-                        
+
                         # Process callback queries
                         cbq = update.get("callback_query")
                         if cbq:
@@ -1327,11 +1324,11 @@ def _poll_commands():
                             c_cid = str(m.get("chat", {}).get("id", ""))
                             cb_data = cbq.get("data", "")
                             cbid = cbq.get("id")
-                            
+
                             if not _is_authorized(c_cid):
                                 tg.answer_callback(cbid, text="⛔ Nicht autorisiert", show_alert=True)
                                 continue
-                            
+
                             logger.debug(f"Processing callback: {cb_data} from {c_cid}")
                             try:
                                 _on_callback(c_cid, mid, cbid, cb_data)
@@ -1339,14 +1336,14 @@ def _poll_commands():
                                 logger.error(f"Callback {cb_data} failed: {e}", exc_info=True)
                                 tg.answer_callback(cbid, text=f"Fehler: {str(e)}", show_alert=True)
                             continue
-                    
+
                     except Exception as e:
                         logger.error(f"Error processing update {update.get('update_id', 'unknown')}: {e}", exc_info=True)
                         continue
-                
+
                 # Reset error counter on successful poll
                 error_count = 0
-                            
+
         except Exception as e:
             co.beat("telegram_poll_major_error")
             error_count += 1
@@ -1367,7 +1364,7 @@ def _poll_commands():
             if random.randint(1, 10) == 1:  # 10% Chance
                 logger.info("HEARTBEAT - Telegram poll cycle completed",
                            extra={"event_type": "HEARTBEAT"})
-            
+
         time.sleep(1)  # Small delay between successful polls
-    
+
     logger.info("Telegram command polling stopped")

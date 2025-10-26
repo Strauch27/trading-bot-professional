@@ -16,8 +16,8 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple, Any, List
-import numpy as np
+from typing import Any, Dict, List, Optional, Tuple
+
 import config
 
 logger = logging.getLogger(__name__)

@@ -15,20 +15,22 @@ Features:
 - Performance metrics aggregation
 """
 
-import time
 import logging
 import threading
-from enum import Enum
-from typing import Dict, Any, Optional, List, Deque
-from collections import deque, defaultdict
-from datetime import datetime, timedelta
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List
 
 try:
     from config import (
-        DEBUG_MODE, DEBUG_AUTO_ESCALATE, DEBUG_STARTUP_FULL_MINUTES,
-        DEBUG_POST_TRADE_FULL_MINUTES, DEBUG_MARKET_DATA_SAMPLING,
-        DEBUG_PERFORMANCE_AGGREGATION_SECONDS
+        DEBUG_AUTO_ESCALATE,
+        DEBUG_MARKET_DATA_SAMPLING,
+        DEBUG_MODE,
+        DEBUG_PERFORMANCE_AGGREGATION_SECONDS,
+        DEBUG_POST_TRADE_FULL_MINUTES,
+        DEBUG_STARTUP_FULL_MINUTES,
     )
 except ImportError:
     # Fallback defaults
@@ -481,7 +483,7 @@ class GuardRollingStats:
         try:
             from core.logging.logger import JsonlLogger
             JsonlLogger().write("guard_summary", json_payload)
-        except (ImportError, AttributeError) as e:
+        except (ImportError, AttributeError):
             # JSONL-Logger optional – kein Crash, wenn nicht verfügbar
             pass
 

@@ -1,14 +1,13 @@
 # heartbeat_telemetry.py
 # V10-Style Enhanced Heartbeat Telemetry: mehr Metriken, weniger Rauschen, bessere Insights
 
-import time
-import threading
-from typing import Dict, List, Optional, Callable, Any, Union, Tuple
-from dataclasses import dataclass, asdict
-from collections import deque, defaultdict
 import statistics
-from datetime import datetime, timezone
-import json
+import threading
+import time
+from collections import deque
+from dataclasses import asdict, dataclass
+from typing import Callable, Dict, List, Tuple, Union
+
 
 @dataclass
 class TradingMetrics:

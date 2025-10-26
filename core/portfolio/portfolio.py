@@ -1,14 +1,13 @@
 # portfolio.py - Portfolio und State Management
-import os
-import time
-import json
-import threading
 import functools
-from typing import Dict, List, Tuple, Optional, Any
-from collections import deque
+import json
+import os
+import threading
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 # =================================================================================
 # Position Data Model
@@ -70,30 +69,29 @@ def synchronized_budget(func):
                 return func(self, *args, **kwargs)
             except Exception as e:
                 # Log budget operation failure
-                logger.error(f"Budget operation failed in {func.__name__}: {e}", 
+                logger.error(f"Budget operation failed in {func.__name__}: {e}",
                            extra={'event_type': 'BUDGET_OP_FAILED', 'function': func.__name__, 'error': str(e)})
                 raise
     return wrapper
 
 from config import (
-    STATE_FILE_HELD, STATE_FILE_OPEN_BUYS, DROP_ANCHORS_FILE,
-    max_trades, cash_reserve_usdt, symbol_cooldown_minutes,
-    reset_portfolio_on_start, safe_min_budget,
-    use_drop_anchor_since_last_close,
-    DUST_TARGET_QUOTE, DUST_MIN_COST_USD, DUST_FORCE_MARKET_IOC
+    DROP_ANCHORS_FILE,
+    DUST_FORCE_MARKET_IOC,
+    DUST_MIN_COST_USD,
+    DUST_TARGET_QUOTE,
+    STATE_FILE_HELD,
+    STATE_FILE_OPEN_BUYS,
+    cash_reserve_usdt,
+    max_trades,
+    reset_portfolio_on_start,
+    safe_min_budget,
+    symbol_cooldown_minutes,
 )
 from core.logging.logger_setup import logger
-from core.logging.loggingx import log_event, log_metric, log_audit_event
-from core.utils import (
-    save_state_safe, load_state, save_trade_history,
-    SettlementManager, get_symbol_limits
-)
-from trading import (
-    refresh_budget_from_exchange,
-    refresh_budget_from_exchange_safe,
-    full_portfolio_reset
-)
-from trading.helpers import _get_free, _base_currency
+from core.logging.loggingx import log_audit_event, log_event
+from core.utils import SettlementManager, load_state, save_state_safe
+from trading import full_portfolio_reset, refresh_budget_from_exchange_safe
+from trading.helpers import _base_currency, _get_free
 
 
 class DustLedger:
@@ -134,11 +132,11 @@ class DustLedger:
         """Versucht alle Symbole zu verkaufen, sofern min_cost/min_qty erfüllt.
         Returns: Anzahl erfolgreicher Sweeps
         """
-        from datetime import datetime, timezone
         import time
+        from datetime import datetime, timezone
         BACKOFF_S = (0, 300, 900, 3600, 7200)  # 0s, 5min, 15min, 60min, 120min
         now = time.time()
-        
+
         done = 0
         for symbol, node in list(self.ledger.items()):
             try:
@@ -152,14 +150,14 @@ class DustLedger:
                         last_attempt = 0.0
                 else:
                     last_attempt = 0.0
-                
+
                 wait = BACKOFF_S[min(fail, len(BACKOFF_S)-1)]
                 if now - last_attempt < wait:
                     continue  # noch im Backoff
-                
+
                 base, quote = symbol.split("/")
                 market = f"{base}/{DUST_TARGET_QUOTE}" if quote != DUST_TARGET_QUOTE else symbol
-                
+
                 # aktueller Preis
                 tkr = exchange.fetch_ticker(market)
                 last = tkr.get("last") or tkr.get("close") or 0.0
@@ -177,11 +175,11 @@ class DustLedger:
                 # quantisieren
                 amount_step = limits.get("amount_step", 8)  # Präzision in Dezimalstellen
                 amt_q = quantize_amount_func(market, amt, amount_step)
-                
+
                 # letzter Check: konsistent mit utils.get_symbol_limits()
                 min_amount = float(limits.get("min_amount") or 0.0)
                 min_cost   = float(limits.get("min_cost")   or 0.0)
-                
+
                 if (min_amount and amt_q < min_amount) or (min_cost and (amt_q * float(last) < min_cost)):
                     continue
 
@@ -191,7 +189,7 @@ class DustLedger:
                 # Bei Erfolg: fail-counter zurücksetzen
                 node["fail"] = 0
                 node["last_attempt"] = str(now)
-                
+
                 # Ledger reduzieren (Rest bleibt, falls Rundung)
                 rest = max(0.0, amt - amt_q)
                 node["amount"] = str(Decimal(str(rest)))
@@ -211,7 +209,7 @@ class DustLedger:
 
 class PortfolioManager:
     """Verwaltet Portfolio-State, Budget und offene Orders"""
-    
+
     def is_holding(self, symbol: str, min_amount: float = 1e-12) -> bool:
         """True, wenn das Symbol aktuell im Portfolio gehalten wird (Menge > 0)."""
         data = (self.held_assets or {}).get(symbol)
@@ -221,26 +219,26 @@ class PortfolioManager:
             return float(data.get("amount") or 0.0) > min_amount
         except Exception:
             return False
-    
+
     def has_open_buy(self, symbol: str) -> bool:
         """True, wenn für das Symbol eine offene Buy-Order getrackt wird."""
         return symbol in (self.open_buy_orders or {})
-    
+
     def __init__(self, exchange, settlement_manager: SettlementManager, dust_sweeper=None):
         self.exchange = exchange
         self.settlement_manager = settlement_manager
         self.dust_sweeper = dust_sweeper
-        
+
         # Thread Safety Locks
         self._lock = threading.RLock()  # Main portfolio lock
         self._budget_lock = threading.RLock()  # Dedicated budget operations lock
         self._state_lock = threading.RLock()  # State persistence lock
-        
+
         # State
         self.held_assets: Dict[str, Dict] = {}
         self.open_buy_orders: Dict[str, Dict] = {}
         self.my_budget: float = 0.0
-        
+
         # Drop Anchors
         self.drop_anchors = {}
         try:
@@ -249,13 +247,13 @@ class PortfolioManager:
                     self.drop_anchors = json.load(fh) or {}
         except Exception:
             self.drop_anchors = {}
-        
+
         # Cooldown tracking
         self.last_buy_time: Dict[str, float] = {}
-        
+
         # Reserved budget tracking for partial fills
         self.reserved_quote: Dict[str, float] = {}
-        
+
         # Budget reservation for atomic operations
         self.reserved_budget: float = 0.0
         self.reserved_base: Dict[str, float] = {}
@@ -273,10 +271,10 @@ class PortfolioManager:
 
         # Initialize state (includes dust ledger)
         self.load_state()
-        
+
         # Initialize budget
         self.initialize_budget()
-        
+
     def load_state(self):
         """Lädt gespeicherten State von Disk (mit Spezialkeys)"""
         state = load_state(STATE_FILE_HELD) or {}
@@ -294,7 +292,7 @@ class PortfolioManager:
             self.dust = DustLedger(dust_ledger)
         except Exception:
             self.dust = DustLedger()
-        
+
     @synchronized('_state_lock')
     def save_state(self):
         """Speichert aktuellen State auf Disk (inkl. Spezialkeys)"""
@@ -316,21 +314,21 @@ class PortfolioManager:
             save_state_safe(self.drop_anchors, DROP_ANCHORS_FILE)
         except Exception:
             pass
-        
+
     def initialize_budget(self):
         """Initialisiert Budget von Exchange"""
         if self.exchange:
             self.my_budget = _get_free(self.exchange, "USDT")
-            logger.info(f"Verfügbares Startbudget: {self.my_budget:.2f} USDT", 
+            logger.info(f"Verfügbares Startbudget: {self.my_budget:.2f} USDT",
                        extra={'event_type': 'BUDGET_INITIALIZED', 'initial_budget_usdt': self.my_budget})
         else:
             self.my_budget = 0
-            logger.info("Bot im Observe-Modus gestartet (keine API-Keys)", 
+            logger.info("Bot im Observe-Modus gestartet (keine API-Keys)",
                        extra={'event_type': 'OBSERVE_MODE'})
-        
+
         # Settlement-Manager initialisieren
         self.settlement_manager.update_verified_budget(self.my_budget)
-        
+
     def sanity_check_and_reconcile(self, preise: Dict[str, float]):
         """Führt Sanity-Check für geladene Assets durch und reconciled mit Exchange"""
         if not self.held_assets or not self.exchange:
@@ -338,38 +336,37 @@ class PortfolioManager:
                 logger.info("Held assets vorhanden, aber keine Exchange-Verbindung (Observe-Mode) – Sanity-Check übersprungen.",
                            extra={'event_type': 'STATE_SANITY_CHECK_SKIPPED'})
             return
-            
-        logger.info("Führe Sanity-Check für geladene Assets durch: Vergleiche State mit realem Kontostand...", 
+
+        logger.info("Führe Sanity-Check für geladene Assets durch: Vergleiche State mit realem Kontostand...",
                    extra={'event_type': 'STATE_SANITY_CHECK_START'})
-        
+
         try:
-            from core.utils import with_backoff
             actual_balances = self.exchange.fetch_balance()
             total_balances = actual_balances.get('total', {})
-            
+
             assets_to_prune = []
             reconciliation_stats = {
                 'checked': 0, 'valid': 0, 'pruned': 0,
                 'actual_gt_state': 0, 'state_gt_actual': 0
             }
-            
+
             for symbol, asset_data in list(self.held_assets.items()):
                 reconciliation_stats['checked'] += 1
                 base_currency = _base_currency(symbol)
                 actual_amount = total_balances.get(base_currency, 0)
                 state_amount = asset_data.get('amount', 0)
-                
+
                 # Toleranz für Floating-Point-Vergleiche
                 tolerance = 0.0001
-                diff = abs(actual_amount - state_amount)
-                
+                abs(actual_amount - state_amount)
+
                 if actual_amount > state_amount + tolerance:
                     reconciliation_stats['actual_gt_state'] += 1
                     logger.warning(f"Diskrepanz für {symbol}: Exchange hat {actual_amount}, State hat {state_amount}. Korrigiere nach oben.",
-                                 extra={'event_type': 'STATE_DISCREPANCY_UP', 'symbol': symbol, 
+                                 extra={'event_type': 'STATE_DISCREPANCY_UP', 'symbol': symbol,
                                        'actual': actual_amount, 'state': state_amount})
                     asset_data['amount'] = actual_amount
-                    
+
                 elif state_amount > actual_amount + tolerance:
                     reconciliation_stats['state_gt_actual'] += 1
                     if actual_amount < 0.0001:
@@ -383,7 +380,7 @@ class PortfolioManager:
                         asset_data['amount'] = actual_amount
                 else:
                     reconciliation_stats['valid'] += 1
-                    
+
                 # Prüfe auf Dust
                 if symbol not in assets_to_prune and actual_amount > 0:
                     current_price = preise.get(symbol, 0)
@@ -397,48 +394,48 @@ class PortfolioManager:
                             if self.dust_sweeper:
                                 self.dust_sweeper.add_dust(symbol, actual_amount, current_price)
                             assets_to_prune.append(symbol)
-            
+
             # Entferne ungültige Assets
             reconciliation_stats['pruned'] = len(assets_to_prune)
             for symbol in assets_to_prune:
                 if symbol in self.held_assets:
                     del self.held_assets[symbol]
-            
+
             logger.info(f"Sanity-Check abgeschlossen. Stats: {reconciliation_stats}",
                        extra={'event_type': 'STATE_SANITY_CHECK_COMPLETE', **reconciliation_stats})
-            
+
             if assets_to_prune:
                 self.save_state()
-                
+
         except Exception as e:
-            logger.error("Kritischer Fehler beim Sanity-Check des Kontostands.", 
+            logger.error("Kritischer Fehler beim Sanity-Check des Kontostands.",
                         extra={'event_type': 'STATE_SANITY_CHECK_FAILED', 'error': str(e)})
-    
+
     def perform_startup_reset(self, preise: Dict[str, float]) -> bool:
         """Führt Portfolio-Reset beim Start durch wenn konfiguriert"""
         if not reset_portfolio_on_start or not self.exchange:
             return False
-            
-        logger.info("PORTFOLIO RESET: Verkaufe alle Nicht-USDT-Assets...", 
+
+        logger.info("PORTFOLIO RESET: Verkaufe alle Nicht-USDT-Assets...",
                    extra={'event_type': 'PORTFOLIO_RESET_START'})
-        
+
         # Audit trail - before reset
         log_audit_event("PORTFOLIO_RESET_INITIATED", {
             "budget_before": self.my_budget,
             "held_assets": list(self.held_assets.keys()),
             "open_orders": len(self.open_buy_orders)
         })
-        
+
         try:
             # Verwende full_portfolio_reset aus trading.py
-            success = full_portfolio_reset(
+            full_portfolio_reset(
                 self.exchange,
                 self.settlement_manager
             )
-            
+
             # Immer State synchronisieren nach Reset-Versuch
             refresh_func = lambda: refresh_budget_from_exchange_safe(self.exchange, self.my_budget, timeout=5.0)
-            
+
             # Warte auf alle Settlements
             if self.settlement_manager.get_total_pending() > 0:
                 if self.settlement_manager.wait_for_all_settlements(refresh_func, timeout=300):
@@ -465,32 +462,32 @@ class PortfolioManager:
                     "budget_after": self.my_budget,
                     "success": True
                 })
-            
+
             # State clearen - IMMER nach Reset
             self.held_assets.clear()
             self.open_buy_orders.clear()
             self.save_state()
-            
+
             # Finale Sanity-Check zur Sicherheit
             if preise:
                 self.sanity_check_and_reconcile(preise)
-            
+
             return True
-                
+
         except Exception as e:
             logger.error(f"Fehler beim Portfolio-Reset: {e}",
                         extra={'event_type': 'PORTFOLIO_RESET_ERROR', 'error': str(e)})
             return False
-    
+
     def check_startup_budget(self) -> bool:
         """Prüft ob genug Budget vorhanden ist"""
         if self.my_budget < safe_min_budget:
             logger.warning(f"Budget {self.my_budget:.2f} USDT unter Minimum {safe_min_budget} USDT",
-                         extra={'event_type': 'INSUFFICIENT_STARTUP_BUDGET', 
+                         extra={'event_type': 'INSUFFICIENT_STARTUP_BUDGET',
                                'budget': self.my_budget, 'required': safe_min_budget})
             return False
         return True
-    
+
     def refresh_budget(self) -> float:
         """Aktualisiert Budget von Exchange"""
         if not self.exchange:
@@ -498,30 +495,30 @@ class PortfolioManager:
 
         # Use timeout-protected version to prevent main thread blocking
         actual_budget = refresh_budget_from_exchange_safe(self.exchange, self.my_budget, timeout=5.0)
-        
+
         # Only log if there's a meaningful change
         delta = abs(actual_budget - (self.my_budget or 0.0))
         rel = delta / max(self.my_budget or 1.0, 1.0)
-        
+
         if delta >= 0.5 or rel >= 0.005:  # Log if change is >= 0.5 USDT or >= 0.5%
             logger.info(f"Budget aktualisiert: {self.my_budget:.2f} -> {actual_budget:.2f} USDT",
-                        extra={'event_type': 'BUDGET_REFRESHED', 
+                        extra={'event_type': 'BUDGET_REFRESHED',
                               'old': self.my_budget, 'new': actual_budget})
-        
+
         self.my_budget = actual_budget
         self.settlement_manager.update_verified_budget(actual_budget)
         return actual_budget
-    
-        
+
+
     def get_available_slots(self) -> int:
         """Berechnet verfügbare Trading-Slots"""
         return max(0, max_trades - (len(self.held_assets) + len(self.open_buy_orders)))
-    
+
     def get_per_trade_cap(self) -> float:
         """Berechnet maximales Budget pro Trade"""
         slots = max(1, self.get_available_slots())
         return max(0.0, (self.my_budget - cash_reserve_usdt) / slots)
-    
+
     def is_symbol_on_cooldown(self, symbol: str) -> bool:
         """Prüft ob Symbol auf Cooldown ist"""
         if symbol not in self.last_buy_time:
@@ -535,8 +532,8 @@ class PortfolioManager:
 
         # Phase 3: Cooldown expired - log cooldown_release event and clear tracking
         try:
-            from core.trace_context import Trace, get_context_var
             from core.logger_factory import HEALTH_LOG, log_event
+            from core.trace_context import Trace, get_context_var
 
             decision_id = get_context_var('decision_id')
 
@@ -555,7 +552,7 @@ class PortfolioManager:
         # Remove from tracking to mark cooldown as released
         del self.last_buy_time[symbol]
         return False
-    
+
     def set_cooldown(self, symbol: str):
         """Setzt Cooldown-Timer für Symbol"""
         cooldown_until = time.time() + (symbol_cooldown_minutes * 60)
@@ -563,9 +560,10 @@ class PortfolioManager:
 
         # Phase 3: Log cooldown_set event
         try:
-            from core.trace_context import Trace, get_context_var
-            from core.logger_factory import HEALTH_LOG, log_event
             from datetime import datetime, timezone
+
+            from core.logger_factory import HEALTH_LOG, log_event
+            from core.trace_context import Trace, get_context_var
 
             decision_id = get_context_var('decision_id')
 
@@ -581,12 +579,12 @@ class PortfolioManager:
         except Exception as e:
             # Don't fail cooldown if logging fails
             logger.debug(f"Failed to log cooldown_set for {symbol}: {e}")
-    
+
     def add_buy_order(self, symbol: str, order_data: Dict):
         """Fügt neue Buy-Order hinzu"""
         self.open_buy_orders[symbol] = order_data
         self.save_state()
-        
+
     def remove_buy_order(self, symbol: str) -> Optional[Dict]:
         """Entfernt Buy-Order und gibt sie zurück"""
         if symbol in self.open_buy_orders:
@@ -594,7 +592,7 @@ class PortfolioManager:
             self.save_state()
             return order
         return None
-    
+
     def add_held_asset(self, symbol: str, asset_data: Dict):
         """
         Fügt gehaltenes Asset hinzu mit WAC und Fee-Tracking.
@@ -639,7 +637,7 @@ class PortfolioManager:
 
         self.held_assets[symbol] = data
         self.save_state()
-        
+
     def on_partial_fill(self, symbol: str, client_order_id: str,
                         filled_quote: float, orig_quote: float):
         """Release budget on partial fill (thread-safe with _budget_lock)
@@ -680,23 +678,23 @@ class PortfolioManager:
         # CRITICAL: Persist state OUTSIDE budget lock to prevent lock hierarchy violation
         if need_save:
             self.save_state()
-    
+
     @synchronized_budget
     def reserve_budget(self, quote_amount: float, symbol: str | None = None, order_info: Dict = None):
         """Reserviert Budget atomisch vor Order-Platzierung
-        
+
         Args:
             quote_amount: Zu reservierender Betrag in USDT
             symbol: Optional - Symbol für das Budget reserviert wird
             order_info: Optional - Zusätzliche Order-Informationen für Tracking
-            
+
         Raises:
             ValueError: Wenn nicht genug Budget verfügbar
         """
         available = self.my_budget - self.reserved_budget
         if quote_amount > available:
             raise ValueError(f"Insufficient budget: need {quote_amount:.2f} but only {available:.2f} available (budget: {self.my_budget:.2f}, reserved: {self.reserved_budget:.2f})")
-        
+
         self.reserved_budget += quote_amount
         if symbol:
             self.reserved_quote[symbol] = self.reserved_quote.get(symbol, 0.0) + quote_amount
@@ -712,7 +710,7 @@ class PortfolioManager:
                 'order_info': order_info or {}
             })
             self.active_reservations[symbol] = reservation
-        
+
         log_event("BUDGET_RESERVED", context={
             "reserved": float(quote_amount),
             "total_reserved": float(self.reserved_budget),
@@ -720,7 +718,7 @@ class PortfolioManager:
             "symbol": symbol,
             "order_info": order_info
         })
-    
+
     @synchronized_budget
     def release_budget(
         self,
@@ -730,7 +728,7 @@ class PortfolioManager:
         intent_id: str | None = None
     ):
         """Gibt reserviertes Budget wieder frei
-        
+
         Args:
             quote_amount: Freizugebender Betrag in USDT
             symbol: Optional - Symbol für das Budget freigegeben wird
@@ -752,7 +750,7 @@ class PortfolioManager:
                     reservation['amount'] = remaining
                     reservation['timestamp'] = time.time()
                     self.active_reservations[symbol] = reservation
-        
+
         context = {
             "released": float(quote_amount),
             "total_reserved": float(self.reserved_budget),
@@ -764,7 +762,7 @@ class PortfolioManager:
             context["intent_id"] = intent_id
 
         log_event("BUDGET_RELEASED", context=context)
-    
+
     @synchronized_budget
     def commit_budget(
         self,
@@ -774,7 +772,7 @@ class PortfolioManager:
         intent_id: str | None = None
     ):
         """Committet reserviertes Budget nach erfolgreicher Order
-        
+
         Args:
             quote_amount: Zu committender Betrag in USDT
             symbol: Optional - Symbol für das Budget committed wird
@@ -797,7 +795,7 @@ class PortfolioManager:
                     reservation['amount'] = remaining
                     reservation['timestamp'] = time.time()
                     self.active_reservations[symbol] = reservation
-        
+
         commit_context = {
             "committed": float(quote_amount),
             "remaining_budget": float(self.my_budget),
@@ -809,7 +807,7 @@ class PortfolioManager:
             commit_context["intent_id"] = intent_id
 
         log_event("BUDGET_COMMITTED", context=commit_context)
-    
+
     @synchronized('_budget_lock')
     def get_free_usdt(self) -> float:
         """Gibt wirklich verfügbares Budget zurück (abzgl. Reservierungen)"""
@@ -847,17 +845,17 @@ class PortfolioManager:
     def balance(self, asset: str) -> float:
         """Alias for get_balance() for compatibility."""
         return self.get_balance(asset)
-    
+
     @synchronized_budget
     def cleanup_stale_reservations(self, max_age_seconds: float = 3600):
         """Bereinigt veraltete Budget-Reservierungen (Budget Leak Prevention)"""
         current_time = time.time()
         stale_symbols = []
-        
+
         for symbol, reservation in self.active_reservations.items():
             if current_time - reservation['timestamp'] > max_age_seconds:
                 stale_symbols.append(symbol)
-        
+
         total_quote_released = 0.0
         total_base_released = 0.0
         for symbol in stale_symbols:
@@ -898,10 +896,10 @@ class PortfolioManager:
                             'side': 'buy'
                         }
                     )
-            
+
             # Remove reservation entry regardless of side
             self.active_reservations.pop(symbol, None)
-        
+
         if total_quote_released > 0 or total_base_released > 0:
             logger.info(
                 "Total stale reservations released: "
@@ -985,7 +983,7 @@ class PortfolioManager:
                 "old_reservations": old_reservations,
                 "health": health
             }
-    
+
     @synchronized_budget
     def reconcile_budget_from_exchange(self):
         """Budget-Reconciliation mit Exchange (Drift-Erkennung)"""
@@ -1030,7 +1028,7 @@ class PortfolioManager:
 
         except Exception as e:
             logger.error(f"Budget reconciliation failed: {e}", extra={'event_type': 'BUDGET_RECONCILE_ERROR', 'error': str(e)})
-    
+
     @synchronized()
     def remove_held_asset(self, symbol: str) -> Optional[Dict]:
         """Entfernt gehaltenes Asset und gibt es zurück"""
@@ -1039,7 +1037,7 @@ class PortfolioManager:
             self.save_state()
             return asset
         return None
-    
+
     # Drop Anchor Helper-Methoden
     @synchronized()
     def set_drop_anchor(self, symbol: str, price: float, ts_iso: str):
@@ -1051,8 +1049,8 @@ class PortfolioManager:
         # Only log if anchor actually changed (not initial set)
         if old_anchor is not None and abs(new_anchor - old_anchor) > 1e-8:
             try:
-                from core.trace_context import Trace, get_context_var
                 from core.logger_factory import DECISION_LOG, log_event
+                from core.trace_context import Trace, get_context_var
 
                 # Use current decision_id if available in context
                 decision_id = get_context_var('decision_id')
@@ -1072,13 +1070,13 @@ class PortfolioManager:
 
         self.drop_anchors[symbol] = {"price": new_anchor, "ts": ts_iso}
         self.save_state()
-    
+
     @synchronized()
     def get_drop_anchor(self, symbol: str) -> float:
         """Gibt Drop-Anchor-Preis für Symbol zurück"""
         rec = self.drop_anchors.get(symbol)
         return float(rec.get("price")) if isinstance(rec, dict) and "price" in rec else None
-    
+
     @synchronized()
     def get_drop_anchor_info(self, symbol: str):
         """
@@ -1088,7 +1086,7 @@ class PortfolioManager:
         price = float(rec['price']) if 'price' in rec else None
         ts = rec.get('ts')  # ISO-String
         return price, ts
-    
+
     @synchronized()
     def update_held_asset(self, symbol: str, updates: Dict):
         """Aktualisiert gehaltenes Asset"""
@@ -1101,7 +1099,7 @@ class PortfolioManager:
                 u['buying_price'] = u['buy_price']
             self.held_assets[symbol].update(u)
             self.save_state()
-    
+
     def get_portfolio_value(self, preise: Dict[str, float]) -> float:
         """Berechnet Gesamtwert des Portfolios"""
         total = self.my_budget
@@ -1110,7 +1108,7 @@ class PortfolioManager:
             price = preise.get(symbol, 0)
             total += amount * price
         return total
-    
+
     def get_portfolio_summary(self) -> Dict:
         """Gibt Portfolio-Zusammenfassung zurück"""
         return {
@@ -1119,15 +1117,15 @@ class PortfolioManager:
             'budget_usdt': self.my_budget,
             'available_slots': self.get_available_slots()
         }
-    
-    
+
+
     def has_open_order(self, symbol: str) -> bool:
         """True, wenn für das Symbol eine offene BUY-Order vorliegt."""
         return symbol in self.open_buy_orders
-    
+
     def get_symbol_exposure_usdt(self, symbol: str) -> float:
         """Berechnet die gesamte Exposition für ein Symbol in USDT.
-        
+
         Inkludiert:
         - Gehaltene Assets (amount * buy_price)
         - Reserviertes Budget für das Symbol
@@ -1138,14 +1136,14 @@ class PortfolioManager:
         amt = float(held.get("amount", 0.0))
         px = float(held.get("buy_price", held.get("buying_price", 0.0)))
         held_cost = amt * px
-        
+
         # Reserviertes Budget für dieses Symbol
         reserved = float(self.reserved_quote.get(symbol, 0.0))
-        
+
         # Offene Buy-Order
         open_buy = self.open_buy_orders.get(symbol) or {}
         pending = float(open_buy.get("quote") or open_buy.get("quote_amount", 0.0))
-        
+
         return held_cost + reserved + pending
 
     # ==================================================================================

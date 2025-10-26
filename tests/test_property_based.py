@@ -8,23 +8,27 @@ Uses Hypothesis to generate randomized test cases for:
 - Price cache invariants
 """
 
-import pytest
-import time
-import tempfile
 import shutil
-from pathlib import Path
-from hypothesis import given, strategies as st, settings, assume
-from hypothesis.stateful import RuleBasedStateMachine, rule, invariant, initialize
 
 # Import components
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import tempfile
+import time
+from pathlib import Path
 
-from market.anchor_manager import AnchorManager
-from core.price_cache import PriceCache
+import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from io package (avoid conflict with built-in io module)
 import importlib.util
+
+from core.price_cache import PriceCache
+from market.anchor_manager import AnchorManager
+
 spec = importlib.util.spec_from_file_location("jsonl_module", str(Path(__file__).parent.parent / "io" / "jsonl.py"))
 jsonl_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jsonl_module)
@@ -231,7 +235,6 @@ class TestJSONLWriterProperties:
 
             total_objects = 0
             for f in files:
-                import json
                 with open(f, 'r') as file:
                     for line in file:
                         if line.strip():

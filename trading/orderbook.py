@@ -10,7 +10,8 @@ Contains functions for orderbook depth analysis:
 """
 
 import logging
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
+
 from .helpers import price_to_precision
 
 logger = logging.getLogger(__name__)

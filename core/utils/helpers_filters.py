@@ -1,9 +1,10 @@
 # helpers_filters.py
 # Zentrale, getestete Utilities für Preis-/Mengenrundung und Filter-Compliance.
 
-from dataclasses import dataclass
-from typing import Dict, Tuple
 import math
+from dataclasses import dataclass
+from typing import Tuple
+
 
 @dataclass
 class ExchangeFilters:
@@ -210,7 +211,7 @@ def apply_exchange_filters(symbol: str, side: str, price: float, qty: float,
         dict mit korrigierten Parametern und Audit-Trail
     """
     filters = market_data.get("filters", {})
-    book = market_data.get("book", {})
+    market_data.get("book", {})
 
     f = ExchangeFilters(
         tickSize=float(filters.get("tickSize", 0.01)),

@@ -5,21 +5,23 @@ Unit Tests for RotatingJSONLWriter (V9_3 Phase 8)
 Tests rotation logic, atomic writes, and thread safety.
 """
 
-import pytest
-import time
-import tempfile
-import shutil
 import json
-from pathlib import Path
-from datetime import datetime, timedelta
-from threading import Thread
+import shutil
 
 # Import JSONL writer
 import sys
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from threading import Thread
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from io package (note: avoid conflict with built-in io module)
 import importlib.util
+
 spec = importlib.util.spec_from_file_location("jsonl_module", str(Path(__file__).parent.parent / "io" / "jsonl.py"))
 jsonl_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jsonl_module)
@@ -81,8 +83,7 @@ class TestRotatingJSONLWriter:
         writer.append(obj1)
 
         # Simulate date change by modifying internal state
-        old_date = writer.current_date
-        new_date = (datetime.utcnow() + timedelta(days=1)).strftime("%Y%m%d")
+        (datetime.utcnow() + timedelta(days=1)).strftime("%Y%m%d")
         writer.current_date = None  # Force rotation check
 
         # Write with new date

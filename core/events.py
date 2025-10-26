@@ -7,8 +7,8 @@ from MarketDataService to Engine and Dashboard.
 """
 
 import logging
-from typing import Callable, Dict, List, Any
 from threading import RLock
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 

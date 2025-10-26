@@ -17,15 +17,15 @@ Crash mitten im Retry → Neustart → keine zweite Order (COID wird wiederverwe
 """
 
 from __future__ import annotations
-import os
+
 import json
-import time
-import threading
 import logging
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, asdict
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass
 from enum import Enum
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

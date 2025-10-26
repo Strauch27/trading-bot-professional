@@ -3,19 +3,17 @@ Thread-Safe Shutdown Coordinator
 Manages clean shutdown across multiple threads and components
 """
 
-import time
-import time as _t
-import threading
-from threading import Lock
+import collections
 import logging
-import sys
 import platform
 import signal as _signal
-import collections
-from typing import Dict, List, Callable, Optional, Any
+import sys
+import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
-
+from threading import Lock
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

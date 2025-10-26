@@ -19,9 +19,9 @@ Usage:
         logger.warning(f"Risk limit exceeded: {limit_checks}")
 """
 
-import time
 import logging
-from typing import Tuple, List, Dict, Any
+import time
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 

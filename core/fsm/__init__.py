@@ -11,9 +11,9 @@ Components:
 - events.py: Event definitions for logging
 """
 
+from .machine import StateMachine
 from .phases import Phase
 from .state import CoinState, set_phase
-from .machine import StateMachine
 
 __all__ = [
     'Phase',

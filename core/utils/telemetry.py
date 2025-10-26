@@ -1,6 +1,7 @@
 # telemetry.py - Heartbeat Telemetry System
 from collections import deque
 
+
 class RollingStats:
     def __init__(self, maxlen=300):
         """

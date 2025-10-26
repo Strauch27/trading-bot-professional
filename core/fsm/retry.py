@@ -3,10 +3,10 @@
 Retry decorators with exponential backoff for exchange calls
 """
 
-import time
 import functools
 import logging
-from typing import Callable, Optional, Type, Tuple
+import time
+from typing import Callable, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def with_retry(
     # Default retryable exceptions
     if retryable_exceptions is None:
         try:
-            from ccxt.base.errors import NetworkError, ExchangeNotAvailable, RequestTimeout
+            from ccxt.base.errors import ExchangeNotAvailable, NetworkError, RequestTimeout
             retryable_exceptions = (NetworkError, ExchangeNotAvailable, RequestTimeout, ConnectionError, TimeoutError)
         except ImportError:
             logger.warning("ccxt not found, using generic exceptions for retry")

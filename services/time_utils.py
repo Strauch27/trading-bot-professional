@@ -10,8 +10,8 @@ Provides timeframe alignment and candle validation:
 Prevents off-by-one errors and partial candle bugs in technical indicators.
 """
 
-from typing import List, Tuple
 import time
+from typing import List
 
 # Timeframe to milliseconds mapping
 TF_MS = {
@@ -228,21 +228,21 @@ def validate_ohlcv_values(ohlcv: List[List]) -> bool:
         if len(candle) < 6:
             raise ValueError(f"Invalid candle at index {i}: insufficient fields")
 
-        ts, o, h, l, c, v = candle[:6]
+        ts, o, h, low, c, v = candle[:6]
 
         # Volume check
         if v is not None and v < 0:
             raise ValueError(f"Negative volume at index {i}: {v}")
 
         # Price range check
-        if h < l:
-            raise ValueError(f"High < Low at index {i}: high={h}, low={l}")
+        if h < low:
+            raise ValueError(f"High < Low at index {i}: high={h}, low={low}")
 
         # OHLC consistency
-        if not (l <= o <= h and l <= c <= h):
+        if not (low <= o <= h and low <= c <= h):
             raise ValueError(
                 f"OHLC inconsistent at index {i}: "
-                f"open={o}, high={h}, low={l}, close={c}"
+                f"open={o}, high={h}, low={low}, close={c}"
             )
 
     return True

@@ -8,10 +8,9 @@ Displays a clean, formatted table showing:
 - Budget and equity status
 """
 
-import time
 import logging
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+import time
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 

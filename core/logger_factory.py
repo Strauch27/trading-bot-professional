@@ -29,22 +29,22 @@ Usage:
     )
 """
 
+import gzip
 import json
 import logging
-import gzip
 import os
 import threading
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
-from typing import Any, Dict, Optional
 from pathlib import Path
+from typing import Any, Dict
 
 from core.trace_context import (
-    session_id_var,
-    decision_id_var,
-    order_req_id_var,
     client_order_id_var,
+    decision_id_var,
     exchange_order_id_var,
+    order_req_id_var,
+    session_id_var,
 )
 
 
@@ -478,7 +478,6 @@ def log_config_diff(config_module: Any, current_hash: str, session_id: str = Non
         session_id: Session ID for correlation
     """
     import os
-    from pathlib import Path
 
     try:
         # Try to load previous config hash
@@ -512,7 +511,6 @@ def log_config_diff(config_module: Any, current_hash: str, session_id: str = Non
                             prev_session=prev_session_dir.name,
                             session_id=session_id
                         )
-                        logger.info(f"CONFIG_DIFF: Drift detected from previous run (prev={prev_hash}, current={current_hash})")
                     else:
                         # No drift
                         log_event(

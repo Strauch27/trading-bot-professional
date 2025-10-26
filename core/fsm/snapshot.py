@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 from core.fsm.phases import Phase
 from core.fsm.state import CoinState
-from core.fsm.state_data import StateData, OrderContext
+from core.fsm.state_data import OrderContext, StateData
 
 logger = logging.getLogger(__name__)
 

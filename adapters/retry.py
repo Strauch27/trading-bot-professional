@@ -15,10 +15,10 @@ Usage:
         pass
 """
 
-import time
-import random
 import functools
 import logging
+import random
+import time
 
 log = logging.getLogger(__name__)
 

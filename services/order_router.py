@@ -15,18 +15,19 @@ FSM States:
 This is the SINGLE execution path for all trading orders.
 """
 
-import time
-import math
+import hashlib
 import logging
 import threading
-import hashlib
+import time
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 import ccxt
+
+import config
 
 # P1: State Persistence
 from core.state_writer import DebouncedStateWriter
-import config
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +329,7 @@ class OrderRouter:
         # Check ORDER_FLOW_ENABLED kill-switch
         order_flow_enabled = getattr(config, 'ORDER_FLOW_ENABLED', True)
         if not order_flow_enabled:
-            error_msg = f"ORDER_FLOW_ENABLED=False: Order placement disabled by kill-switch"
+            error_msg = "ORDER_FLOW_ENABLED=False: Order placement disabled by kill-switch"
             logger.warning(error_msg, extra={'symbol': symbol, 'side': side, 'qty': qty})
             raise RuntimeError(error_msg)
 
@@ -478,7 +479,7 @@ class OrderRouter:
         # Check ORDER_FLOW_ENABLED kill-switch early (before budget reservation)
         order_flow_enabled = getattr(config, 'ORDER_FLOW_ENABLED', True)
         if not order_flow_enabled:
-            error_msg = f"ORDER_FLOW_ENABLED=False: Order execution disabled by kill-switch"
+            error_msg = "ORDER_FLOW_ENABLED=False: Order execution disabled by kill-switch"
             logger.warning(error_msg, extra={'intent_id': intent_id, 'symbol': symbol, 'side': side})
             self.tl.write("order_audit", {
                 "intent_id": intent_id,

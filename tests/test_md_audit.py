@@ -5,11 +5,13 @@ Tests for services/md_audit.py
 Tests JSONL audit logging and statistics analysis.
 """
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
-from services.md_audit import MarketDataAuditor, AuditStats
+
+import pytest
+
+from services.md_audit import AuditStats, MarketDataAuditor
 
 
 class TestMarketDataAuditor:

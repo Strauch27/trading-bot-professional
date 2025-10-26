@@ -9,8 +9,8 @@ Contains:
 - Manual exit operations
 """
 
-import time
 import logging
+import time
 
 from services import ExitResult
 

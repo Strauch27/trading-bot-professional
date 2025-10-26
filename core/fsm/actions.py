@@ -9,9 +9,10 @@ All actions must be:
 4. Logged (structured events)
 """
 
+import logging
+
 from core.fsm.fsm_events import EventContext
 from core.fsm.state import CoinState
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 def action_warmup_complete(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: WARMUP → IDLE"""
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="WARMUP",
@@ -45,7 +46,7 @@ def action_evaluate_entry(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.signal_type = ctx.data.get('signal_type')
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="IDLE",
@@ -64,7 +65,7 @@ def action_prepare_buy(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.buy_order_prepared_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="ENTRY_EVAL",
@@ -81,7 +82,7 @@ def action_log_blocked(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.note = f"blocked: {ctx.data.get('block_reason', 'unknown')}"
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="ENTRY_EVAL",
@@ -103,7 +104,7 @@ def action_wait_for_fill(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.buy_order.placed_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="PLACE_BUY",
@@ -132,7 +133,7 @@ def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.position_entry_price = ctx.avg_price or 0.0
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "position_opened",
                   symbol=ctx.symbol,
                   qty=ctx.filled_qty,
@@ -158,7 +159,7 @@ def action_handle_partial_buy(ctx: EventContext, coin_state: CoinState) -> None:
         order_ctx.cumulative_qty = (order_ctx.cumulative_qty or 0.0) + (ctx.filled_qty or 0.0)
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "order_partial_fill",
                   symbol=ctx.symbol,
                   filled_qty=ctx.filled_qty,
@@ -174,7 +175,7 @@ def action_cancel_and_cleanup(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.order_placed_ts = 0.0
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="WAIT_FILL",
@@ -192,7 +193,7 @@ def action_cleanup_cancelled(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.order_placed_ts = 0.0
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="WAIT_FILL",
@@ -209,7 +210,7 @@ def action_handle_reject(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.retry_count += 1
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="PLACE_BUY",
@@ -245,7 +246,7 @@ def action_prepare_sell(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.exit_detected_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="EXIT_EVAL",
@@ -273,7 +274,7 @@ def action_wait_for_sell(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.sell_order.placed_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="PLACE_SELL",
@@ -296,7 +297,7 @@ def action_close_position(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.note = f"position closed: PnL={realized_pnl:.4f}"
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "position_closed",
                   symbol=ctx.symbol,
                   qty_closed=ctx.filled_qty,
@@ -327,7 +328,7 @@ def action_handle_partial_sell(ctx: EventContext, coin_state: CoinState) -> None
         order_ctx.cumulative_qty = (order_ctx.cumulative_qty or 0.0) + (ctx.filled_qty or 0.0)
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "order_partial_fill",
                   symbol=ctx.symbol,
                   filled_qty=ctx.filled_qty,
@@ -345,7 +346,7 @@ def action_retry_sell(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.sell_order.retry_count = coin_state.retry_count
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   to_phase="POSITION",
@@ -367,7 +368,7 @@ def action_start_cooldown(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.cooldown_started_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="POST_TRADE",
@@ -404,7 +405,7 @@ def action_reset_to_idle(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.exit_signal = None
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   from_phase="COOLDOWN",
@@ -427,7 +428,7 @@ def action_log_error(ctx: EventContext, coin_state: CoinState) -> None:
         coin_state.fsm_data.last_error_at = ctx.timestamp
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_transition",
                   symbol=ctx.symbol,
                   to_phase="ERROR",
@@ -442,7 +443,7 @@ def action_safe_halt(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.note = "HALTED - manual intervention required"
 
     try:
-        from core.logger_factory import log_event, DECISION_LOG
+        from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "fsm_halted",
                   symbol=ctx.symbol,
                   reason="manual_halt")

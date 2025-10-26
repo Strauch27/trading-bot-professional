@@ -12,15 +12,8 @@ Tests order lifecycle state machine with:
 
 import time
 import unittest
-from unittest.mock import Mock, patch
 
-from core.fsm.order_fsm import (
-    OrderState,
-    OrderFSM,
-    OrderFSMManager,
-    StateTransition,
-    get_order_fsm_manager
-)
+from core.fsm.order_fsm import OrderFSM, OrderFSMManager, OrderState, get_order_fsm_manager
 
 
 class TestOrderState(unittest.TestCase):
@@ -414,7 +407,7 @@ class TestOrderFSMManager(unittest.TestCase):
         # Create orders
         fsm1 = self.manager.create_order("order_1", "BTC/USDT", "buy", 0.1)
         fsm2 = self.manager.create_order("order_2", "BTC/USDT", "buy", 0.1)
-        fsm3 = self.manager.create_order("order_3", "BTC/USDT", "buy", 0.1)
+        self.manager.create_order("order_3", "BTC/USDT", "buy", 0.1)
 
         # Mark as terminal with different completion times
         fsm1.transition(OrderState.FILLED)
@@ -438,7 +431,7 @@ class TestOrderFSMManager(unittest.TestCase):
         # Create mixed orders
         fsm1 = self.manager.create_order("order_1", "BTC/USDT", "buy", 0.1)
         fsm2 = self.manager.create_order("order_2", "BTC/USDT", "buy", 0.1)
-        fsm3 = self.manager.create_order("order_3", "ETH/USDT", "buy", 1.0)
+        self.manager.create_order("order_3", "ETH/USDT", "buy", 1.0)
 
         # Transition some
         fsm1.transition(OrderState.PARTIAL)

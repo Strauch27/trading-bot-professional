@@ -9,41 +9,40 @@ Enhanced with:
 - RollingWindowManager for drop tracking (long-term solution)
 """
 
-import time
 import logging
 import math
-from typing import Dict, List, Optional, Any, Tuple
-from threading import RLock
-from dataclasses import dataclass, asdict
-from collections import defaultdict, deque, Counter
-from pathlib import Path
-from datetime import datetime, timedelta
+import os
 
-# Import new services
-from services.cache_ttl import TTLCache, CacheCoordinator
-from services.time_utils import (
-    filter_closed_candles,
-    validate_ohlcv_monotonic,
-    validate_ohlcv_values,
-    align_since_to_closed,
-    TF_MS
-)
-from services.md_audit import MarketDataAuditor
+# Import from market_data submodule
+import sys
+import time
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from threading import RLock
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import new pipeline components
 from core.price_cache import PriceCache
 from core.rolling_windows import RollingWindowManager
 from features.engine import compute as compute_features
-from market.snapshot_builder import build as build_snapshot
 from market.anchor_manager import AnchorManager
-from telemetry.jsonl_writer import JsonlWriter
+from market.snapshot_builder import build as build_snapshot
 
 # Import V9_3 persistence (Phase 4)
 from persistence.jsonl import RotatingJSONLWriter
 
-# Import from market_data submodule
-import sys
-import os
+# Import new services
+from services.cache_ttl import TTLCache
+from services.md_audit import MarketDataAuditor
+from services.time_utils import (
+    filter_closed_candles,
+    validate_ohlcv_monotonic,
+    validate_ohlcv_values,
+)
+from telemetry.jsonl_writer import JsonlWriter
+
 _market_data_dir = os.path.join(os.path.dirname(__file__), 'market_data')
 if _market_data_dir not in sys.path:
     sys.path.insert(0, _market_data_dir)
@@ -1400,7 +1399,7 @@ class MarketDataProvider:
             # ULTRA DEBUG
             try:
                 with open("/tmp/update_market_data.txt", "a") as f:
-                    f.write(f"  Using LEGACY pipeline\n")
+                    f.write("  Using LEGACY pipeline\n")
                     f.flush()
             except:
                 pass
@@ -1724,8 +1723,8 @@ class MarketDataProvider:
             export_dir = getattr(config, 'MARKET_DATA_HEALTH_EXPORT_DIR', None)
             if export_dir:
                 try:
-                    from pathlib import Path
                     import json
+                    from pathlib import Path
                     Path(export_dir).mkdir(parents=True, exist_ok=True)
                     export_file = Path(export_dir) / "md_health.jsonl"
                     with open(export_file, 'a') as f:
@@ -1755,7 +1754,7 @@ class MarketDataProvider:
         # ULTRA DEBUG
         try:
             with open("/tmp/update_market_data.txt", "a") as f:
-                f.write(f"  Updating PriceCache...\n")
+                f.write("  Updating PriceCache...\n")
                 f.flush()
         except:
             pass
@@ -1767,7 +1766,7 @@ class MarketDataProvider:
         # ULTRA DEBUG
         try:
             with open("/tmp/update_market_data.txt", "a") as f:
-                f.write(f"  PriceCache updated\n")
+                f.write("  PriceCache updated\n")
                 f.flush()
         except:
             pass
@@ -1868,7 +1867,7 @@ class MarketDataProvider:
                 # ULTRA DEBUG
                 try:
                     with open("/tmp/update_market_data.txt", "a") as f:
-                        f.write(f"  EventBus publish SUCCESS\n")
+                        f.write("  EventBus publish SUCCESS\n")
                         f.flush()
                 except:
                     pass
@@ -1950,7 +1949,7 @@ class MarketDataProvider:
         # ULTRA DEBUG
         try:
             with open("/tmp/update_market_data.txt", "a") as f:
-                f.write(f"  update_market_data() COMPLETE\n")
+                f.write("  update_market_data() COMPLETE\n")
                 f.flush()
         except:
             pass
@@ -2010,7 +2009,7 @@ class MarketDataProvider:
             # ULTRA DEBUG
             try:
                 with open("/tmp/market_data_start.txt", "a") as f:
-                    f.write(f"  Already running, returning early\n")
+                    f.write("  Already running, returning early\n")
                     f.flush()
             except:
                 pass
@@ -2130,15 +2129,16 @@ class MarketDataProvider:
         except:
             pass
 
-        import config
         import traceback
         from pathlib import Path
+
+        import config
 
         try:
             # ULTRA DEBUG
             try:
                 with open("/tmp/market_data_loop.txt", "a") as f:
-                    f.write(f"  Inside try block\n")
+                    f.write("  Inside try block\n")
                     f.flush()
             except:
                 pass
@@ -2146,7 +2146,7 @@ class MarketDataProvider:
             # ULTRA DEBUG - Test 1
             try:
                 with open("/tmp/market_data_loop.txt", "a") as f:
-                    f.write(f"  Test 1: About to check self.persist\n")
+                    f.write("  Test 1: About to check self.persist\n")
                     f.flush()
                     persist_value = self.persist
                     f.write(f"  Test 2: self.persist={persist_value}\n")
@@ -2163,7 +2163,7 @@ class MarketDataProvider:
                 # ULTRA DEBUG
                 try:
                     with open("/tmp/market_data_loop.txt", "a") as f:
-                        f.write(f"  Creating paths...\n")
+                        f.write("  Creating paths...\n")
                         f.flush()
                 except:
                     pass

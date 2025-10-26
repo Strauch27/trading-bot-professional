@@ -5,10 +5,9 @@ This logger creates a simple log file that shows all evaluation steps
 for each symbol, making it easy to debug why symbols are bought or blocked.
 """
 import logging
-import os
 from datetime import datetime
-from typing import Optional, Dict
 from pathlib import Path
+from typing import Dict, Optional
 
 
 class BuyFlowLogger:

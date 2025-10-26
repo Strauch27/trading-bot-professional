@@ -11,22 +11,19 @@ Features:
 - Critical event preservation
 """
 
-import os
 import gzip
-import time
-import shutil
-import logging
-import threading
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime, timedelta
-from pathlib import Path
 import json
+import logging
+import os
+import shutil
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
 
 try:
-    from config import (
-        LOG_DIR, DEBUG_ENABLE_LOG_COMPRESSION, DEBUG_LOG_RETENTION_DAYS,
-        SESSION_DIR, run_timestamp
-    )
+    from config import DEBUG_ENABLE_LOG_COMPRESSION, DEBUG_LOG_RETENTION_DAYS, LOG_DIR, SESSION_DIR, run_timestamp
 except ImportError:
     # Fallback defaults
     LOG_DIR = "logs"

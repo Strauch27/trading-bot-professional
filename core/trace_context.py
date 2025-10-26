@@ -15,10 +15,9 @@ Usage:
         place_order()
 """
 
-from contextvars import ContextVar
 import uuid
-from typing import Optional, Dict, Any
-
+from contextvars import ContextVar
+from typing import Dict, Optional
 
 # Context Variables for Correlation IDs
 session_id_var: ContextVar[Optional[str]] = ContextVar("session_id", default=None)

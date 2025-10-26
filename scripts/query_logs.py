@@ -17,11 +17,11 @@ Query Types:
     performance  - Calculate win rate, PnL, avg trade duration
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict, Optional
-import argparse
+from typing import Dict, List, Optional
 
 
 class LogQuery:
@@ -272,7 +272,7 @@ def main():
     session_dir = Path("sessions") / args.session
     if not session_dir.exists():
         print(f"❌ Error: Session directory not found: {session_dir}")
-        print(f"\nAvailable sessions:")
+        print("\nAvailable sessions:")
         sessions_dir = Path("sessions")
         if sessions_dir.exists():
             for session in sorted(sessions_dir.iterdir(), reverse=True):
@@ -322,7 +322,7 @@ def main():
 
         for order_events in orders[-args.limit:]:
             attempt = order_events.get('order_attempt', {})
-            ack = order_events.get('order_ack', {})
+            order_events.get('order_ack', {})
             done = order_events.get('order_done', {})
 
             final_status = done.get('final_status', 'pending')

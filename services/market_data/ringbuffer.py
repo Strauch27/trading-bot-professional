@@ -37,10 +37,11 @@ Example:
 """
 
 from __future__ import annotations
-import threading
-from typing import TypeVar, Generic, Optional, List, Iterator, Any
-from dataclasses import dataclass
+
 import logging
+import threading
+from dataclasses import dataclass
+from typing import Generic, Iterator, List, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 

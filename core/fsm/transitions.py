@@ -7,9 +7,9 @@ FSM Transition Table
 The single source of truth for all state transitions.
 """
 
-from typing import Dict, Tuple, Callable, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
-from core.fsm.fsm_events import FSMEvent, EventContext
+from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.phases import Phase
 
 if TYPE_CHECKING:
@@ -41,30 +41,30 @@ class TransitionTable:
 
         # Import actions here to avoid circular imports
         from core.fsm.actions import (
-            action_warmup_complete,
-            action_idle_tick,
-            action_evaluate_entry,
-            action_prepare_buy,
-            action_log_blocked,
-            action_wait_for_fill,
-            action_open_position,
-            action_handle_partial_buy,
             action_cancel_and_cleanup,
-            action_cleanup_cancelled,
-            action_handle_reject,
-            action_check_exit,
-            action_update_pnl,
-            action_prepare_sell,
-            action_continue_holding,
-            action_wait_for_sell,
-            action_close_position,
-            action_handle_partial_sell,
-            action_retry_sell,
-            action_start_cooldown,
             action_check_cooldown,
-            action_reset_to_idle,
+            action_check_exit,
+            action_cleanup_cancelled,
+            action_close_position,
+            action_continue_holding,
+            action_evaluate_entry,
+            action_handle_partial_buy,
+            action_handle_partial_sell,
+            action_handle_reject,
+            action_idle_tick,
+            action_log_blocked,
             action_log_error,
+            action_open_position,
+            action_prepare_buy,
+            action_prepare_sell,
+            action_reset_to_idle,
+            action_retry_sell,
             action_safe_halt,
+            action_start_cooldown,
+            action_update_pnl,
+            action_wait_for_fill,
+            action_wait_for_sell,
+            action_warmup_complete,
         )
 
         # ===== WARMUP Phase =====

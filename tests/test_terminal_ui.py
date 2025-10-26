@@ -5,11 +5,11 @@ Tests for Terminal UI components
 Tests Rich Console integration, Live Monitors, and logging bridge.
 """
 
-import pytest
-import sys
 import os
-from unittest.mock import Mock, patch, MagicMock
-from io import StringIO
+import sys
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent dir to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,7 +35,7 @@ class TestRichConsoleBasics:
 
     def test_log_functions_callable(self):
         """Test that all log functions are callable"""
-        from ui.console_ui import log_info, log_success, log_warning, log_error
+        from ui.console_ui import log_error, log_info, log_success, log_warning
 
         # All should be callable functions
         assert callable(log_info)
@@ -275,6 +275,7 @@ class TestFallbackBehavior:
         """Test that log functions work even without Rich"""
         # Reload module to apply patch
         import importlib
+
         from ui import console_ui
         importlib.reload(console_ui)
 

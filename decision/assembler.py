@@ -10,8 +10,8 @@ Pipeline: Signal + Guards + Risk → Intent → OrderRouter
 
 import hashlib
 import time
-from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)

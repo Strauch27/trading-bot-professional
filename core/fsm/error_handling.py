@@ -5,11 +5,12 @@ ERROR State Handling
 Safe-halt mechanism for unrecoverable errors.
 """
 
-from core.fsm.fsm_events import FSMEvent, EventContext
+import logging
+import time
+
+from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.phases import Phase
 from core.fsm.state import CoinState
-import time
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class ErrorHandler:
 
         # Log to structured log
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_error",
@@ -142,7 +143,7 @@ class ErrorHandler:
 
         # Log recovery event
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_manual_recovery",
@@ -196,7 +197,7 @@ class ErrorHandler:
 
         # Log recovery event
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_auto_recovery",

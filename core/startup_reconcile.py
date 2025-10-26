@@ -13,7 +13,7 @@ Usage:
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def reconcile_pending_coids(
         stats_before = coid_manager.get_stats()
         pending_before = stats_before.get('pending_count', 0)
 
-        logger.info(f"COID Store Stats (before):")
+        logger.info("COID Store Stats (before):")
         logger.info(f"  Total entries: {stats_before.get('total_entries', 0)}")
         logger.info(f"  Pending: {pending_before}")
         logger.info(f"  Terminal: {stats_before.get('terminal_count', 0)}")
@@ -88,7 +88,7 @@ def reconcile_pending_coids(
         stats_after = coid_manager.get_stats()
         pending_after = stats_after.get('pending_count', 0)
 
-        logger.info(f"COID Store Stats (after):")
+        logger.info("COID Store Stats (after):")
         logger.info(f"  Total entries: {stats_after.get('total_entries', 0)}")
         logger.info(f"  Pending: {pending_after}")
         logger.info(f"  Terminal: {stats_after.get('terminal_count', 0)}")

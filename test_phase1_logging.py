@@ -10,26 +10,25 @@ Demonstrates usage of the new structured logging system:
 Run this script to verify Phase 1 implementation works correctly.
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from core.logger_factory import (
+    AUDIT_LOG,
+    DECISION_LOG,
+    HEALTH_LOG,
+    ORDER_LOG,
+    install_global_excepthook,
+    log_event,
+)
 from core.trace_context import (
     Trace,
-    set_session_id,
     new_decision_id,
     new_order_req_id,
-)
-from core.logger_factory import (
-    DECISION_LOG,
-    ORDER_LOG,
-    TRACER_LOG,
-    AUDIT_LOG,
-    HEALTH_LOG,
-    log_event,
-    install_global_excepthook,
+    set_session_id,
 )
 
 

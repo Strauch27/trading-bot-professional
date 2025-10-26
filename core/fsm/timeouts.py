@@ -3,12 +3,13 @@
 Centralized timeout handling for orders
 """
 
+import logging
 import time
 from typing import List, Optional
-from core.fsm.fsm_events import FSMEvent, EventContext
-from core.fsm.state_data import StateData
+
+from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.phases import Phase
-import logging
+from core.fsm.state_data import StateData
 
 logger = logging.getLogger(__name__)
 

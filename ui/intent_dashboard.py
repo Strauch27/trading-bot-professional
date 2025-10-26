@@ -6,11 +6,11 @@ Displays active intents with age, status, and metrics for monitoring.
 Modular design - returns formatted string for display in main dashboard.
 """
 
-import time
 import sys
-from typing import Dict, Any, List, Optional
-import config
+import time
+from typing import Any, Dict
 
+import config
 
 # Unicode support detection
 _UNICODE_SUPPORTED = None

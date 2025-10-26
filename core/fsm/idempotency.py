@@ -5,10 +5,10 @@ Idempotency Store - Prevents duplicate event processing
 Uses event fingerprints (symbol + event + order_id + timestamp) to detect duplicates.
 """
 
+import logging
 import threading
 import time
-import logging
-from typing import Set, Tuple, Dict, Optional
+from typing import Dict, Optional, Set, Tuple
 
 from core.fsm.fsm_events import EventContext
 

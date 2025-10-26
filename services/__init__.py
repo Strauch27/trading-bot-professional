@@ -1,34 +1,36 @@
 # Services package (sizing, sell, pnl, …)
 
 # Import existing services
-from .sizing_service import SizingService
-from .buy_service import BuyService, BuyPlan
-from .sell_service import SellService
+from .buy_service import BuyPlan, BuyService
 
-# Import new PnL service (Drop 1)
-from .pnl import PnLService, TradeRecord, PnLSummary, PositionState
+# Import new Buy Signals & Market Guards services (Drop 5)
+from .buy_signals import BuySignalService
 
-# Import new Trailing & Signals services (Drop 2)
-from .trailing import TrailingStopController, TrailingStopManager
-from .signals import ExitSignalQueue, SignalManager
+# Import new Exit & Market Data services (Drop 4)
+from .exits import ExitContext, ExitEvaluator, ExitManager, ExitOrderManager, ExitResult, ExitSignal
+from .market_data import (
+    MarketDataProvider,
+    OHLCVBar,
+    OHLCVHistory,
+    TickerCache,
+    TickerData,
+    fetch_ticker_cached,
+    fetch_ticker_with_retry,
+)
+from .market_guards import MarketGuards
 
 # Import new Order services (Drop 3)
 from .orders import OrderService
 from .orders_cache import OrderCache
 
-# Import new Exit & Market Data services (Drop 4)
-from .exits import (
-    ExitSignal, ExitContext, ExitResult, ExitEvaluator,
-    ExitOrderManager, ExitManager
-)
-from .market_data import (
-    TickerData, OHLCVBar, TickerCache, OHLCVHistory,
-    MarketDataProvider, fetch_ticker_cached, fetch_ticker_with_retry
-)
+# Import new PnL service (Drop 1)
+from .pnl import PnLService, PnLSummary, PositionState, TradeRecord
+from .sell_service import SellService
+from .signals import ExitSignalQueue, SignalManager
+from .sizing_service import SizingService
 
-# Import new Buy Signals & Market Guards services (Drop 5)
-from .buy_signals import BuySignalService
-from .market_guards import MarketGuards
+# Import new Trailing & Signals services (Drop 2)
+from .trailing import TrailingStopController, TrailingStopManager
 
 __all__ = [
     # Existing services

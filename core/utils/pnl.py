@@ -1,6 +1,7 @@
 # pnl.py
 from dataclasses import dataclass
 
+
 @dataclass
 class PnL:
     """PnL-Datenstruktur für realized und unrealized P&L"""

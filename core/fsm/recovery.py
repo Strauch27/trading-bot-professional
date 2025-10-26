@@ -91,7 +91,7 @@ class RecoveryManager:
 
         # Log recovery event
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_recovery",

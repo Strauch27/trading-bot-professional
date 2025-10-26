@@ -7,7 +7,8 @@ set_phase: Transition helper with logging and metrics
 
 from dataclasses import dataclass, field
 from time import time
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 from .phases import Phase
 
 

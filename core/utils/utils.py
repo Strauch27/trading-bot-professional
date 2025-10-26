@@ -1,29 +1,42 @@
-# utils.py - Utility-Funktionen und State-Management 
-import os
+# utils.py - Utility-Funktionen und State-Management
+import itertools
 import json
-import pandas as pd
 import math
-from datetime import datetime, timezone
-from collections import deque
-import time
+import os
 import random
+import re
+import time
+from collections import deque
+from datetime import datetime, timezone
+from typing import List, Tuple
+
 import ccxt
-from typing import List, Dict, Tuple
+import pandas as pd
+
 from config import (
-    HISTORY_FILE, RUN_ID, symbol_min_cost_override,
-    FEE_RATE, stop_loss_threshold, take_profit_threshold, be_activation_pct,
-    trailing_stop_activation_pct, trailing_stop_distance_pct,
-    use_trailing_take_profit, trailing_tp_activation_pct,
-    trailing_tp_step_bp, trailing_tp_under_high_bp
+    FEE_RATE,
+    HISTORY_FILE,
+    RUN_ID,
+    be_activation_pct,
+    stop_loss_threshold,
+    symbol_min_cost_override,
+    take_profit_threshold,
+    trailing_stop_activation_pct,
+    trailing_stop_distance_pct,
+    trailing_tp_activation_pct,
+    trailing_tp_step_bp,
+    trailing_tp_under_high_bp,
+    use_trailing_take_profit,
 )
 from core.logging.logger_setup import logger
 from core.logging.loggingx import (
-    log_event, log_metric, sl_breakeven_bump,
-    sl_trail_update, tp_trail_update,
-    trailing_bump, trailing_hit
+    log_metric,
+    sl_breakeven_bump,
+    sl_trail_update,
+    tp_trail_update,
+    trailing_bump,
 )
-import itertools
-import re
+
 
 # Self-Check für Min-Notional-Warnungen (V9_3-style)
 def log_min_notional_warnings(exchange, symbols, position_size_usdt, buffer=1.02):
@@ -78,15 +91,15 @@ def next_client_order_id(symbol: str, side: str, decision_id: str | None = None)
     Kompakter, MEXC-kompatibler clientOrderId-Generator (≤32 Zeichen).
     Format: prefix(6) + symbol(10) + side(1) + nonce(7)
     Optional mit decision_id für Tracing
-    
+
     MEXC erlaubt nur [0-9a-zA-Z_-] und max. 32 Zeichen
     """
     import time
-    
+
     prefix = RUN_ID.replace("-", "")[:6]  # 6 Zeichen von RUN_ID
     sym = re.sub(r'[^0-9A-Za-z]', '', symbol.upper())[:10]  # max 10 Zeichen Symbol
     nonce = int(time.time() * 1000) % 10_000_000  # 7-stellige Zahl
-    
+
     # Optional: decision_id einbauen für Tracing (wenn vorhanden)
     if decision_id:
         # Nutze decision_id als Teil des Prefix (max 10 chars von decision_id)
@@ -94,7 +107,7 @@ def next_client_order_id(symbol: str, side: str, decision_id: str | None = None)
         coid = f"{dec_part}{sym}{side[:1]}{nonce}"
     else:
         coid = f"{prefix}{sym}{side[:1]}{nonce}"
-    
+
     # Sanity check und sanitize
     coid = re.sub(r'[^0-9A-Za-z_-]', '', coid)[:_MAX_COID_LEN]
     return coid
@@ -131,7 +144,7 @@ def with_backoff(fn, *args, max_retries: int = 5, base_delay: float = 0.25, jitt
     while True:
         try:
             return fn(*args, **kwargs)
-        except RETRYABLE_ERRORS as e:
+        except RETRYABLE_ERRORS:
             if attempt >= max_retries:
                 raise
             delay = (base_delay * (2 ** attempt)) + random.uniform(0, jitter)
@@ -145,22 +158,22 @@ _ticker_cache = {}
 
 def fetch_ticker_cached(exchange, symbol: str, ttl_s: float = 2.0):
     """Fetch ticker mit In-Memory Cache und exponential backoff
-    
+
     Args:
         exchange: CCXT Exchange Instanz
         symbol: Trading-Paar (z.B. "ETH/USDT")
         ttl_s: Cache Time-To-Live in Sekunden
-    
+
     Returns:
         Ticker-Dictionary von der Exchange
     """
     now = time.time()
     item = _ticker_cache.get(symbol)
-    
+
     # Cache-Hit
     if item and (now - item["t"]) <= ttl_s:
         return item["v"]
-    
+
     # Retry mit exponential backoff
     retry_count = 0
     for retry in (0.2, 0.5, 1.0):
@@ -168,18 +181,18 @@ def fetch_ticker_cached(exchange, symbol: str, ttl_s: float = 2.0):
             v = exchange.fetch_ticker(symbol)
             _ticker_cache[symbol] = {"v": v, "t": now}
             return v
-        except Exception as e:
+        except Exception:
             retry_count += 1
             # Log API retry metric
             if retry_count > 1:  # Don't count first attempt as retry
                 log_metric("API_RETRY_COUNT", 1, {"endpoint": "fetch_ticker", "symbol": symbol})
-            
+
             if retry < 1.0:  # Nicht beim letzten Versuch schlafen
                 time.sleep(retry)
             else:
                 # Beim letzten Fehlschlag Exception weitergeben
                 raise
-    
+
 # =================================================================================
 # State-Management-Funktionen
 # =================================================================================
@@ -190,13 +203,13 @@ def save_state_safe(data, file_path):
         with open(temp_file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
         os.replace(temp_file_path, file_path)
-        
+
         # Erfolg loggen
         file_name = os.path.basename(file_path)
         data_count = len(data) if hasattr(data, '__len__') else 0
         logger.debug(f"State saved: {file_name} ({data_count} entries)",
-                    extra={'event_type': 'STATE_SAVED', 
-                          'file': file_name, 
+                    extra={'event_type': 'STATE_SAVED',
+                          'file': file_name,
                           'entries': data_count})
     except Exception as e:
         # Detailliertes Logging für State-Save-Fehler
@@ -206,7 +219,7 @@ def save_state_safe(data, file_path):
             'data_type': type(data).__name__,
             'data_size': len(data) if hasattr(data, '__len__') else 'unknown'
         }
-        
+
         # Prüfe auf spezifische Fehlertypen
         if 'permission' in str(e).lower():
             error_context['likely_cause'] = 'Keine Schreibrechte im Verzeichnis'
@@ -214,34 +227,34 @@ def save_state_safe(data, file_path):
             error_context['likely_cause'] = 'Festplatte voll'
         elif 'json' in str(e).lower():
             error_context['likely_cause'] = 'Daten nicht JSON-serialisierbar'
-        
-        logger.error("Fehler beim Speichern des Zustands.", 
+
+        logger.error("Fehler beim Speichern des Zustands.",
                     extra={'event_type': 'STATE_SAVE_ERROR', **error_context})
 
 def load_state(file_path):
     """Lädt State-Datei"""
-    if not os.path.exists(file_path): 
+    if not os.path.exists(file_path):
         logger.debug(f"State file not found: {os.path.basename(file_path)} (will start fresh)",
-                    extra={'event_type': 'STATE_FILE_NOT_FOUND', 
+                    extra={'event_type': 'STATE_FILE_NOT_FOUND',
                           'file': os.path.basename(file_path)})
         return {}
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-            if not content: 
+            if not content:
                 logger.debug(f"State file empty: {os.path.basename(file_path)}",
-                            extra={'event_type': 'STATE_FILE_EMPTY', 
+                            extra={'event_type': 'STATE_FILE_EMPTY',
                                   'file': os.path.basename(file_path)})
                 return {}
             data = json.loads(content)
             data_count = len(data) if hasattr(data, '__len__') else 0
             logger.debug(f"State loaded: {os.path.basename(file_path)} ({data_count} entries)",
-                        extra={'event_type': 'STATE_LOADED', 
+                        extra={'event_type': 'STATE_LOADED',
                               'file': os.path.basename(file_path),
                               'entries': data_count})
             return data
     except Exception as e:
-        logger.warning(f"Zustandsdatei {file_path} konnte nicht geladen werden.", 
+        logger.warning(f"Zustandsdatei {file_path} konnte nicht geladen werden.",
                       extra={'event_type': 'STATE_LOAD_WARNING', 'file_path': file_path, 'error': str(e)})
         return {}
 
@@ -336,7 +349,7 @@ def save_trade_history(trade_data):
     trade_data.setdefault('is_maker', False)
     trade_data.setdefault('trigger_reason', '')
     trade_data.setdefault('revenue_usdt', 0)
-    
+
     file_exists = os.path.exists(HISTORY_FILE)
     df_to_save = pd.DataFrame([trade_data])
     df_to_save.to_csv(HISTORY_FILE, mode='a', header=not file_exists, index=False)
@@ -351,7 +364,7 @@ class SettlementManager:
         self.last_verified_budget = 0
         self.settlement_history = deque(maxlen=100)  # Für Statistiken
         self.dust_sweeper = dust_sweeper  # Optional: DustSweeper für Dust-Handling
-        
+
     def add_pending(self, order_id, amount, symbol="", **extra):
         """Fügt ein pending settlement hinzu mit optionalen Extra-Daten"""
         self.pending_settlements[order_id] = {
@@ -360,10 +373,10 @@ class SettlementManager:
             'symbol': symbol,
             **extra  # Entry price, reason, etc.
         }
-        logger.debug(f"Settlement pending: {amount:.2f} USDT von {symbol}", 
-                    extra={'event_type': 'SETTLEMENT_PENDING', 'order_id': order_id, 
+        logger.debug(f"Settlement pending: {amount:.2f} USDT von {symbol}",
+                    extra={'event_type': 'SETTLEMENT_PENDING', 'order_id': order_id,
                           'amount': amount, 'symbol': symbol})
-    
+
     def remove_pending(self, order_id):
         """Entfernt ein settlement nach Bestätigung"""
         if order_id in self.pending_settlements:
@@ -373,11 +386,11 @@ class SettlementManager:
                 'amount': settlement['amount'],
                 'duration': time.time() - settlement['timestamp']
             })
-    
+
     def get_total_pending(self):
         """Berechnet die Summe aller pending settlements"""
         return sum(s['amount'] for s in self.pending_settlements.values())
-    
+
     def wait_for_all_settlements(self, refresh_budget_func, timeout=60, tolerance=0.99, check_interval=30, max_attempts=8):
         """
         Wartet bis alle pending settlements angekommen sind.
@@ -385,47 +398,47 @@ class SettlementManager:
         """
         if not self.pending_settlements:
             return True
-            
+
         start = time.time()
         initial_pending = self.get_total_pending()
         attempts = 0
-        
-        logger.info(f"Warte auf {len(self.pending_settlements)} settlements ({initial_pending:.2f} USDT total)...", 
-                   extra={'event_type': 'WAITING_FOR_SETTLEMENTS', 
-                         'count': len(self.pending_settlements), 
+
+        logger.info(f"Warte auf {len(self.pending_settlements)} settlements ({initial_pending:.2f} USDT total)...",
+                   extra={'event_type': 'WAITING_FOR_SETTLEMENTS',
+                         'count': len(self.pending_settlements),
                          'total_amount': initial_pending})
-        
+
         # Progressive Retry-Schleife
         while self.pending_settlements and attempts < max_attempts:
             attempts += 1
             check_start = time.time()
-            
+
             # Warte für ein Intervall mit kontinuierlichen Budget-Checks
             while (time.time() - check_start) < check_interval and self.pending_settlements:
                 actual = refresh_budget_func()
                 expected = self.last_verified_budget + self.get_total_pending()
-                
+
                 if actual >= expected * tolerance:  # Toleranz für Fees
                     cleared = list(self.pending_settlements.keys())
                     for order_id in cleared:
                         self.remove_pending(order_id)
                     self.last_verified_budget = actual
-                    
-                    logger.info(f"Alle settlements bestätigt nach {time.time()-start:.1f}s (Versuch {attempts})", 
-                              extra={'event_type': 'SETTLEMENTS_CONFIRMED', 
+
+                    logger.info(f"Alle settlements bestätigt nach {time.time()-start:.1f}s (Versuch {attempts})",
+                              extra={'event_type': 'SETTLEMENTS_CONFIRMED',
                                     'duration': time.time()-start,
                                     'attempts': attempts,
                                     'new_budget': actual})
                     return True
-                
+
                 # Prüfe auf Teil-Settlements
                 if actual > self.last_verified_budget:
                     partial = actual - self.last_verified_budget
-                    logger.debug(f"Partial settlement: {partial:.2f} USDT angekommen (Versuch {attempts})", 
-                               extra={'event_type': 'PARTIAL_SETTLEMENT', 
+                    logger.debug(f"Partial settlement: {partial:.2f} USDT angekommen (Versuch {attempts})",
+                               extra={'event_type': 'PARTIAL_SETTLEMENT',
                                      'amount': partial,
                                      'attempts': attempts})
-                    
+
                     # Entferne settlements die teilweise erfüllt wurden
                     partially_cleared = []
                     remaining = self.get_total_pending()
@@ -433,36 +446,36 @@ class SettlementManager:
                         for order_id, settlement in self.pending_settlements.items():
                             if settlement['amount'] <= partial * 1.1:  # Mit kleiner Toleranz
                                 partially_cleared.append(order_id)
-                    
+
                     for order_id in partially_cleared:
                         self.remove_pending(order_id)
-                    
+
                     self.last_verified_budget = actual
-                
+
                 time.sleep(1)
-            
+
             # Log nach jedem Versuch
             if self.pending_settlements and attempts < max_attempts:
-                logger.debug(f"Settlement Check {attempts}/{max_attempts}: Noch {len(self.pending_settlements)} ausstehend", 
+                logger.debug(f"Settlement Check {attempts}/{max_attempts}: Noch {len(self.pending_settlements)} ausstehend",
                            extra={'event_type': 'SETTLEMENT_CHECK_RETRY',
                                  'attempt': attempts,
                                  'max_attempts': max_attempts,
                                  'pending_count': len(self.pending_settlements),
                                  'pending_amount': self.get_total_pending()})
-        
+
         # Nach allen Versuchen - entferne alte settlements
         expired = []
         for order_id, settlement in self.pending_settlements.items():
             if time.time() - settlement['timestamp'] > 180:  # 3 Minuten alt
                 expired.append(order_id)
-        
+
         for order_id in expired:
             self.remove_pending(order_id)
-            logger.warning(f"Settlement timeout für Order {order_id} nach {attempts} Versuchen", 
-                         extra={'event_type': 'SETTLEMENT_TIMEOUT', 
+            logger.warning(f"Settlement timeout für Order {order_id} nach {attempts} Versuchen",
+                         extra={'event_type': 'SETTLEMENT_TIMEOUT',
                                'order_id': order_id,
                                'attempts': attempts})
-        
+
         # Return True wenn nur noch sehr kleine Beträge ausstehen
         remaining = self.get_total_pending()
         if remaining < 1.0:  # Weniger als 1 USDT
@@ -470,40 +483,41 @@ class SettlementManager:
                        extra={'event_type': 'SETTLEMENT_SMALL_REMAINDER',
                              'amount': remaining})
             return True
-        
+
         return False
-    
+
     def update_verified_budget(self, amount):
         """Aktualisiert das verifizierte Budget"""
         self.last_verified_budget = amount
-    
+
     def get_average_settlement_time(self):
         """Berechnet die durchschnittliche Settlement-Zeit"""
         if not self.settlement_history:
             return 5.0  # Default
         return sum(s['duration'] for s in self.settlement_history) / len(self.settlement_history)
-    
+
     def on_sell_settled(self, order_id, symbol, exit_price, amount, fee=0.0, **extra):
         """Handler für abgeschlossene SELL-Orders mit PnL-Berechnung"""
         import time
+
         from core.logging.loggingx import on_order_filled
         from integrations.telegram import tg
-        
+
         # Get pending settlement data
         settlement = self.pending_settlements.get(order_id, {})
         entry_price = float(settlement.get('entry_price', exit_price))
         entry_time = float(settlement.get('entry_time', time.time()))
         reason = settlement.get('reason', '')
-        
+
         # Calculate PnL
         pnl_pct = ((exit_price / entry_price) - 1.0) * 100.0 if entry_price > 0 else 0.0
         profit_usdt = (amount * (exit_price - entry_price)) - fee
         duration_s = time.time() - entry_time
-        
+
         # Log with full details
         on_order_filled(
-            "sell", symbol, order_id, 
-            avg=exit_price, filled=amount, 
+            "sell", symbol, order_id,
+            avg=exit_price, filled=amount,
             remaining=0.0, fee=fee, maker=False,
             order_type="LIMIT", tif="IOC",
             pnl_percentage=pnl_pct,
@@ -512,7 +526,7 @@ class SettlementManager:
             reason=reason,
             **extra
         )
-        
+
         # Send EXIT notification with reason
         try:
             tg.notify_exit(
@@ -523,7 +537,7 @@ class SettlementManager:
             )
         except Exception:
             pass
-        
+
         # Entkopplung via Runtime-Event; Engine-Hook aktualisiert PnL & Telegram
         try:
             from core.events import get_event_bus
@@ -538,7 +552,7 @@ class SettlementManager:
             })
         except Exception:
             pass
-        
+
         # Remove from pending
         self.remove_pending(order_id)
         return profit_usdt
@@ -549,7 +563,7 @@ class SettlementManager:
 def round_to_precision(exchange_obj, symbol, value_type, value):
     """Rundet Werte auf Exchange-Präzision"""
     try:
-        market = exchange_obj.market(symbol)
+        exchange_obj.market(symbol)
         return exchange_obj.price_to_precision(symbol, value) if value_type == 'price' else exchange_obj.amount_to_precision(symbol, value)
     except Exception:
         return value
@@ -560,7 +574,7 @@ def get_market_min_cost(exchange_obj, symbol):
         # Erst Override checken
         if symbol in symbol_min_cost_override:
             return symbol_min_cost_override[symbol]
-        
+
         market = exchange_obj.market(symbol)
         return market.get('limits', {}).get('cost', {}).get('min', 5.1)
     except Exception:
@@ -572,11 +586,11 @@ def get_symbol_limits(exchange_obj, symbol):
         market = exchange_obj.market(symbol)
         limits = market.get('limits', {})
         precision = market.get('precision', {})
-        
+
         # Check für Symbol-Override
-        min_cost = symbol_min_cost_override.get(symbol, 
+        min_cost = symbol_min_cost_override.get(symbol,
                    limits.get('cost', {}).get('min', 5.1))
-        
+
         return {
             'min_cost': min_cost,
             'min_amount': limits.get('amount', {}).get('min', 0),
@@ -597,7 +611,7 @@ def floor_to_step(value, step):
     """Rundet einen Wert auf die nächste gültige Schrittgröße ab"""
     if step == 0 or step is None:
         return value
-    
+
     if isinstance(step, int) and step > 0:
         # Dezimalstellen (Präzision)
         factor = 10 ** step
@@ -613,7 +627,7 @@ def ceil_to_step(value, step):
     """Rundet einen Wert auf die nächste gültige Schrittgröße auf"""
     if step == 0 or step is None:
         return value
-    
+
     if isinstance(step, int) and step > 0:
         # Dezimalstellen (Präzision)
         factor = 10 ** step
@@ -627,7 +641,7 @@ def ceil_to_step(value, step):
 
 def log_initial_config(config_vars):
     """Loggt die initiale Bot-Konfiguration"""
-    logger.info("Bot-Konfiguration geladen", 
+    logger.info("Bot-Konfiguration geladen",
                extra={'event_type': 'CONFIGURATION_LOADED', 'config': config_vars})
 
 def compute_affordable_qty(
@@ -695,7 +709,7 @@ class DustSweeper:
         self.min_sweep_value = min_sweep_value
         self.dust_accumulator = {}  # {symbol: amount}
         self.last_sweep_attempt = {}  # {symbol: timestamp}
-    
+
     def add_dust(self, symbol, amount, price):
         """Fügt Dust zum Accumulator hinzu"""
         value = amount * price
@@ -703,7 +717,7 @@ class DustSweeper:
             if symbol not in self.dust_accumulator:
                 self.dust_accumulator[symbol] = 0
 
-            previous_amount = self.dust_accumulator[symbol]
+            self.dust_accumulator[symbol]
             self.dust_accumulator[symbol] += amount
             total_amount = self.dust_accumulator[symbol]
             total_value = total_amount * price
@@ -715,17 +729,17 @@ class DustSweeper:
                               'price': price, 'min_sweep_value': self.min_sweep_value})
             return True
         return False
-    
+
     def sweep(self, preise):
         """Verkauft angesammelten Dust wenn genug Wert vorhanden"""
         swept_symbols = []
-        
+
         for symbol, amount in list(self.dust_accumulator.items()):
             # Prüfe ob wir kürzlich schon versucht haben
             if symbol in self.last_sweep_attempt:
                 if time.time() - self.last_sweep_attempt[symbol] < 300:  # 5 Min Cooldown
                     continue
-            
+
             price = preise.get(symbol, 0)
             if price > 0:
                 value = amount * price
@@ -733,26 +747,26 @@ class DustSweeper:
                     try:
                         # Get symbol limits and check if order is valid
                         limits = get_symbol_limits(self.exchange, symbol)
-                        
+
                         # Apply precision to amount
                         precise_amount = floor_to_step(amount, limits['amount_step'])
-                        
+
                         # Check minimum order value
                         min_cost = limits.get('min_cost', 5.1)
                         order_value = precise_amount * price
-                        
+
                         if order_value < min_cost:
                             logger.debug(f"Dust-Sweep für {symbol} unter Min-Cost: {order_value:.2f} < {min_cost}",
-                                       extra={'event_type': 'DUST_BELOW_MIN_COST', 
+                                       extra={'event_type': 'DUST_BELOW_MIN_COST',
                                              'symbol': symbol, 'value': order_value, 'min_cost': min_cost})
                             continue
-                        
+
                         # Verkaufe den gesammelten Dust mit korrekter Präzision und robusten Fallbacks
                         try:
                             order = self.exchange.create_market_order(symbol, "sell", precise_amount)
                         except Exception as e:
                             err = str(e).lower()
-                            
+
                             # 1) Preis-Pflicht (MEXC 700004) -> Market mit Preis oder Limit IOC
                             if ("mandatory parameter 'price'" in err) or ("700004" in err):
                                 ob = self.exchange.fetch_order_book(symbol)
@@ -761,11 +775,11 @@ class DustSweeper:
                                     exec_price = float(ob['bids'][0][0])
                                 elif ob and ob.get('asks'):
                                     exec_price = float(ob['asks'][0][0])
-                                
+
                                 if exec_price:
                                     exec_price = float(self.exchange.price_to_precision(symbol, exec_price))
                                     logger.warning(f"Dust-Sweep: nutze Preis {exec_price} wegen 700004",
-                                                 extra={'event_type': 'DUST_SWEEP_PRICE_FALLBACK', 
+                                                 extra={'event_type': 'DUST_SWEEP_PRICE_FALLBACK',
                                                        'symbol': symbol, 'price': exec_price})
                                     try:
                                         order = self.exchange.create_market_order(symbol, 'sell', precise_amount)
@@ -774,14 +788,14 @@ class DustSweeper:
                                         order = self.exchange.create_limit_order(symbol, 'sell', precise_amount, exec_price, 'IOC')
                                 else:
                                     raise e
-                            
+
                             # 2) Symbol-Route Problem (10007) -> Limit-IOC mit aggressivem Preis
                             elif ("symbol not support" in err) or ("10007" in err):
                                 try:
                                     self.exchange.load_markets(True)
                                 except Exception:
                                     pass
-                                
+
                                 px = None
                                 try:
                                     ob = self.exchange.fetch_order_book(symbol)
@@ -791,18 +805,18 @@ class DustSweeper:
                                         px = float(ob['asks'][0][0])
                                 except Exception:
                                     px = None
-                                
+
                                 if px:
                                     px = float(self.exchange.price_to_precision(symbol, px * 0.9995))  # 0.05% unter Bid
                                     logger.warning(f"Dust-Sweep: Limit-IOC bei {px} wegen 10007",
-                                                 extra={'event_type': 'DUST_SWEEP_LIMIT_IOC', 
+                                                 extra={'event_type': 'DUST_SWEEP_LIMIT_IOC',
                                                        'symbol': symbol, 'price': px})
                                     try:
                                         order = self.exchange.create_limit_order(symbol, 'sell', precise_amount, px, 'IOC')
-                                    except Exception as e2:
+                                    except Exception:
                                         # GTC als letzter Fallback
-                                        logger.warning(f"Dust-Sweep: IOC fehlgeschlagen, versuche GTC",
-                                                     extra={'event_type': 'DUST_SWEEP_LIMIT_GTC', 
+                                        logger.warning("Dust-Sweep: IOC fehlgeschlagen, versuche GTC",
+                                                     extra={'event_type': 'DUST_SWEEP_LIMIT_GTC',
                                                            'symbol': symbol, 'price': px})
                                         order = self.exchange.create_limit_order(symbol, 'sell', precise_amount, px)
                                 else:
@@ -810,17 +824,17 @@ class DustSweeper:
                                     from config import dust_allow_market_fallback
                                     if dust_allow_market_fallback:
                                         logger.warning(f"Dust-Sweep: Market-Fallback für {symbol}",
-                                                     extra={'event_type': 'DUST_SWEEP_MARKET_FALLBACK', 
+                                                     extra={'event_type': 'DUST_SWEEP_MARKET_FALLBACK',
                                                            'symbol': symbol})
                                         order = self.exchange.create_market_order(symbol, "sell", precise_amount)
                                     else:
-                                        logger.error(f"Dust-Sweep: Market-Fallback blockiert (dust_allow_market_fallback=False)",
-                                                   extra={'event_type': 'DUST_SWEEP_MARKET_BLOCKED', 
+                                        logger.error("Dust-Sweep: Market-Fallback blockiert (dust_allow_market_fallback=False)",
+                                                   extra={'event_type': 'DUST_SWEEP_MARKET_BLOCKED',
                                                          'symbol': symbol})
                                         raise Exception("Market fallback not allowed for dust sweep")
                             else:
                                 raise e
-                        
+
                         # Erweiterte Telemetrie für erfolgreichen Sweep
                         avg_price = order_value / precise_amount if precise_amount > 0 else 0
                         logger.info(f"DUST_SWEEP_EXECUTED - {symbol}: {precise_amount} @ ${avg_price:.6f} = ${order_value:.2f}",
@@ -831,16 +845,16 @@ class DustSweeper:
                         swept_symbols.append(symbol)
                     except Exception as e:
                         logger.error(f"Dust-Sweep fehlgeschlagen für {symbol}: {e}",
-                                   extra={'event_type': 'DUST_SWEEP_ERROR', 
+                                   extra={'event_type': 'DUST_SWEEP_ERROR',
                                          'symbol': symbol, 'error': str(e)})
                         self.last_sweep_attempt[symbol] = time.time()
-        
+
         # Entferne erfolgreich verkaufte Symbole
         for symbol in swept_symbols:
             del self.dust_accumulator[symbol]
             if symbol in self.last_sweep_attempt:
                 del self.last_sweep_attempt[symbol]
-        
+
         return len(swept_symbols)
 
 # =================================================================================
@@ -848,7 +862,7 @@ class DustSweeper:
 # =================================================================================
 class TrailingController:
     """Kombiniertes Trailing für TP & SL (Worst-Case, BE-Bump, TSL, TTP)"""
-    
+
     def __init__(self, fees_rt: float = FEE_RATE):
         self.state = {}  # position_id -> {entry, highest, sl, tp, tp_steps}
         self.fees_rt = float(fees_rt)
@@ -856,10 +870,10 @@ class TrailingController:
     def on_entry(self, position_id: str, entry: float):
         """Initialisiert Trailing für neue Position"""
         self.state[position_id] = {
-            "entry": float(entry), 
-            "highest": float(entry), 
-            "sl": None, 
-            "tp": None, 
+            "entry": float(entry),
+            "highest": float(entry),
+            "sl": None,
+            "tp": None,
             "tp_steps": 0
         }
 
@@ -868,10 +882,10 @@ class TrailingController:
         st = self.state.get(position_id)
         if not st:
             return
-            
+
         e = st["entry"]
         h = st["highest"]
-        
+
         # Update Highest
         if last > h:
             st["highest"] = h = float(last)
@@ -959,7 +973,7 @@ def compute_min_cost(exchange, market):
 
 def round_amount(exchange, market, amount):
     import math  # Import immer am Anfang
-    
+
     # Verwende exchange.amount_to_precision für korrekte Quantisierung
     symbol = market.get("symbol")
     if symbol and hasattr(exchange, 'amount_to_precision'):
@@ -976,7 +990,7 @@ def round_amount(exchange, market, amount):
             else:
                 ndigits = 8
             a = float(round(amount, ndigits))
-    
+
     # Step-basierte Rundung (falls vorhanden)
     step = market.get("limits", {}).get("amount", {}).get("min")
     if step and step > 0:
@@ -1011,7 +1025,7 @@ def check_min_requirements(qty: float, price: float, min_qty: float | None, min_
     reason: "OK" | "MIN_QTY" | "MIN_COST"
     """
     from decimal import Decimal
-    
+
     dqty   = Decimal(str(qty))
     dprice = Decimal(str(price))
     dminq  = Decimal(str(min_qty or 0))
@@ -1034,14 +1048,14 @@ def compute_gtc_wait_seconds(spread_bps: float,
                             lo: float = 2.0, hi: float = 10.0) -> float:
     """
     Berechnet dynamische GTC-Wartezeit basierend auf aktuellem Spread.
-    
+
     Args:
         spread_bps: Aktueller Spread in Basispunkten
         base: Basis-Wartezeit in Sekunden
         slope: Steigung für Spread-Abhängigkeit
         lo: Minimale Wartezeit
         hi: Maximale Wartezeit
-    
+
     Returns:
         Wartezeit in Sekunden
     """
@@ -1052,21 +1066,22 @@ def compute_gtc_wait_seconds(spread_bps: float,
 def current_regime(atr_pct_30m: float, spread_bps: float) -> str:
     """
     Bestimmt das aktuelle Markt-Regime basierend auf Zeit und Volatilität.
-    
+
     Args:
         atr_pct_30m: 30-Minuten ATR in Prozent
         spread_bps: Aktueller Spread in Basispunkten
-    
+
     Returns:
         "HIGH_VOL", "NIGHT" oder "BASE"
     """
-    import pytz
     from datetime import datetime
-    
+
+    import pytz
+
     # Hoch-Volatilitäts-Check
     if spread_bps > 25 or atr_pct_30m > 1.2:
         return "HIGH_VOL"
-    
+
     # Zeit-basierter Check (Europe/Berlin)
     try:
         tz = pytz.timezone("Europe/Berlin")
@@ -1075,18 +1090,18 @@ def current_regime(atr_pct_30m: float, spread_bps: float) -> str:
             return "NIGHT"
     except Exception:
         pass  # Falls pytz nicht verfügbar, ignorieren
-    
+
     return "BASE"
 
 
 def apply_regime_overrides(regime: str, cfg: dict) -> dict:
     """
     Wendet Regime-spezifische Config-Overrides an.
-    
+
     Args:
         regime: "BASE", "NIGHT" oder "HIGH_VOL"
         cfg: Aktuelle Konfiguration (wird modifiziert)
-    
+
     Returns:
         Modifizierte Konfiguration
     """
@@ -1101,7 +1116,7 @@ def apply_regime_overrides(regime: str, cfg: dict) -> dict:
         })
         logger.info("Markt-Regime: NACHT - defensive Parameter aktiv",
                    extra={'event_type': 'REGIME_SWITCH', 'regime': 'NIGHT'})
-    
+
     elif regime == "HIGH_VOL":
         # Hoch-Volatilitäts-Override
         cfg.update({
@@ -1113,19 +1128,19 @@ def apply_regime_overrides(regime: str, cfg: dict) -> dict:
         })
         logger.info("Markt-Regime: HOHE VOLATILITÄT - erweiterte Parameter aktiv",
                    extra={'event_type': 'REGIME_SWITCH', 'regime': 'HIGH_VOL'})
-    
+
     return cfg
 
 def would_exit_be_under_min(exchange, symbol: str, amount: float, price: float) -> bool:
     """
     Prüft ob ein Exit (TP/SL) unter dem Minimum-Notional liegen würde
-    
+
     Args:
         exchange: CCXT Exchange-Instanz
         symbol: Trading-Symbol
         amount: Menge in Base-Currency
         price: Preis pro Einheit
-        
+
     Returns:
         True wenn Exit unter Minimum, False sonst
     """

@@ -6,8 +6,8 @@
 # - Aliase für Rückwärtskompatibilität am Ende (nicht ändern!)
 
 import os
-import uuid
 import shutil
+import uuid
 from datetime import datetime, timezone
 
 # =============================================================================
@@ -96,6 +96,7 @@ ORDER_ROUTER_META_FILE = None
 
 # CRITICAL FIX (C-CONFIG-02): Thread-safe runtime overrides
 import threading
+
 _config_overrides = {}
 _config_lock = threading.RLock()
 
@@ -998,7 +999,7 @@ def validate_config_schema():
         check_enum("ENTRY_ORDER_TIF", ENTRY_ORDER_TIF, ["GTC", "IOC", "FOK"])
     if errors:
         error_msg = "[ERROR] CONFIG VALIDATION FAILED!\n" + "\n".join(f"  - {err}" for err in errors)
-        error_msg += f"\n\nCheck config.py lines 46-200 for main parameters"
+        error_msg += "\n\nCheck config.py lines 46-200 for main parameters"
         raise ValueError(error_msg)
     return True
 

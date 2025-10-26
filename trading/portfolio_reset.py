@@ -10,18 +10,17 @@ Contains functions for:
 NOTE: Vollständige Implementierungen können aus trading_legacy.py (Zeilen 747-1173) kopiert werden.
 """
 
-import time
 import logging
-from typing import Dict
+import time
 
 logger = logging.getLogger(__name__)
 
 
 def cleanup_stale_orders(exchange, held_assets, open_buy_orders, max_age_minutes=60):
     """Bereinigt alte offene Orders die Kapital blockieren - mit Crash-Recovery"""
-    from core.logging.loggingx import log_mexc_update, log_mexc_cancel
+    from core.logging.loggingx import log_mexc_cancel
     try:
-        from config import take_profit_threshold, stop_loss_threshold
+        from config import stop_loss_threshold, take_profit_threshold
         cleaned_count = 0
         reattached_count = 0
 
@@ -113,9 +112,10 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
     Returns: True bei Erfolg (auch wenn keine Assets zu verkaufen waren), False bei Fehler
     """
     from core.logging.loggingx import log_mexc_cancel
-    from .helpers import amount_to_precision, price_to_precision
-    from .settlement import refresh_budget_from_exchange, refresh_budget_from_exchange_safe
     from core.utils.utils import get_symbol_limits, next_client_order_id
+
+    from .helpers import amount_to_precision, price_to_precision
+    from .settlement import refresh_budget_from_exchange_safe
     # Note: PORTFOLIO_RESET_START already logged in portfolio.py - no duplicate needed
 
     try:
@@ -229,13 +229,13 @@ def full_portfolio_reset(exchange, settlement_manager) -> bool:
             # Wir setzen später order_value nur, wenn price > 0 ist.
 
         # Limits und Min-Order-Value prüfen (nur wenn wir einen Preis haben)
-        limits = markets[symbol].get('limits', {})
+        markets[symbol].get('limits', {})
 
         # Amount-Präzision anwenden (V9_3-style: richtige Tick/Step-Interpretation)
         market_info = markets[symbol]
         if market_info:
             try:
-                from helpers_filters import create_filters_from_market, _floor_to_step
+                from helpers_filters import _floor_to_step, create_filters_from_market
                 f = create_filters_from_market(market_info)
                 # Floor für SELL-Orders (Inventar-begrenzt)
                 qty = _floor_to_step(qty, f.stepSize)

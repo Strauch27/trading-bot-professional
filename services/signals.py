@@ -3,10 +3,10 @@ Exit Signal Service - Priority-based exit signal processing
 Extrahiert aus engine.py für bessere Modularität und Testbarkeit.
 """
 
+import logging
 import threading
 import time
-from typing import Dict, List, Optional, Any
-import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

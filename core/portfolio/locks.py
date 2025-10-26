@@ -22,10 +22,10 @@ Akzeptanzkriterium:
 Concurrency-Test mit Threads erzeugt keine inkonsistenten Mengen/WAC.
 """
 
+import logging
 import threading
 from contextlib import contextmanager
 from typing import Dict
-import logging
 
 logger = logging.getLogger(__name__)
 

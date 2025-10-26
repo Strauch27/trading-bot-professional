@@ -3,8 +3,8 @@
 UI Module - Rich-based Terminal Output
 """
 
-from .console_ui import banner, start_summary, line, ts, shorten
-from .live_monitors import LiveHeartbeat, DropMonitorView, PortfolioMonitorView
+from .console_ui import banner, line, shorten, start_summary, ts
+from .live_monitors import DropMonitorView, LiveHeartbeat, PortfolioMonitorView
 
 __all__ = [
     'banner',

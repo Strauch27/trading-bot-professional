@@ -25,9 +25,9 @@ Usage:
     log_event(DECISION_LOG(), "sell_trigger_eval", **ev.model_dump())
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel
 
 # =============================================================================
 # BUY DECISION EVENTS

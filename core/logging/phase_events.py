@@ -7,10 +7,10 @@ Each phase change is written as a single JSON line for easy parsing and replay.
 
 import json
 import logging
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

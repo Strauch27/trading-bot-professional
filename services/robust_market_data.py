@@ -3,13 +3,14 @@ Robust Market Data Service
 Enhanced market data fetching with graceful degradation and advanced error recovery
 """
 
-import time
 import logging
 import random
-from typing import Dict, List, Optional, Any, Set, Tuple
-from threading import RLock
+import time
+from collections import defaultdict
 from dataclasses import dataclass
-from collections import defaultdict, deque
+from threading import RLock
+from typing import Any, Dict, List, Optional, Tuple
+
 from .market_data import MarketDataProvider, TickerData
 
 logger = logging.getLogger(__name__)

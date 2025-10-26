@@ -3,18 +3,19 @@ Exchange Adapter - Dünne, mockbare Schicht über CCXT
 Vereinheitlicht Exchange-Zugriff und macht Tests ohne echte Exchange möglich.
 """
 
-import time
-import random
-import threading
-from typing import Dict, List, Optional, Any, Union
-from decimal import Decimal
-from abc import ABC, abstractmethod
 import logging
-import ccxt
+import random
 import socket
+import threading
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Union
+
+import ccxt
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 from adapters.retry import with_backoff
 
 logger = logging.getLogger(__name__)
@@ -24,18 +25,16 @@ CCXT_TIMEOUT_MS = 7000  # hartes Request-Timeout
 NETWORK_ERRORS = (ccxt.NetworkError, ccxt.DDoSProtection, requests.RequestException, socket.timeout)
 
 # Import for heartbeat coordination
-from services.shutdown_coordinator import get_shutdown_coordinator
-
 # Import robust sizing logic
 from core.utils.helpers_filters import (
     ExchangeFilters,
-    size_buy_from_quote,
-    size_sell_from_base,
+    create_filters_from_market,
     post_only_guard_buy,
     post_only_guard_sell,
-    apply_exchange_filters,
-    create_filters_from_market
+    size_buy_from_quote,
+    size_sell_from_base,
 )
+from services.shutdown_coordinator import get_shutdown_coordinator
 
 
 def _emit_order_sent(log_instance, order_dict):
@@ -513,7 +512,7 @@ class ExchangeAdapter(ExchangeInterface):
                 msg = str(e).lower()
                 co.beat(f"retry_error:attempt_{attempt}")
                 if attempt == len(self._retry_backoff):  # Letzter Versuch
-                    logger.info(f"HEARTBEAT - All retry attempts failed, giving up",
+                    logger.info("HEARTBEAT - All retry attempts failed, giving up",
                                extra={"event_type": "HEARTBEAT"})
 
                 # >>> NEU: Timestamp-/recvWindow-Fehler abfangen und Zeit resyncen
@@ -779,7 +778,7 @@ class ExchangeAdapter(ExchangeInterface):
             filters_raw = market_data.get("filters", {})
 
             best_bid = float(book.get("best_bid", 0))
-            best_ask = float(book.get("best_ask", 0))
+            float(book.get("best_ask", 0))
 
             if best_bid <= 0:
                 return {
@@ -886,7 +885,7 @@ class ExchangeAdapter(ExchangeInterface):
             filters_raw = market_data.get("filters", {})
 
             best_ask = float(book.get("best_ask", 0))
-            best_bid = float(book.get("best_bid", 0))
+            float(book.get("best_bid", 0))
 
             if best_ask <= 0:
                 return {

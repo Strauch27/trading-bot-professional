@@ -13,7 +13,8 @@ to improve fill rates while protecting against excessive slippage.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def determine_entry_constraints(
     # Volatility metrics (if available)
     volatility = market_data.get("volatility", {})
     atr_pct = volatility.get("atr_pct", 0)  # ATR as % of price
-    price_variance = volatility.get("variance_1h", 0)
+    volatility.get("variance_1h", 0)
 
     # Start with config defaults
     max_slippage_bps = getattr(config, 'MAX_SLIPPAGE_BPS_ENTRY', 30)

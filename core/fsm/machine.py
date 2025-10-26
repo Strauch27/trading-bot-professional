@@ -5,12 +5,13 @@ Manages all symbol states and coordinates phase transitions.
 Central registry for all FSM operations.
 """
 
-from typing import Dict, Callable, Optional, List, Any
-from .state import CoinState, set_phase
-from .phases import Phase
-from .events import EventType, create_event
 import logging
 import time
+from typing import Any, Callable, Dict, List, Optional
+
+from .events import EventType, create_event
+from .phases import Phase
+from .state import CoinState, set_phase
 
 logger = logging.getLogger(__name__)
 

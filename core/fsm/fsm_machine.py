@@ -6,12 +6,13 @@ Orchestrates transitions, actions, and logging.
 """
 
 import logging
-from typing import Optional, Dict, List
-from core.fsm.fsm_events import FSMEvent, EventContext
-from core.fsm.transitions import get_transition_table
+from typing import Dict, List, Optional
+
+from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.idempotency import get_idempotency_store
 from core.fsm.phases import Phase
 from core.fsm.state import CoinState
+from core.fsm.transitions import get_transition_table
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class FSMachine:
     ):
         """Log successful transition"""
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_transition",
@@ -148,7 +149,7 @@ class FSMachine:
         valid_events = self.transition_table.get_valid_events(coin_state.phase)
 
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_invalid_transition",
@@ -186,7 +187,7 @@ class FSMachine:
 
         # Log error
         try:
-            from core.logger_factory import log_event, DECISION_LOG
+            from core.logger_factory import DECISION_LOG, log_event
             log_event(
                 DECISION_LOG(),
                 "fsm_action_error",

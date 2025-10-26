@@ -1,6 +1,7 @@
 # signals/rolling_window.py
 from collections import deque
 
+
 class RollingWindow:
     """Rolling window for tracking maximum values efficiently"""
 

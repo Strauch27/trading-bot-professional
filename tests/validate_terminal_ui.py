@@ -4,8 +4,8 @@ Simple validation script for Terminal UI components
 (Does not require pytest - can run standalone)
 """
 
-import sys
 import os
+import sys
 
 # Add parent dir to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -74,12 +74,7 @@ def validate_live_monitors():
     """Validate live_monitors module"""
     print("\n3. Validating live_monitors module...")
 
-    from ui.live_monitors import (
-        LiveHeartbeat,
-        DropMonitorView,
-        PortfolioMonitorView,
-        LiveDashboard
-    )
+    from ui.live_monitors import DropMonitorView, LiveDashboard, LiveHeartbeat, PortfolioMonitorView
 
     # Test LiveHeartbeat instantiation
     try:
@@ -102,7 +97,7 @@ def validate_live_monitors():
                 "positions": 5,
                 "memory_mb": 250.0
             }
-            rendered = heartbeat._render(stats)
+            heartbeat._render(stats)
             print("   ✓ LiveHeartbeat rendering successful")
         else:
             print("   ⚠ Rich not available - skipping render test")
@@ -113,7 +108,7 @@ def validate_live_monitors():
 
     # Test DropMonitorView
     try:
-        drop_monitor = DropMonitorView()
+        DropMonitorView()
         print("   ✓ DropMonitorView instantiation successful")
     except Exception as e:
         print(f"   ✗ DropMonitorView instantiation failed: {e}")
@@ -121,7 +116,7 @@ def validate_live_monitors():
 
     # Test PortfolioMonitorView
     try:
-        portfolio_monitor = PortfolioMonitorView()
+        PortfolioMonitorView()
         print("   ✓ PortfolioMonitorView instantiation successful")
     except Exception as e:
         print(f"   ✗ PortfolioMonitorView instantiation failed: {e}")
@@ -129,7 +124,7 @@ def validate_live_monitors():
 
     # Test LiveDashboard
     try:
-        dashboard = LiveDashboard()
+        LiveDashboard()
         print("   ✓ LiveDashboard instantiation successful")
     except Exception as e:
         print(f"   ✗ LiveDashboard instantiation failed: {e}")

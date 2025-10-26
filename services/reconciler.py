@@ -16,9 +16,9 @@ NOT Responsible For:
 - Position lifecycle management (handled by Portfolio)
 """
 
-import time
 import logging
-from typing import Dict, List, Optional, Any
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

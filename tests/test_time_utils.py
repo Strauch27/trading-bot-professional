@@ -5,19 +5,20 @@ Tests for services/time_utils.py
 Tests candle alignment, validation, and partial candle filtering.
 """
 
-import pytest
 import time
+
+import pytest
+
 from services.time_utils import (
     align_since_to_closed,
-    last_closed_candle_open_ms,
-    is_closed_candle,
     filter_closed_candles,
     get_candle_age_ms,
+    get_timeframe_info,
+    is_closed_candle,
+    last_closed_candle_open_ms,
+    timeframe_to_seconds,
     validate_ohlcv_monotonic,
     validate_ohlcv_values,
-    timeframe_to_seconds,
-    get_timeframe_info,
-    TF_MS
 )
 
 

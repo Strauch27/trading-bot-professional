@@ -1,32 +1,36 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime, timezone
+
 import time  # Phase 9: For telemetry timestamps
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
 import config as cfg  # Phase 8: Import config module for evaluate_all_entry_guards
 from config import (
-    FEE_RATE,
-    MIN_ORDER_BUFFER,
     BUY_ESCALATION_STEPS,
-    PREDICTIVE_BUY_ZONE_BPS,
+    DEPTH_MIN_NOTIONAL_USD,  # Phase 7
     MAX_SLIPPAGE_BPS_ENTRY,  # Phase 4
     MAX_SPREAD_BPS_ENTRY,  # Phase 7
-    DEPTH_MIN_NOTIONAL_USD,  # Phase 7
+    PREDICTIVE_BUY_ZONE_BPS,
     PREDICTIVE_BUY_ZONE_CAP_BPS,  # Phase 7
 )
-from core.utils import (
-    next_client_order_id,
-    fetch_ticker_cached,
-    quantize_price,
-)
 from core.logging.loggingx import (
-    decision_start, decision_end, report_buy_sizing, log_event, new_decision_id,
+    decision_end,
+    decision_start,
+    log_event,
+    new_decision_id,
+    report_buy_sizing,
 )
-from .sizing_service import SizingService
-from core.utils import compute_avg_fill_and_fees
-from .order_service import OrderService
 from core.risk_limits import evaluate_all_entry_guards  # Phase 8
 from core.telemetry import get_fill_tracker  # Phase 9
+from core.utils import (
+    compute_avg_fill_and_fees,
+    fetch_ticker_cached,
+    next_client_order_id,
+)
+
+from .order_service import OrderService
+from .sizing_service import SizingService
 
 
 @dataclass

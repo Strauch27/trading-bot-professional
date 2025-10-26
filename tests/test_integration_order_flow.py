@@ -10,12 +10,11 @@ Tests end-to-end order flow including:
 - Portfolio synchronization
 """
 
-import sys
 import os
-import time
+import sys
 import threading
-from unittest.mock import Mock, MagicMock, patch
-from decimal import Decimal
+import time
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -236,7 +235,6 @@ class TestCOIDIdempotency:
 
     def test_duplicate_order_prevention(self):
         """Test that duplicate COIDs are rejected"""
-        from collections import defaultdict
 
         # Simulate COID manager
         coid_registry = {}

@@ -1,15 +1,16 @@
 # ml_gatekeeper.py
 # V10-Style ML Gatekeeper für intelligente Budget-Skalierung ohne harte Blocks
 
-import time
-import threading
-import numpy as np
-from typing import Dict, Optional, Tuple, List, Union, Any, Callable
-from dataclasses import dataclass, asdict
-from collections import deque, defaultdict
-from enum import Enum
 import pickle
-import json
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Tuple
+
+import numpy as np
+
 
 class ScalingStrategy(Enum):
     """Verschiedene Scaling-Strategien"""

@@ -25,9 +25,9 @@ Example:
     # OK to trade
 """
 
-import time
 import logging
-from typing import Dict, Optional, List
+import time
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

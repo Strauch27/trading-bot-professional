@@ -70,7 +70,7 @@ def print_startup_summary(
     line = "━" * 80
 
     print(f"\n{line}")
-    print(f"🚀 Trading Bot v1.0 startet...")
+    print("🚀 Trading Bot v1.0 startet...")
     print(line)
 
     # Exchange & Config
@@ -101,7 +101,7 @@ def print_startup_summary(
     if portfolio_reset:
         print(f"   Portfolio:     ✓ Reset ({reset_from:.2f} → {reset_to:.2f} USDT)")
     else:
-        print(f"   Portfolio:     No Reset")
+        print("   Portfolio:     No Reset")
 
     print(line)
     print("✅ Trading Engine ready")

@@ -15,9 +15,10 @@ Die vollständigen Implementierungen können aus trading_legacy.py (Zeilen 30-14
 
 import logging
 import time
-from typing import Optional, Dict, Callable, Any, Tuple
 from functools import wraps
-from .helpers import sanitize_coid, price_to_precision, amount_to_precision
+from typing import Any, Callable, Dict, Optional, Tuple
+
+from .helpers import amount_to_precision, price_to_precision, sanitize_coid
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +246,7 @@ def cancel_order_with_tracking(exchange, order_id: str, symbol: str, reason: str
             logger.debug(f"Failed to fetch order before cancel: {fetch_error}")
 
         # Cancel order
-        cancel_result = exchange.cancel_order(order_id, symbol)
+        exchange.cancel_order(order_id, symbol)
 
         # Log cancellation with structured event
         log_order_cancel(
@@ -459,8 +460,9 @@ def place_limit_ioc_sell_with_coid(exchange, symbol, amount, price, coid):
 
 def place_market_ioc_sell_with_coid(exchange, symbol, amount, coid, held_assets=None, preise=None):
     """Market IOC Sell Order mit clientOrderId und safe amount calculation"""
-    from .helpers import compute_safe_sell_amount
     import ccxt
+
+    from .helpers import compute_safe_sell_amount
 
     coid = sanitize_coid(coid)
 
@@ -491,7 +493,8 @@ def place_precise_limit_buy(exchange, symbol: str, quote_usdt: float, limit_pric
     V6 Buy-Logic: Platziert eine Limit-Buy-Order bei einem spezifizierten Preis.
     Wird von der Engine mit limit_price = last_price * predictive_buy_zone_pct aufgerufen.
     """
-    from utils import get_symbol_limits, floor_to_step, next_client_order_id
+    from utils import floor_to_step, get_symbol_limits, next_client_order_id
+
     from config import min_order_buffer
 
     try:
@@ -564,12 +567,19 @@ def place_limit_ioc_buy(exchange, symbol, amount, reference_price, price_buffer_
     Fällt automatisch auf Best-Ask-Pricing zurück, wenn USE_DEPTH_SWEEP=False.
     """
     import time
-    from config import (
-        use_depth_sweep, sweep_orderbook_levels, max_slippage_bps_entry,
-        sweep_reprice_attempts, sweep_reprice_sleep_ms, RUN_ID,
-        ENTRY_LIMIT_OFFSET_BPS, ENTRY_ORDER_TIF
-    )
+
     from utils import next_client_order_id
+
+    from config import (
+        ENTRY_LIMIT_OFFSET_BPS,
+        ENTRY_ORDER_TIF,
+        max_slippage_bps_entry,
+        sweep_orderbook_levels,
+        sweep_reprice_attempts,
+        sweep_reprice_sleep_ms,
+        use_depth_sweep,
+    )
+
     from .orderbook import compute_sweep_limit_price, fetch_top_of_book
 
     filled_total = 0.0
@@ -670,6 +680,7 @@ def place_limit_ioc_sell(exchange, symbol, amount, reference_price, held_assets,
     z.B. 0.10% → 0.25% → 0.50%. Falls alles nicht füllt, finaler Market (mit Preis).
     """
     from utils import next_client_order_id
+
     from .orderbook import fetch_top_of_book
 
     # Best-Bid mit neuer Funktion bestimmen
@@ -747,10 +758,11 @@ def place_limit_ioc_sell(exchange, symbol, amount, reference_price, held_assets,
 def safe_create_limit_sell_order(exchange, symbol, desired_amount, price, held_assets, preise,
                                  active_order_id=None, extra_params=None):
     """Cancel (optional) with polling, then place a limit sell using balance-aware amount & precision."""
-    from .settlement import poll_order_canceled, sync_active_order_and_state
-    from .helpers import compute_safe_sell_amount, price_to_precision
-    from utils import next_client_order_id
     import ccxt
+    from utils import next_client_order_id
+
+    from .helpers import compute_safe_sell_amount, price_to_precision
+    from .settlement import poll_order_canceled, sync_active_order_and_state
 
     if active_order_id:
         try:
@@ -807,11 +819,14 @@ def place_ioc_ladder_no_market(exchange, symbol, amount, reference_price,
     - Rest: kurzer POST_ONLY-GTC mit Auto-Reprice
     """
     import time
+
+    from loggingx import order_replaced, sell_limit_placed
+
     from config import RUN_ID, ioc_price_buffers_bps, ioc_retry_sleep_s, post_only_rest_ttl_s, post_only_undershoot_bps
-    from loggingx import sell_limit_placed, order_replaced
-    from .settlement import poll_order_canceled
+
+    from .helpers import compute_min_cost, price_to_precision
     from .orderbook import fetch_top_of_book
-    from .helpers import price_to_precision, compute_min_cost
+    from .settlement import poll_order_canceled
 
     if active_order_id:
         try:
@@ -930,9 +945,12 @@ def place_limit_ioc_sell_ladder(exchange, symbol: str, qty: float, best_bid: flo
     Gibt ein Ergebnis-Dict zurück (filled/avg/fee usw.) für Logging & PnL.
     """
     import time
+
+    from loggingx import log_event, on_order_filled, sell_limit_placed
+
     from config import RUN_ID, exit_ladder_bps, exit_ladder_sleep_ms
-    from loggingx import sell_limit_placed, log_event, on_order_filled
-    from .helpers import price_to_precision, compute_min_cost
+
+    from .helpers import compute_min_cost, price_to_precision
 
     result = {"filled": 0.0, "avg": None, "fee": 0.0, "orders": []}
     remaining = float(qty)
@@ -972,7 +990,7 @@ def place_limit_ioc_sell_ladder(exchange, symbol: str, qty: float, best_bid: flo
         try:
             o = exchange.fetch_order(order["id"], symbol)
             filled = float(o.get("filled") or 0.0)
-            remain = float(o.get("remaining") or 0.0)
+            float(o.get("remaining") or 0.0)
             avg = float(o.get("average") or 0.0) or result["avg"]
             fee = 0.0
             if o.get("fee"):
@@ -1010,11 +1028,16 @@ def place_ioc_sell_with_depth_sweep(exchange, symbol, amount, tif="IOC"):
     Reprice-Loop mit Slippage-Kappe.
     """
     import time
-    from config import (
-        max_slippage_bps_exit, sweep_orderbook_levels,
-        sweep_reprice_attempts, sweep_reprice_sleep_ms, RUN_ID
-    )
+
     from utils import next_client_order_id
+
+    from config import (
+        max_slippage_bps_exit,
+        sweep_orderbook_levels,
+        sweep_reprice_attempts,
+        sweep_reprice_sleep_ms,
+    )
+
     from .orderbook import compute_sweep_limit_price
 
     remaining = float(amount or 0.0)

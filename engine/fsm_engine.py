@@ -5,42 +5,43 @@ Full rewrite with explicit Finite State Machine pattern.
 All 12 phase handlers fully implemented.
 """
 
-import time
-import threading
 import logging
-from typing import Dict, Any, Optional
+import threading
+import time
 from datetime import datetime, timezone
-
-# Core FSM - Table-Driven Architecture
-from core.fsm.state import CoinState
-from core.fsm.phases import Phase
-from core.fsm.fsm_machine import FSMachine
-from core.fsm.transitions import get_transition_table
-from core.fsm.fsm_events import FSMEvent, EventContext
-from core.fsm.state_data import StateData, OrderContext
-from core.fsm.timeouts import TimeoutManager
-from core.fsm.partial_fills import PartialFillHandler
-from core.fsm.snapshot import SnapshotManager
-from core.fsm.recovery import recover_fsm_states_on_startup
-from core.fsm.portfolio_transaction import init_portfolio_transaction, get_portfolio_transaction
-
-# Logging & Metrics
-from core.logging.phase_events import PhaseEventLogger
-from core.logging.logger import new_decision_id, new_client_order_id
-from telemetry.phase_metrics import (
-    phase_changes, phase_code, PHASE_MAP,
-    start_metrics_server, update_stuck_metric
-)
-
-# Services (from existing architecture)
-from services import (
-    BuySignalService, MarketGuards, OrderService, OrderCache,
-    ExitManager, PnLService, MarketDataProvider
-)
-from adapters.exchange import ExchangeAdapter as ExchangeAdapterClass
+from typing import Any, Dict, Optional
 
 # Config
 import config
+from adapters.exchange import ExchangeAdapter as ExchangeAdapterClass
+from core.fsm.fsm_events import EventContext, FSMEvent
+from core.fsm.fsm_machine import FSMachine
+from core.fsm.partial_fills import PartialFillHandler
+from core.fsm.phases import Phase
+from core.fsm.portfolio_transaction import get_portfolio_transaction, init_portfolio_transaction
+from core.fsm.recovery import recover_fsm_states_on_startup
+from core.fsm.snapshot import SnapshotManager
+
+# Core FSM - Table-Driven Architecture
+from core.fsm.state import CoinState
+from core.fsm.state_data import OrderContext, StateData
+from core.fsm.timeouts import TimeoutManager
+from core.logging.logger import new_client_order_id, new_decision_id
+
+# Logging & Metrics
+from core.logging.phase_events import PhaseEventLogger
+
+# Services (from existing architecture)
+from services import (
+    BuySignalService,
+    ExitManager,
+    MarketDataProvider,
+    MarketGuards,
+    OrderCache,
+    OrderService,
+    PnLService,
+)
+from telemetry.phase_metrics import PHASE_MAP, phase_changes, phase_code, start_metrics_server, update_stuck_metric
 
 logger = logging.getLogger(__name__)
 

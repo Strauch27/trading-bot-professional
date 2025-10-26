@@ -5,10 +5,12 @@ Tests for services/cache_ttl.py
 Tests soft-TTL cache behavior, LRU eviction, and request coalescing.
 """
 
-import pytest
-import time
 import threading
-from services.cache_ttl import TTLCache, CacheCoordinator, CacheEntry
+import time
+
+import pytest
+
+from services.cache_ttl import CacheCoordinator, CacheEntry, TTLCache
 
 
 class TestCacheEntry:

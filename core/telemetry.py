@@ -25,15 +25,15 @@ Usage:
     stats = tracker.get_statistics()
 """
 
-import time
-import logging
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
-from collections import defaultdict, deque
-from enum import Enum
 import json
+import logging
+import time
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

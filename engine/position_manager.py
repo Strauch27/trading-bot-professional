@@ -10,8 +10,8 @@ Contains:
 - Unrealized PnL tracking
 """
 
-import time
 import logging
+import time
 from typing import Dict
 
 import config
@@ -259,7 +259,7 @@ class PositionManager:
                         unrealized_pct=unrealized_pct,
                         threshold=info.get('stop_price') if hit else None,
                         hit=hit,
-                        reason=info.get('reason') if hit else f"atr_stop_not_hit"
+                        reason=info.get('reason') if hit else "atr_stop_not_hit"
                     )
 
                     decision_id = data.get('decision_id')

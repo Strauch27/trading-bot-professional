@@ -38,12 +38,13 @@ Configuration:
 """
 
 from __future__ import annotations
+
+import logging
 import threading
 import time
-from typing import Optional, Dict, Any
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-import logging
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

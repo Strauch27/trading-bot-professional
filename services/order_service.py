@@ -17,15 +17,16 @@ Phase 2 Enhancement:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
-from enum import Enum
-import time
+
 import logging
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 # Phase 2: Import COID manager
 try:
-    from core.coid import get_coid_manager, COIDStatus
+    from core.coid import COIDStatus, get_coid_manager
     COID_AVAILABLE = True
 except ImportError:
     COID_AVAILABLE = False

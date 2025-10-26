@@ -17,12 +17,12 @@ This provides complete audit trail for:
 - Trade review and learning
 """
 
-import os
 import json
-import time
-from typing import Optional, Dict, Any
-from datetime import datetime
 import logging
+import os
+import time
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

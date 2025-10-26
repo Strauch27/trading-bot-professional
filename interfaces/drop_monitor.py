@@ -17,15 +17,15 @@ Color-coded:
 - Blue: Triggered!
 """
 
-import time
 import logging
-from typing import Dict, List, Optional, Tuple
+import time
 from datetime import datetime, timezone
+from typing import Dict, List
 
 try:
     from rich.console import Console
-    from rich.table import Table
     from rich.live import Live
+    from rich.table import Table
     from rich.text import Text
     RICH_AVAILABLE = True
 except ImportError:

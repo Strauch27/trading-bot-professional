@@ -17,12 +17,17 @@ Exchange-Trace-Extractor (kompakt & robust für MEXC/ccxt-Logs)
 Nur Standardbibliothek.
 """
 
-import os, sys, json, csv, re, gzip
-from datetime import datetime, timezone, timedelta
+import csv
+import gzip
+import json
+import os
+import re
+import sys
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
-from typing import Optional, Iterable, List
+from typing import List, Optional
 
 # =========================
 #           CONFIG

@@ -8,24 +8,23 @@ Contains:
 - Buy flow handling and tracking
 """
 
-import time
 import logging
-from typing import Optional, Dict, Any
+import time
+from typing import Any, Dict, Optional
 
 import config
-from core.logging.logger import new_decision_id
-from core.logging.debug_tracer import trace_function, trace_step, trace_error
-from core.logging.adaptive_logger import track_error, track_guard_block, notify_trade_completed
-from core.logging.adaptive_logger import guard_stats_record
-
-# Phase 1 Structured Logging
-from core.trace_context import Trace
+from core.event_schemas import RiskLimitsEval
 from core.logger_factory import DECISION_LOG, ORDER_LOG, log_event
-from decision.assembler import assemble as assemble_intent
+from core.logging.adaptive_logger import guard_stats_record, notify_trade_completed, track_error, track_guard_block
+from core.logging.debug_tracer import trace_error, trace_function, trace_step
+from core.logging.logger import new_decision_id
 
 # Risk management imports (avoid hot-path imports)
 from core.risk_limits import RiskLimitChecker
-from core.event_schemas import RiskLimitsEval
+
+# Phase 1 Structured Logging
+from core.trace_context import Trace
+from decision.assembler import assemble as assemble_intent
 
 logger = logging.getLogger(__name__)
 
@@ -1038,8 +1037,9 @@ class BuyDecisionHandler:
             self.engine.positions[symbol] = position_data
 
             try:
-                from core.event_schemas import PositionOpened
                 from datetime import datetime
+
+                from core.event_schemas import PositionOpened
 
                 position_opened = PositionOpened(
                     symbol=symbol,

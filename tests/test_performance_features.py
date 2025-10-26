@@ -10,13 +10,12 @@ Tests:
 - 100 parallel request load test
 """
 
-import sys
 import os
-import time
+import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import Mock
+import time
 import tracemalloc
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -117,7 +116,6 @@ class TestRequestCoalescing:
 
         # Launch concurrent requests for different keys
         keys = [f"ticker:{symbol}" for symbol in ["BTC/USDT", "ETH/USDT", "SOL/USDT"]]
-        threads = []
 
         def worker(key):
             return fetch_with_coalescing(key)
@@ -181,7 +179,7 @@ class TestRateLimiting:
             if bucket.acquire(tokens=1, blocking=False):
                 successful += 1
 
-        elapsed = time.time() - start
+        time.time() - start
 
         # Should get ~10 immediate successes, rest throttled
         assert successful <= 12, f"Should throttle after capacity exhausted, got {successful}"
@@ -252,7 +250,6 @@ class TestCachePerformance:
         """Test cache hit rate calculation"""
         total_requests = 1000
         cache_hits = 850
-        cache_misses = 150
 
         hit_rate = cache_hits / total_requests
         hit_rate_pct = hit_rate * 100
@@ -473,7 +470,7 @@ class TestLoadPerformance:
         assert avg_latency < 50, f"Average latency should be <50ms, got {avg_latency:.1f}ms"
         assert throughput > 50, f"Throughput should be >50 req/s, got {throughput:.1f} req/s"
 
-        print(f"✓ Load test (100 parallel requests):")
+        print("✓ Load test (100 parallel requests):")
         print(f"  - Success rate: {success_rate*100:.1f}%")
         print(f"  - Avg latency: {avg_latency:.1f}ms")
         print(f"  - P95 latency: {p95_latency:.1f}ms")
@@ -499,7 +496,7 @@ class TestLoadPerformance:
         while time.time() - start_time < duration_seconds:
             try:
                 if time.time() >= next_request_time:
-                    success = mock_request()
+                    mock_request()
                     total_requests += 1
                     next_request_time += (1.0 / target_rps)
             except Exception:

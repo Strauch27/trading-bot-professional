@@ -8,15 +8,15 @@ Provides live-updating terminal displays:
 - PortfolioMonitorView: Active positions
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
 import sys
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 try:
-    from rich.live import Live
-    from rich.table import Table
-    from rich.panel import Panel
     from rich.console import Group
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -190,7 +190,7 @@ class LiveHeartbeat:
 
                 # Extract statistics
                 provider_stats = md_stats.get("provider", {})
-                cache_stats = md_stats.get("ticker_cache", {})
+                md_stats.get("ticker_cache", {})
                 coalesce_stats = md_stats.get("coalescing", {})
                 rate_limit_stats = md_stats.get("rate_limiting", {})
 
@@ -230,7 +230,7 @@ class LiveHeartbeat:
                     f"[red]{errors}[/red]" if errors > 0 else "0"
                 )
 
-            except Exception as e:
+            except Exception:
                 # If metrics retrieval fails, skip metrics table
                 metrics_table = None
 
@@ -286,7 +286,7 @@ class LiveHeartbeat:
                     f"{avg_slippage_bps:+.1f} bps"
                 )
 
-            except Exception as e:
+            except Exception:
                 # If fill metrics retrieval fails, skip fill table
                 fill_table = None
 
@@ -590,7 +590,7 @@ class LiveDashboard:
         try:
             heartbeat_panel = self.heartbeat._render(system_stats)
             panels.append(heartbeat_panel)
-        except Exception as e:
+        except Exception:
             pass  # Skip on error
 
         # Drop monitor panel
@@ -599,7 +599,7 @@ class LiveDashboard:
                 drop_panel = self.drop_view.render(drop_rows)
                 if drop_panel:
                     panels.append(drop_panel)
-            except Exception as e:
+            except Exception:
                 pass  # Skip on error
 
         # Portfolio monitor panel
@@ -617,7 +617,7 @@ class LiveDashboard:
                 )
                 if portfolio_panel:
                     panels.append(portfolio_panel)
-            except Exception as e:
+            except Exception:
                 pass  # Skip on error
 
         return Group(*panels) if panels else Group()

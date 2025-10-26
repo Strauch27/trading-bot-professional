@@ -11,11 +11,13 @@ Metrics:
 - phase_errors_total: Counter of errors by phase
 """
 
-from prometheus_client import Counter, Gauge, Histogram, start_http_server
-from core.fsm.phases import Phase
-from core.fsm.state import CoinState
 import logging
 import time
+
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
+
+from core.fsm.phases import Phase
+from core.fsm.state import CoinState
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +228,7 @@ def update_all_stuck_metrics(states: dict):
     Args:
         states: Dict mapping symbol -> CoinState
     """
-    current_time = time.time()
+    time.time()
 
     for state in states.values():
         try:

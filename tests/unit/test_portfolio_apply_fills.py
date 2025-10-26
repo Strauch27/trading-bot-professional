@@ -10,10 +10,10 @@ Tests:
 - Budget reconciliation
 """
 
-import pytest
 import time
-from unittest.mock import Mock, patch
-from decimal import Decimal
+from unittest.mock import patch
+
+import pytest
 
 from core.portfolio.portfolio import PortfolioManager, Position
 
@@ -246,7 +246,7 @@ class TestApplyFillsSellReduction:
             {"side": "sell", "amount": 0.03, "price": 52000.0, "fee": {"cost": 1.56}}
         ]
 
-        result1 = portfolio.apply_fills(symbol, trades1)
+        portfolio.apply_fills(symbol, trades1)
         pos = portfolio.positions[symbol]
 
         assert pos.qty == pytest.approx(0.07)
@@ -257,7 +257,7 @@ class TestApplyFillsSellReduction:
             {"side": "sell", "amount": 0.04, "price": 53000.0, "fee": {"cost": 2.12}}
         ]
 
-        result2 = portfolio.apply_fills(symbol, trades2)
+        portfolio.apply_fills(symbol, trades2)
         pos = portfolio.positions[symbol]
 
         assert pos.qty == pytest.approx(0.03)
@@ -413,7 +413,7 @@ class TestBudgetReconciliation:
         ]
 
         # Total cost: 100 USDT + 0.1 fee
-        result = portfolio.apply_fills(symbol, trades)
+        portfolio.apply_fills(symbol, trades)
 
         # Budget should be committed (reserved → spent)
         # Note: apply_fills calls commit_budget internally
@@ -433,14 +433,13 @@ class TestBudgetReconciliation:
             opened_ts=time.time()
         )
 
-        initial_budget = portfolio.my_budget
 
         # Sell position
         trades = [
             {"side": "sell", "amount": 0.1, "price": 52000.0, "fee": {"cost": 5.2}}
         ]
 
-        result = portfolio.apply_fills(symbol, trades)
+        portfolio.apply_fills(symbol, trades)
 
         # Sell proceeds: (0.1 * 52000) - 5.2 = 5200 - 5.2 = 5194.8
         # Budget should increase by proceeds

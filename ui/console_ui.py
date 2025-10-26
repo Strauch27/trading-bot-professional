@@ -9,7 +9,7 @@ Provides beautiful terminal output with:
 """
 
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
 try:
     from rich.console import Console

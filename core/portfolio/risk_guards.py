@@ -1,12 +1,13 @@
 # risk_guards.py
 # V10-Style ATR & Trailing-Stop Guards für deterministische, verlässliche Exits
 
-import numpy as np
-import pandas as pd
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, Optional, Tuple
+
+import numpy as np
+
 
 class ExitReason(Enum):
     """Exit-Gründe für klare Telemetrie"""
@@ -450,7 +451,6 @@ class RiskGuardManager:
         cfg = {**default_config, **config}
 
         # Check stops in priority order
-        signals_to_check = []
 
         if cfg["enable_atr_stop"]:
             atr_signal = self.check_atr_stop(

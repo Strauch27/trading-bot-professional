@@ -1,5 +1,4 @@
 # numpy_fix.py
-import sys
 import numpy as np
 
 # Patch für alte pandas_ta Versionen

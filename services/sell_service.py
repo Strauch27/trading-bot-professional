@@ -1,20 +1,30 @@
 from __future__ import annotations
-from typing import Optional, List, Dict
-from datetime import datetime, timezone
-from contextlib import contextmanager
+
 import time  # Phase 9: For telemetry timestamps
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
 from config import (
-    TRADE_TTL_MIN, NEVER_MARKET_SELLS, ALLOW_MARKET_FALLBACK_TTL,
-    EXIT_ESCALATION_BPS, EXIT_LADDER_BPS, EXIT_IOC_TTL_MS, MAX_SLIPPAGE_BPS_EXIT
+    ALLOW_MARKET_FALLBACK_TTL,
+    EXIT_ESCALATION_BPS,
+    EXIT_IOC_TTL_MS,
+    EXIT_LADDER_BPS,
+    MAX_SLIPPAGE_BPS_EXIT,
+    NEVER_MARKET_SELLS,
+    TRADE_TTL_MIN,
 )
-from core.utils import (
-    next_client_order_id, fetch_ticker_cached, quantize_price,
-    compute_avg_fill_and_fees, compute_realized_pnl_net_sell, save_trade_history
-)
-from core.logging.loggingx import log_event, exit_placed, exit_filled
-from .sizing_service import SizingService
-from .order_service import OrderService
+from core.logging.loggingx import exit_filled, exit_placed, log_event
 from core.telemetry import get_fill_tracker  # Phase 9
+from core.utils import (
+    compute_realized_pnl_net_sell,
+    fetch_ticker_cached,
+    next_client_order_id,
+    save_trade_history,
+)
+
+from .order_service import OrderService
+from .sizing_service import SizingService
 
 # Phase 6: Symbol-scoped locking helper
 try:

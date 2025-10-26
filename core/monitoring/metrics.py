@@ -14,12 +14,12 @@ This module tracks key trading metrics identified in the bug fixes:
 - Logging system health
 """
 
-import time
-import logging
-from typing import Dict, Any, Optional
-from collections import defaultdict
 import json
+import logging
 import os
+import time
+from collections import defaultdict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

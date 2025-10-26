@@ -23,9 +23,9 @@ Example:
         engine.halt_trading()
 """
 
-import time
 import logging
-from typing import List, Tuple, Dict, Optional
+import time
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

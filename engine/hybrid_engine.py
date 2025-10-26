@@ -14,14 +14,16 @@ Modes:
 
 import logging
 import threading
-from typing import Dict, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+from core.fsm.phases import Phase
+from core.fsm.state import CoinState
 
 from .engine import TradingEngine as LegacyEngine
 
-# Lazy import of FSM engine to avoid import errors if dependencies are missing
-# from .fsm_engine import FSMTradingEngine  # Moved to _initialize_engines()
-from core.fsm.state import CoinState
-from core.fsm.phases import Phase
+# TYPE_CHECKING import to avoid circular dependencies
+if TYPE_CHECKING:
+    from .fsm_engine import FSMTradingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +153,7 @@ class HybridEngine:
                     logger.info("MD_THREAD_STATUS", extra={"is_alive": alive})
                     if not alive:
                         logger.error("MARKET_DATA_THREAD_NOT_ALIVE")
-            except Exception as e:
+            except Exception:
                 logger.exception("MD_THREAD_STATUS_CHECK_FAIL")
 
         if self.mode in ["fsm", "both"] and self.fsm_engine:

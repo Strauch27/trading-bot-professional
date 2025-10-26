@@ -11,12 +11,12 @@ New Features:
 - Simplified API for snapshot builder
 """
 
-import os
 import json
-import time
 import logging
+import os
+import time
 from collections import deque
-from typing import Dict, Deque, Tuple, Optional
+from typing import Deque, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class RollingWindowManager:
             os.makedirs(self.base_path, exist_ok=True)
             logger.info(f"RollingWindowManager initialized with persistence: {self.base_path}")
         else:
-            logger.info(f"RollingWindowManager initialized (no persistence)")
+            logger.info("RollingWindowManager initialized (no persistence)")
 
     def _path(self, sym: str) -> str:
         """Get file path for symbol's persisted window.

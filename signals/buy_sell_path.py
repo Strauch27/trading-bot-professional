@@ -2,13 +2,13 @@
 # V10-Style Buy/Sell-Pfad mit korrekter Slippage-Kontrolle und ORDER_SENT Garantie
 # Eliminiert "no_trigger" durch sichtbare Order-Platzierung auch bei Dry-Run
 
-import time
+import logging
 import math
 import threading
-from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Callable, Any, Tuple
+import time
+from dataclasses import asdict, dataclass
 from enum import Enum
-import logging
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -765,18 +765,8 @@ def create_tier_based_slippage_config() -> SlippageConfig:
     }
 
     # Tier 2 - Popular alts
-    tier2_config = {
-        "max_slippage_bp": 80,
-        "max_spread_bp": 50,
-        "maker_safety_ticks": 2
-    }
 
     # Tier 3 - Other alts
-    tier3_config = {
-        "max_slippage_bp": 150,
-        "max_spread_bp": 100,
-        "maker_safety_ticks": 3
-    }
 
     config.symbol_overrides = {
         # Tier 1

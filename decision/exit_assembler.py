@@ -10,11 +10,11 @@ Builds immutable ExitIntent objects from exit signals with:
 Exit signals come from ExitEngine.choose() and flow to OrderRouter.
 """
 
+import hashlib
+import json
+import time
 from dataclasses import dataclass
 from typing import Dict, Optional
-import hashlib
-import time
-import json
 
 
 @dataclass(frozen=True)

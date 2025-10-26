@@ -3,17 +3,16 @@ Memory Management Service
 Manages memory usage, deque limits, and automated cleanup across the application
 """
 
-import time
-import threading
-import psutil
 import gc
 import logging
-from typing import Dict, List, Optional, Any, Callable, Set
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
-from collections import deque, defaultdict
 from threading import RLock
-import weakref
+from typing import Any, Callable, Dict, List, Optional
 
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -349,10 +348,10 @@ class MemoryManager:
         items_cleaned = 0
 
         # Cleanup managed deques (remove 50% of items)
-        for deque in self._managed_deques.values():
-            current_size = len(deque)
+        for managed_deque in self._managed_deques.values():
+            current_size = len(managed_deque)
             target_cleanup = max(1, current_size // 2)
-            cleaned = deque.force_cleanup(target_cleanup)
+            cleaned = managed_deque.force_cleanup(target_cleanup)
             items_cleaned += cleaned
 
         # Run cleanup callbacks
@@ -375,9 +374,9 @@ class MemoryManager:
     def _perform_maintenance(self) -> None:
         """Perform regular maintenance tasks"""
         # Light cleanup of managed deques
-        for deque in self._managed_deques.values():
-            if deque._should_cleanup():
-                deque._cleanup()
+        for managed_deque in self._managed_deques.values():
+            if managed_deque._should_cleanup():
+                managed_deque._cleanup()
 
         # Regular garbage collection
         if self._stats['memory_cleanups_triggered'] % 10 == 0:  # Every 10th cleanup cycle
@@ -398,8 +397,8 @@ class MemoryManager:
         # Deque statistics
         deque_stats = {}
         total_deque_utilization = 0.0
-        for name, deque in self._managed_deques.items():
-            stats = deque.get_stats()
+        for name, managed_deque in self._managed_deques.items():
+            stats = managed_deque.get_stats()
             deque_stats[name] = stats
             total_deque_utilization += stats['utilization_percent']
 
@@ -444,8 +443,8 @@ class MemoryManager:
         results = {}
 
         # Cleanup managed deques
-        for name, deque in self._managed_deques.items():
-            cleaned = deque.force_cleanup()
+        for name, managed_deque in self._managed_deques.items():
+            cleaned = managed_deque.force_cleanup()
             results[f"deque_{name}"] = cleaned
 
         # Run cleanup callbacks

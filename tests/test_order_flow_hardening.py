@@ -16,11 +16,12 @@ Run tests:
     pytest tests/test_order_flow_hardening.py -v
 """
 
-import pytest
-import time
 import threading
-from unittest.mock import Mock, MagicMock, patch
-from datetime import datetime, timezone
+import time
+from unittest.mock import Mock
+
+import pytest
+
 
 # Phase 2 Tests: COID Idempotency
 class TestCOIDIdempotency:
@@ -28,7 +29,7 @@ class TestCOIDIdempotency:
 
     def test_coid_generation_format(self):
         """Test COID format: {decision_id}_{leg_idx}_{side}_{timestamp}"""
-        from core.coid import COIDManager, get_coid_manager
+        from core.coid import get_coid_manager
 
         manager = get_coid_manager()
         coid = manager.next_client_order_id(
@@ -130,8 +131,9 @@ class TestTTLTiming:
 
     def test_first_fill_ts_preserved_on_partial_fills(self):
         """Test first_fill_ts is preserved across partial fills"""
-        from core.portfolio.portfolio import PortfolioManager
         import time
+
+        from core.portfolio.portfolio import PortfolioManager
 
         portfolio = PortfolioManager(initial_budget=1000.0)
 
@@ -264,8 +266,8 @@ class TestConsolidatedEntryGuards:
 
     def test_evaluate_all_entry_guards_risk_limits(self):
         """Test consolidated guards check risk limits"""
-        from core.risk_limits import evaluate_all_entry_guards
         import config as cfg
+        from core.risk_limits import evaluate_all_entry_guards
 
         portfolio = Mock()
         portfolio.held_assets = {f"SYM{i}/USDT": {} for i in range(10)}  # Max positions
@@ -291,7 +293,7 @@ class TestFillTelemetry:
 
     def test_order_telemetry_tracking(self):
         """Test basic order telemetry tracking"""
-        from core.telemetry import FillTracker, FillStatus
+        from core.telemetry import FillStatus, FillTracker
 
         tracker = FillTracker()
 

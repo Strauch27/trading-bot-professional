@@ -41,12 +41,12 @@ Usage:
     )
 """
 
-import sqlite3
-import time
 import logging
+import sqlite3
 import threading
-from typing import Optional, Dict
+import time
 from pathlib import Path
+from typing import Dict, Optional
 
 from core.logger_factory import AUDIT_LOG, log_event
 from core.trace_context import Trace

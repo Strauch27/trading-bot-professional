@@ -11,9 +11,9 @@ Wraps CCXT exchange with:
 This is the ONLY module that should call CCXT directly for order operations.
 """
 
-import time
 import logging
-from typing import Dict, List, Optional, Any
+import time
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

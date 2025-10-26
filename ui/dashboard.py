@@ -12,13 +12,13 @@ Provides a comprehensive real-time dashboard with:
 Updates continuously without scrolling using Rich Live.
 """
 
-import time
-import logging
 import glob
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Dict, List, Any
+import logging
+import time
 from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
 
 try:
     from rich.layout import Layout
@@ -124,8 +124,8 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
     """
     try:
         # Get current working directory
-        import os
         import json
+        import os
         cwd = os.getcwd()
 
         # Try multiple log locations (prioritize JSONL over legacy .log)
@@ -389,8 +389,9 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
 
             # Emit health event for monitoring systems
             try:
-                from core.logger_factory import AUDIT_LOG, log_event
                 import logging as log_module
+
+                from core.logger_factory import AUDIT_LOG, log_event
                 log_event(
                     AUDIT_LOG(),
                     "stale_snapshots_health",

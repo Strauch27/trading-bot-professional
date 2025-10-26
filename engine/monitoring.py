@@ -9,16 +9,13 @@ Contains:
 - Final statistics reporting
 """
 
-import time
 import logging
-from typing import Dict, Any
+import time
 from collections import deque
+from typing import Any
 
 import config
-from core.logging.adaptive_logger import (
-    should_log_event, should_log_performance_metric,
-    flush_performance_buffer
-)
+from core.logging.adaptive_logger import flush_performance_buffer, should_log_event, should_log_performance_metric
 
 logger = logging.getLogger(__name__)
 

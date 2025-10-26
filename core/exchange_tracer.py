@@ -28,13 +28,11 @@ Usage:
     order = exchange.create_order("BTC/USDT", "limit", "buy", 0.001, 50000)
 """
 
-import time
 import logging
-from typing import Any, Dict, List, Optional, Callable
-from functools import wraps
+import time
+from typing import Any, Callable, Dict, List
 
 from core.logger_factory import TRACER_LOG, log_event, safe_exchange_raw
-
 
 logger = logging.getLogger(__name__)
 

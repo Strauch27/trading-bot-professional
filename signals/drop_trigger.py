@@ -1,6 +1,8 @@
 # signals/drop_trigger.py
 import time
-from config import HYSTERESIS_BPS, DEBOUNCE_S, DROP_TRIGGER_VALUE
+
+from config import DEBOUNCE_S, DROP_TRIGGER_VALUE, HYSTERESIS_BPS
+
 
 class DropTrigger:
     """

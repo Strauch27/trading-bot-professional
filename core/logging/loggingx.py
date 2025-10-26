@@ -1,17 +1,28 @@
 # loggingx.py - Konsolidiertes Logging mit Rotation
 import json
-import time
 import logging
-from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone, date
+import time
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Optional
-from config import ORDER_UPDATE_MIN_INTERVAL_S, ORDER_UPDATE_MIN_DELTA_FILLED
+
+from config import ORDER_UPDATE_MIN_DELTA_FILLED, ORDER_UPDATE_MIN_INTERVAL_S
+
 try:
-    from config import (ENABLE_PRETTY_TRADE_LOGS, USE_ANSI_COLORS, ICONS,
-                       PRICE_DECIMALS, QTY_DECIMALS, PNL_DECIMALS,
-                       SHOW_TIF, SHOW_MAKER, SHOW_DURATION_LONG, ENABLE_RICH_LOGGING)
+    from config import (
+        ENABLE_PRETTY_TRADE_LOGS,
+        ENABLE_RICH_LOGGING,
+        ICONS,
+        PNL_DECIMALS,
+        PRICE_DECIMALS,
+        QTY_DECIMALS,
+        SHOW_DURATION_LONG,
+        SHOW_MAKER,
+        SHOW_TIF,
+        USE_ANSI_COLORS,
+    )
 except Exception:
     ENABLE_PRETTY_TRADE_LOGS, USE_ANSI_COLORS = True, True
     ICONS = {}
@@ -21,7 +32,7 @@ except Exception:
 
 # Rich Console Integration (optional)
 try:
-    from ui.console_ui import log_info, log_success, log_warning, log_error, is_rich_available
+    from ui.console_ui import is_rich_available, log_error, log_info, log_success, log_warning
     RICH_AVAILABLE = is_rich_available()
 except ImportError:
     RICH_AVAILABLE = False
@@ -63,7 +74,7 @@ def fmt_pct(x):
     col = GREEN if x >= 0 else RED
     return c(f"{x:+.{PNL_DECIMALS}f}%", col)
 
-def fmt_price(p): 
+def fmt_price(p):
     """Format price"""
     return f"{p:.{PRICE_DECIMALS}f}"
 
@@ -122,8 +133,9 @@ def _json_default(o):
 def setup_rotating_logger(logger_name: str, log_file: str = None,
                           max_bytes: int = 50_000_000, backups: int = 5):
     """Setup logger with rotating file handler (dedupliziert & propagierend)"""
-    from config import LOG_FILE
     import os
+
+    from config import LOG_FILE
 
     target = os.path.abspath(log_file or LOG_FILE)
     logger = logging.getLogger(logger_name)
@@ -278,12 +290,12 @@ def log_detailed_error(logger, error_tracker,
             "open_buys_count": len(open_buy_orders) if open_buy_orders else 0
         }
     }
-    
+
     if settlement_manager and hasattr(settlement_manager, 'pending_settlements'):
         error_data["state"]["pending_settlements"] = len(settlement_manager.pending_settlements)
-    
+
     logger.error(json.dumps(error_data))
-    
+
     # Track error if tracker provided
     if error_tracker and hasattr(error_tracker, 'log_error'):
         error_tracker.log_error(error_type, symbol, error, context)
@@ -382,13 +394,13 @@ def on_order_placed(side: str, symbol: str, order_id: str,
                    limit: float, amount: float, tif="GTC", clientOrderId="", **kwargs):
     """Log order placement (compatibility)"""
     parts = [ICONS.get("placed", "⌛"), f"{side.upper()} PLACED {symbol}"]
-    if SHOW_TIF: 
+    if SHOW_TIF:
         parts.append(f"TimeInForce={tif}")
     parts += [f"Limit @ {fmt_price(limit)}", f"Amount {fmt_qty(amount)}"]
     txt = " | ".join(parts)
     logger = logging.getLogger(__name__)
     logger.info(txt, extra={'event_type': f'{side.upper()}_ORDER_PLACED','symbol':symbol})
-    
+
     logging.getLogger("events").info(json.dumps({
         "ts": _utc_iso(),
         "event": f"{side.upper()}_LIMIT_PLACED",
@@ -400,7 +412,7 @@ def on_order_placed(side: str, symbol: str, order_id: str,
         "clientOrderId": clientOrderId,
         **kwargs
     }))
-    
+
     # Audit trail
     log_audit_event(f"{side.upper()}_ORDER_PLACED", {
         "symbol": symbol,
@@ -412,7 +424,7 @@ def on_order_placed(side: str, symbol: str, order_id: str,
         "tif": kwargs.get("timeInForce", "GTC"),
         "clientOrderId": kwargs.get("clientOrderId")
     })
-    
+
     # Pretty console output
     side_u = (side or "").lower()
     if side_u == "buy":
@@ -431,11 +443,11 @@ def on_order_filled(side: str, symbol: str, order_id: str,
     parts = [ICONS.get("buy", "✅") if side=="buy" else ICONS.get("sell_filled", "✅"),
              f"{side.upper()} FILLED {symbol} @ {fmt_price(avg)}",
              f"Filled {fmt_qty(filled)}", f"Fee {fee:.4f}"]
-    if SHOW_MAKER: 
+    if SHOW_MAKER:
         parts.append(f"Maker={bool(maker)}")
     txt = " | ".join(parts)
     logging.getLogger(__name__).info(txt, extra={'event_type': f'{side.upper()}_FILLED','symbol':symbol})
-    
+
     logging.getLogger("events").info(json.dumps({
         "ts": _utc_iso(),
         "event": "ORDER_FILLED",
@@ -450,7 +462,7 @@ def on_order_filled(side: str, symbol: str, order_id: str,
         "clientOrderId": clientOrderId,
         **kwargs
     }))
-    
+
     # Pretty console output
     if ENABLE_PRETTY_TRADE_LOGS:
         side_upper = side.upper()
@@ -461,10 +473,10 @@ def on_order_filled(side: str, symbol: str, order_id: str,
             icon = "✅" if USE_ANSI_COLORS else "[SELL]"
             color = "\033[93m" if USE_ANSI_COLORS else ""  # Yellow
         reset = "\033[0m" if USE_ANSI_COLORS else ""
-        
+
         msg = f"{color}{icon} {side_upper} FILLED: {symbol} @ {avg:.8f} x {filled:.8f} | Fee: {fee:.4f} USDT{reset}"
         _console_info("ORDER_FILLED", msg)
-    
+
     # Audit trail
     log_audit_event("ORDER_FILLED", {
         "symbol": symbol,
@@ -477,7 +489,7 @@ def on_order_filled(side: str, symbol: str, order_id: str,
         "maker": maker,
         "clientOrderId": kwargs.get("clientOrderId")
     })
-    
+
     # Pretty console output
     side_u = (side or "").lower()
     if side_u == "buy":
@@ -488,7 +500,7 @@ def on_order_filled(side: str, symbol: str, order_id: str,
         icon = "✅"
         msg = f"{icon} {_c('SELL FILLED','green')} {symbol} @ {float(avg):.8f} | Qty={float(filled):.8f} | Fee={float(fee):.6f} | id={order_id[:8]}..."
         _console_info("SELL_FILLED", msg)
-    
+
     # --- Telegram Alert ---
     try:
         from telegram_notify import tg
@@ -527,8 +539,8 @@ def on_order_replaced(symbol: str, old_order_id: str, new_order_id: str, **kwarg
         **kwargs
     }))
 
-def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0, 
-                    amount=0, pnl_percentage=0, profit_usdt=0, order_id="", 
+def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0,
+                    amount=0, pnl_percentage=0, profit_usdt=0, order_id="",
                     duration_s=0, **kwargs):
     """Log exit execution (compatibility)"""
     icon = ICONS.get("sell_tp", "🟢") if reason=="tp" else ICONS.get("sell_sl", "🔴") if reason=="sl" else ICONS.get("sell_filled", "✅")
@@ -536,7 +548,7 @@ def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0,
     txt = (f"{icon} {reason.upper()} EXECUTED {symbol} | "
            f"Profit {fmt_pnl_usdt(profit_usdt)} ({fmt_pct(pnl_percentage*100)}) | Dauer {dur}")
     logging.getLogger(__name__).info(txt, extra={'event_type':'EXIT_EXECUTED','symbol':symbol})
-    
+
     logging.getLogger("events").info(json.dumps({
         "ts": _utc_iso(),
         "event": "EXIT_EXECUTED",
@@ -551,10 +563,10 @@ def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0,
         "duration_s": duration_s,
         **kwargs
     }))
-    
+
     # Pretty console output with TP/SL indicators
     if ENABLE_PRETTY_TRADE_LOGS:
-        
+
         if reason.lower() in ["tp", "take_profit"]:
             icon = "🟢" if USE_ANSI_COLORS else "[TP]"
             color = "\033[92m" if USE_ANSI_COLORS else ""  # Green
@@ -567,12 +579,12 @@ def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0,
             icon = "✅" if USE_ANSI_COLORS else "[EXIT]"
             color = "\033[93m" if USE_ANSI_COLORS else ""  # Yellow
             reason_text = reason.upper()
-        
+
         reset = "\033[0m" if USE_ANSI_COLORS else ""
         pnl_pct = pnl_percentage * 100  # Convert to percentage
         msg = f"{color}{icon} {reason_text} {symbol}: Entry={entry_price:.8f} → Exit={exit_price:.8f} | P&L={pnl_pct:+.2f}% | {profit_usdt:+.2f} USDT{reset}"
         _console_info("EXIT_EXECUTED", msg)
-    
+
     # Audit trail
     log_audit_event("EXIT_EXECUTED", {
         "symbol": symbol,
@@ -585,7 +597,7 @@ def on_exit_executed(symbol: str, reason: str, entry_price=0, exit_price=0,
         "order_id": kwargs.get("order_id"),
         "duration_s": kwargs.get("duration_s")
     })
-    
+
     # --- Telegram Exit Alert ---
     try:
         from telegram_notify import tg
@@ -785,8 +797,7 @@ def heartbeat(**kwargs):
 # SNAPSHOT WRITER (Parquet mit Fallback)
 # =============================================================================
 import threading
-from typing import Iterable, List, Dict
-from pathlib import Path
+from typing import Dict, Iterable, List
 
 try:
     import pandas as _pd
@@ -822,15 +833,15 @@ class SnapshotWriter:
             return
         rows = self._buf
         self._buf = []
-        
+
         try:
             from config import RUN_TIMESTAMP_LOCAL
-            
+
             # Zielverzeichnis aus self.path ableiten
             p = Path(self.path)
             out_dir = p if p.is_dir() else p.parent
             out_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Eine Datei pro Bot-Session (wird nur beim ersten Mal gesetzt)
             if not self._session_file:
                 self._session_file = out_dir / f"market_snapshots_{RUN_TIMESTAMP_LOCAL}.parquet"
@@ -838,21 +849,21 @@ class SnapshotWriter:
                 if not _HAS_PQ:
                     self._session_file = self._session_file.with_suffix('.csv')
                     self._csv_mode = True
-            
+
             # Alle Snapshots sammeln
             self._all_snapshots.extend(rows)
-            
+
             if _HAS_PQ and not self._csv_mode:
                 try:
                     # Alle bisherigen Snapshots in EINE Datei schreiben (überschreibt vorherige Version)
                     df_all = _pd.DataFrame(self._all_snapshots)
                     df_all.to_parquet(self._session_file, index=False, engine="pyarrow", compression="zstd")
-                    
+
                     log_event("SNAPSHOT_APPENDED", level="DEBUG",
-                             context={"new_rows": len(rows), "total_rows": len(self._all_snapshots), 
+                             context={"new_rows": len(rows), "total_rows": len(self._all_snapshots),
                                     "path": str(self._session_file)})
                     log_metric("SNAPSHOT_FLUSH_OK", len(rows))
-                    
+
                 except Exception as parquet_error:
                     # Bei Fehler auf CSV wechseln
                     log_event("SNAPSHOT_PARQUET_ERROR", level="ERROR",
@@ -860,7 +871,7 @@ class SnapshotWriter:
                              context={"switching_to_csv": True})
                     self._csv_mode = True
                     self._session_file = self._session_file.with_suffix('.csv')
-            
+
             # CSV-Mode (Fallback oder wenn Pandas nicht verfügbar)
             if self._csv_mode or not _HAS_PQ:
                 try:
@@ -871,18 +882,18 @@ class SnapshotWriter:
                             f.write(",".join(rows[0].keys()) + "\n")
                         for r in rows:
                             f.write(",".join(str(r.get(k, "")) for k in rows[0].keys()) + "\n")
-                    log_event("SNAPSHOT_CSV_APPENDED", level="DEBUG", 
+                    log_event("SNAPSHOT_CSV_APPENDED", level="DEBUG",
                              context={"rows": len(rows), "path": str(self._session_file)})
                 except Exception as csv_error:
                     log_event("SNAPSHOT_CSV_ERROR", level="ERROR",
                              message=f"{type(csv_error).__name__}: {csv_error}",
                                  context={"rows_lost": len(rows)})
-                
+
         except Exception as e:
-            log_event("SNAPSHOT_FLUSH_ERROR", level="ERROR", 
+            log_event("SNAPSHOT_FLUSH_ERROR", level="ERROR",
                      message=f"{type(e).__name__}: {e}",
                      context={"path": self.path, "rows_lost": len(rows)})
-    
+
     def final_flush(self):
         """Flush beim Beenden des Bots aufrufen, um alle verbleibenden Daten zu schreiben"""
         with self._lock:
@@ -960,7 +971,7 @@ def guard_block(symbol: str, guard_type: str, ctx=None, **kwargs):
 
 def guard_pass(symbol: str, guard_type: str, **kwargs):
     """Log guard pass - less noise, only DEBUG level"""
-    log_event("GUARD_PASS", symbol=symbol, level="DEBUG", 
+    log_event("GUARD_PASS", symbol=symbol, level="DEBUG",
               context={"guard_type": guard_type, **kwargs})
 
 def trailing_bump(symbol: str, **kwargs):
@@ -1006,8 +1017,9 @@ def metric_timer(name: str, labels: dict = None):
 # ---------------------------------------------------------------------------
 import uuid
 from typing import Optional
+
 try:
-    from config import DECISION_LOG_PASS_LEVEL, DECISION_LOG_BLOCK_LEVEL
+    from config import DECISION_LOG_BLOCK_LEVEL, DECISION_LOG_PASS_LEVEL
 except Exception:
     DECISION_LOG_PASS_LEVEL, DECISION_LOG_BLOCK_LEVEL = "DEBUG", "INFO"
 

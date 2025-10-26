@@ -10,8 +10,8 @@ Refactored engine module with separation of concerns:
 - engine_config.py: Configuration and factory functions
 """
 
-from .engine_config import EngineConfig, create_trading_engine, create_mock_trading_engine
 from .engine import TradingEngine
+from .engine_config import EngineConfig, create_mock_trading_engine, create_trading_engine
 
 __all__ = [
     'TradingEngine',

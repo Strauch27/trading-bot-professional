@@ -8,13 +8,12 @@ Collects state changes in memory and writes to disk at configurable intervals
 Thread-safe implementation with automatic flush on shutdown.
 """
 
-import os
 import json
-import time
-import threading
 import logging
-from typing import Dict, Any, Optional, Callable
-from pathlib import Path
+import os
+import threading
+import time
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

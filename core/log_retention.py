@@ -29,14 +29,13 @@ Usage:
     print(f"Removed {removed} files, freed {freed_mb:.1f}MB")
 """
 
-import os
-import time
 import gzip
-import shutil
 import logging
+import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Tuple
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 

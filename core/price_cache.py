@@ -7,7 +7,7 @@ Provides O(1) last-price lookup and efficient historical views.
 """
 
 from collections import deque
-from typing import Dict, Deque, Tuple, Iterable, Optional
+from typing import Deque, Dict, Iterable, Optional, Tuple
 
 
 class PriceCache:

@@ -3,16 +3,17 @@ Telegram Notifier für Trading Bot
 Robuste Implementation mit Escaping, Chunking, Rate-Limiting und De-Duplication
 """
 
-import os
-import json
-import time
 import hashlib
+import json
+import os
 import threading
-import urllib.request
-import urllib.parse
+import time
 import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 
 class TelegramNotifier:
     def __init__(self, bot_token: str = None, chat_id: str = None, session_id: str = None):
@@ -27,42 +28,42 @@ class TelegramNotifier:
         self._lock = threading.Lock()
         self.dedup_ttl_s = int(os.getenv("TELEGRAM_DEDUP_TTL_S","60"))
         self._dedup = {}  # key -> ts
-        
+
         # Session ID (from main.py or environment)
         self.session_id = (session_id or os.environ.get("BOT_SESSION_ID") or "").strip()
-        
+
         # Session stats for summary
         self.session_start = datetime.now()
         self.total_buys = 0
         self.total_sells = 0
         self.total_profit = 0.0
-        
+
     def is_configured(self) -> bool:
         """Check if Telegram is properly configured"""
         return bool(self.bot_token and (self.chat_id or self.allowed_chat_ids) and self.enabled)
-    
+
     def set_session_id(self, session_id: str):
         """Set or update the session ID"""
         self.session_id = (session_id or "").strip()
-    
+
     def _session_footer(self) -> str:
         """Generate session footer for transaction messages"""
         if not self.session_id:
             return ""
         # Full session ID as code block for easy copying
         return f"\n\n🧾 Run: <code>{self.session_id}</code>"
-    
+
     def is_authorized(self, chat_id: str) -> bool:
         """Check if chat_id is authorized"""
         if self.allowed_chat_ids:
             return str(chat_id) in self.allowed_chat_ids
         return str(chat_id) == self.chat_id if self.chat_id else False
-    
+
     @staticmethod
     def escape_html(text: str) -> str:
         """Escape HTML special characters"""
         return (text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-    
+
     def _request(self, method: str, payload: dict, *, max_retries: int = 3):
         """Internal request method with retry logic (shutdown-aware)"""
         if not self.is_configured():
@@ -122,7 +123,7 @@ class TelegramNotifier:
                     time.sleep(backoff)
                 backoff *= 1.6
         return None
-    
+
     def _should_send(self, dedup_key: Optional[str]):
         """Check if message should be sent (rate limiting and deduplication, shutdown-aware)"""
         # Try to get shutdown coordinator (optional)
@@ -151,24 +152,24 @@ class TelegramNotifier:
                 # Clean old entries
                 self._dedup = {k: v for k, v in self._dedup.items() if now - v < self.dedup_ttl_s * 2}
         return True
-    
-    def send(self, message: str, *, parse_mode: str = "HTML", 
-             disable_notification: Optional[bool] = None, 
+
+    def send(self, message: str, *, parse_mode: str = "HTML",
+             disable_notification: Optional[bool] = None,
              dedup_key: Optional[str] = None,
              escape: bool = True,
              reply_markup: dict | None = None) -> bool:
         """Send message to Telegram with chunking support
-        
+
         Args:
-            escape: If True (default), escapes HTML in message. 
+            escape: If True (default), escapes HTML in message.
                    Set False for pre-formatted HTML templates.
         """
         if not self._should_send(dedup_key):
             return False
-        
+
         text = self.escape_html(message) if (parse_mode == "HTML" and escape) else (message or "")
         CHUNK = 4000  # TG max ≈4096
-        
+
         # Base payload
         payload_base = {
             "chat_id": self.chat_id,
@@ -177,7 +178,7 @@ class TelegramNotifier:
         }
         if reply_markup:
             payload_base["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False, separators=(',', ':'))
-        
+
         # Smart chunking for HTML to avoid breaking tags
         if not escape and parse_mode == "HTML" and len(text) > CHUNK:
             start = 0
@@ -205,17 +206,17 @@ class TelegramNotifier:
                 if not result:
                     return False
         return True
-    
-    def send_to(self, chat_id: str, text: str, *, parse_mode: str = "HTML", 
+
+    def send_to(self, chat_id: str, text: str, *, parse_mode: str = "HTML",
                 escape: bool = True, reply_markup: dict | None = None) -> bool:
         """Send message to specific chat_id"""
         if not self.is_configured():
             return False
-        
+
         # Apply escaping if HTML mode and escape=True
         if parse_mode == "HTML" and escape:
             text = self.escape_html(text)
-        
+
         payload = {
             "chat_id": chat_id,
             "text": text or ".",
@@ -224,20 +225,20 @@ class TelegramNotifier:
         }
         if reply_markup:
             payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False, separators=(',', ':'))
-        
+
         result = self._request("sendMessage", payload)
         return bool(result)
-    
+
     def edit_message(self, chat_id: str, message_id: int, text: str,
                      *, parse_mode: str = "HTML", escape: bool = True,
                      reply_markup: dict | None = None) -> bool:
         """Edit an existing message"""
         if not self.is_configured():
             return False
-        
+
         if parse_mode == "HTML" and escape:
             text = self.escape_html(text)
-        
+
         payload = {
             "chat_id": chat_id,
             "message_id": int(message_id),
@@ -246,47 +247,47 @@ class TelegramNotifier:
         }
         if reply_markup:
             payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False, separators=(',', ':'))
-        
+
         result = self._request("editMessageText", payload)
         return bool(result)
-    
+
     def answer_callback(self, callback_query_id: str, text: str | None = None, show_alert: bool = False) -> bool:
         """Answer a callback query"""
         if not self.is_configured():
             return False
-        
+
         payload = {"callback_query_id": callback_query_id}
         if text:
             payload["text"] = text
         if show_alert:
             payload["show_alert"] = True
-        
+
         result = self._request("answerCallbackQuery", payload)
         return bool(result)
-    
+
     def send_document(self, file_path: str, caption: str = None) -> bool:
         """Send document to Telegram"""
         if not (self.is_configured() and os.path.isfile(file_path)):
             return False
-        
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendDocument"
         boundary = "----WebKitFormBoundary" + hashlib.md5(str(time.time()).encode()).hexdigest()
-        
+
         def _encode(k,v):
             return f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'
-        
+
         body = _encode("chat_id", self.chat_id)
         if caption:
             body += _encode("caption", caption)
-        
+
         try:
             with open(file_path, "rb") as f:
                 file_content = f.read()
-            
+
             body = body.encode() + \
                    f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{os.path.basename(file_path)}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode() + \
                    file_content + f'\r\n--{boundary}--\r\n'.encode()
-            
+
             req = urllib.request.Request(url, data=body, method="POST")
             req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
             with urllib.request.urlopen(req, timeout=60):
@@ -297,7 +298,7 @@ class TelegramNotifier:
             logger.warning(f"Telegram document send failed: {e}",
                          extra={'event_type': 'TELEGRAM_DOCUMENT_SEND_ERROR', 'error': str(e)})
             return False
-    
+
     def notify_startup(self, mode: str, budget: float):
         """Send startup notification"""
         self.session_start = datetime.now()
@@ -308,14 +309,14 @@ class TelegramNotifier:
         msg += f"💰 Budget: <b>${budget:.2f}</b>\n"
         msg += f"🕐 Zeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         self.send(msg, dedup_key=None, escape=False)  # Always send startup
-    
+
     def notify_shutdown(self, summary: Dict[str, Any] = None):
         """Send shutdown notification with session summary"""
         duration = (datetime.now() - self.session_start).total_seconds() / 3600
-        
+
         msg = "🛑 <b>Trading Bot beendet</b>\n\n"
         msg += f"⏱ Laufzeit: <b>{duration:.2f}h</b>\n"
-        
+
         if summary:
             msg += f"📈 Trades: {summary.get('total_trades', 0)}\n"
             msg += f"💵 Realisiert: <b>${summary.get('realized_pnl', 0):.2f}</b>\n"
@@ -326,11 +327,11 @@ class TelegramNotifier:
             msg += f"📈 Käufe: {self.total_buys}\n"
             msg += f"📉 Verkäufe: {self.total_sells}\n"
             msg += f"💵 Profit: <b>${self.total_profit:.2f}</b>\n"
-            
+
         msg += f"🕐 Zeit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         msg += self._session_footer()
         self.send(msg, dedup_key=None, escape=False)  # Always send shutdown
-    
+
     def notify_buy_filled(self, symbol: str, price: float, amount: float, fee: float = 0, order_id: str = "", **extra):
         """Send enriched BUY-filled notification (HTML)"""
         self.total_buys += 1
@@ -342,7 +343,7 @@ class TelegramNotifier:
         tp_mult = extra.get("tp_mult")
         sl_mult = extra.get("sl_mult")
         ref_px = extra.get("ref_price")
-        latency_ms = extra.get("latency_ms")
+        extra.get("latency_ms")
         budget_before = extra.get("budget_before")
         budget_after = extra.get("budget_after")
         slot_after = extra.get("slot_after")
@@ -381,7 +382,7 @@ class TelegramNotifier:
         rows.append(f"🆔 Order: <code>{self.escape_html(str(order_id)[-12:])}</code>")
         msg = "\n".join(rows) + self._session_footer()
         self.send(msg, escape=False)
-    
+
     def notify_sell_filled(self, symbol: str, price: float, amount: float, fee: float = 0, order_id: str = "", **extra):
         """Send enriched SELL-filled notification (HTML)"""
         self.total_sells += 1
@@ -406,15 +407,15 @@ class TelegramNotifier:
         if reason:
             reason_lower = str(reason).lower()
             if reason_lower in ["tp", "take_profit"]:
-                rows.append(f"🎯 Exit: TAKE PROFIT")
+                rows.append("🎯 Exit: TAKE PROFIT")
             elif reason_lower in ["sl", "stop_loss"]:
-                rows.append(f"🛑 Exit: STOP LOSS")
+                rows.append("🛑 Exit: STOP LOSS")
             elif "panic" in reason_lower:
-                rows.append(f"🚨 Exit: PANIC SELL")
+                rows.append("🚨 Exit: PANIC SELL")
             elif "ttl" in reason_lower:
-                rows.append(f"⏱ Exit: TTL EXPIRED")
+                rows.append("⏱ Exit: TTL EXPIRED")
             elif "reset" in reason_lower:
-                rows.append(f"🔄 Exit: PORTFOLIO RESET")
+                rows.append("🔄 Exit: PORTFOLIO RESET")
             else:
                 rows.append(f"🧭 Exit: {self.escape_html(str(reason).upper())}")
         if pnl_pct is not None and profit is not None:
@@ -425,9 +426,9 @@ class TelegramNotifier:
         rows.append(f"🆔 Order: <code>{self.escape_html(str(order_id)[-12:])}</code>")
         msg = "\n".join(rows) + self._session_footer()
         self.send(msg, escape=False)
-    
-    def notify_exit(self, symbol: str, reason: str, entry_price: float, exit_price: float, 
-                   amount: float, pnl_percentage: float, profit_usdt: float, 
+
+    def notify_exit(self, symbol: str, reason: str, entry_price: float, exit_price: float,
+                   amount: float, pnl_percentage: float, profit_usdt: float,
                    duration_s: float = 0, order_id: str = "", **extra):
         """Send enriched EXIT notification (TP/SL/PANIC/RESET)"""
         self.total_profit += profit_usdt
@@ -445,16 +446,16 @@ class TelegramNotifier:
             reason_display = "PORTFOLIO RESET 🔄"
             icon = "🔄"
         elif "api" in reason_lower or "error" in reason_lower:
-            reason_display = f"ERROR EXIT ⚠️"
+            reason_display = "ERROR EXIT ⚠️"
             icon = "⚠️"
         else:
             reason_display = reason.upper()
             icon = "📤"
-        
+
         rows = [f"{icon} <b>{reason_display}</b> — {self.escape_html(symbol)}"]
         rows.append(f"💵 Entry: ${float(entry_price):.6f}  →  Exit: ${float(exit_price):.6f}")
         rows.append(f"📦 Qty: {float(amount):.8f}")
-        
+
         # Enhanced PnL display
         if profit_usdt > 1:
             rows.append(f"💚 <b>P&L: {float(pnl_percentage):+.2f}%  •  +${float(profit_usdt):.2f}</b>")
@@ -462,11 +463,11 @@ class TelegramNotifier:
             rows.append(f"💔 <b>P&L: {float(pnl_percentage):+.2f}%  •  ${float(profit_usdt):.2f}</b>")
         else:
             rows.append(f"📈 P&L: {float(pnl_percentage):+.2f}%  •  ${float(profit_usdt):+.2f}")
-        
+
         if duration_s:
             try: rows.append(f"⏱ Hold: {str(timedelta(seconds=float(duration_s)))}")
             except Exception: pass
-        
+
         exit_type = extra.get("exit_type")
         order_type = extra.get("order_type")
         if exit_type or order_type:
@@ -474,26 +475,26 @@ class TelegramNotifier:
             if exit_type: meta.append(str(exit_type).upper())
             if order_type: meta.append(str(order_type).upper())
             rows.append("⚙️ " + " • ".join(meta))
-        
+
         if order_id:
             rows.append(f"🆔 Order: <code>{self.escape_html(str(order_id)[-12:])}</code>")
-            
+
         msg = "\n".join(rows) + self._session_footer()
         self.send(msg, escape=False)
-    
+
     def notify_error(self, error_type: str, symbol: str = None, details: str = None):
         """Send error notification with deduplication"""
         dedup_key = f"ERROR_{error_type}_{symbol}" if symbol else f"ERROR_{error_type}"
-        
+
         msg = f"⚠️ <b>FEHLER: {self.escape_html(error_type)}</b>\n\n"
         if symbol:
             msg += f"📊 Symbol: {self.escape_html(symbol)}\n"
         if details:
             msg += f"📝 Details: {self.escape_html(details)[:200]}\n"
         msg += f"🕐 Zeit: {datetime.now().strftime('%H:%M:%S')}"
-        
+
         self.send(msg, disable_notification=False, dedup_key=dedup_key, escape=False)
-    
+
     def notify_daily_summary(self, stats: Dict[str, Any]):
         """Send daily summary"""
         msg = "📊 <b>TAGES-ZUSAMMENFASSUNG</b>\n\n"
@@ -504,7 +505,7 @@ class TelegramNotifier:
         msg += f"🎯 Win Rate: {stats.get('win_rate', 0):.1f}%\n"
         msg += f"📈 Beste: {stats.get('best_trade', 'N/A')}\n"
         msg += f"📉 Schlechteste: {stats.get('worst_trade', 'N/A')}"
-        
+
         self.send(msg, escape=False)
 
 # Global instance
@@ -519,7 +520,7 @@ def init_telegram_from_config():
         load_dotenv()
     except ImportError:
         pass
-    
+
     tg = TelegramNotifier()
 
     import logging

@@ -3,12 +3,10 @@ Order Service - Zentrale Order-Platzierung und -Verwaltung
 Kapselt Order-Logic mit Retry, Cache und einheitlichem Error-Handling.
 """
 
-import time
-import threading
-from typing import Dict, List, Optional, Any, Tuple
-from decimal import Decimal
-from datetime import datetime, timezone
 import logging
+import threading
+import time
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +327,7 @@ class OrderService:
                     logger.debug(f"Failed to fetch order before cancel: {fetch_error}")
 
                 # Cancel order
-                result = self.exchange.cancel_order(order_id, symbol)
+                self.exchange.cancel_order(order_id, symbol)
 
                 self._stats['orders_canceled'] += 1
 

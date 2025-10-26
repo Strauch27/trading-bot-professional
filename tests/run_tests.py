@@ -5,11 +5,11 @@ Test Runner for Market Data Services
 Runs tests for time_utils, cache_ttl, and md_audit modules.
 """
 
-import sys
-import os
-import time
-import tempfile
 import json
+import os
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 # Add project root to path
@@ -18,6 +18,7 @@ sys.path.insert(0, project_root)
 
 # Import directly from module files to avoid dependency issues
 import importlib.util
+
 
 def import_module_from_file(module_name, file_path):
     """Import a Python module from a file path"""

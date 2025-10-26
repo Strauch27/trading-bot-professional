@@ -1,18 +1,20 @@
 # logger_setup.py - Logging-Konfiguration und Error-Tracking
 import logging
-from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
-import time
-import re
 import os
 import queue
+import re
 import signal
-from pythonjsonlogger import jsonlogger
-from collections import deque
+import time
 import traceback
+from collections import deque
 from datetime import datetime, timezone
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
+
+from pythonjsonlogger import jsonlogger
+
 # CRITICAL FIX (C-CONFIG-01): Handle lazy initialization from config
 try:
-    from config import LOG_FILE, run_id, run_timestamp, USE_STATUS_LINE
+    from config import LOG_FILE, USE_STATUS_LINE, run_id, run_timestamp
     # Provide fallbacks if config hasn't been initialized yet
     if LOG_FILE is None:
         LOG_FILE = os.path.join(os.getcwd(), "logs", "bot_log.jsonl")
@@ -27,7 +29,8 @@ except ImportError:
     LOG_FILE = os.path.join(os.getcwd(), "logs", "bot_log.jsonl")
     import uuid
     run_id = str(uuid.uuid4())[:8]
-    from datetime import datetime, timezone as _tz
+    from datetime import datetime
+    from datetime import timezone as _tz
     run_timestamp = datetime.now(_tz.utc).strftime('%Y%m%d_%H%M%S')
     USE_STATUS_LINE = False
 
@@ -76,7 +79,6 @@ class TimeoutFormatter(logging.Formatter):
 
     def format(self, record):
         """Format with timeout protection"""
-        import signal
         import sys
 
         # Skip timeout on Windows (no alarm support)
@@ -125,7 +127,6 @@ class TimeoutUTCJsonFormatter(UTCJsonFormatter):
 
     def format(self, record):
         """Format with timeout protection"""
-        import signal
         import sys
 
         # Skip timeout on Windows (no alarm support)
@@ -233,12 +234,12 @@ class ConsoleImportantInfoFilter(logging.Filter):
         # Immer durchlassen: WARNING und höher
         if record.levelno >= logging.WARNING:
             return True
-        
+
         # Statuszeile aktiv? Dann SESSION_END/SESSION_START nicht doppelt in der Konsole zeigen
         evt = getattr(record, "event_type", "")
         if USE_STATUS_LINE and evt in ("SESSION_END", "SESSION_START", "TERMINAL_MARKET_MONITOR"):
             return False
-        
+
         # Bei INFO Level: Nur wichtige Events durchlassen
         if record.levelno == logging.INFO:
             # Event types die IMMER angezeigt werden sollen
@@ -259,11 +260,11 @@ class ConsoleImportantInfoFilter(logging.Filter):
                 # Guard Events für Live-Feedback
                 'GUARD_BLOCK_SUMMARY', 'GUARD_PASS_SUMMARY', 'GUARD_ROLLING_SUMMARY'
             }
-            
+
             event_type = getattr(record, 'event_type', '')
             if event_type in important_events:
                 return True
-            
+
             # Auch wichtige Text-Patterns durchlassen
             msg = record.getMessage() if hasattr(record, 'getMessage') else ''
             important_patterns = [
@@ -272,11 +273,11 @@ class ConsoleImportantInfoFilter(logging.Filter):
                 'Trading-Engine', 'PORTFOLIO RESET',
                 'Main trading loop started'
             ]
-            
+
             for pattern in important_patterns:
                 if pattern in msg:
                     return True
-        
+
         # Alles andere blockieren
         return False
 
@@ -290,7 +291,7 @@ class ErrorTracker:
         self.error_counts = {}
         self.error_by_symbol = {}
         self.last_summary_time = time.time()
-        
+
     def track_error(self, error_type, symbol, error_msg):
         """Fügt einen Fehler zur Historie hinzu"""
         error_entry = {
@@ -300,33 +301,33 @@ class ErrorTracker:
             'message': error_msg[:200]  # Begrenzt auf 200 Zeichen
         }
         self.error_history.append(error_entry)
-        
+
         # Update Zähler
         self.error_counts[error_type] = self.error_counts.get(error_type, 0) + 1
         if symbol:
             if symbol not in self.error_by_symbol:
                 self.error_by_symbol[symbol] = {}
             self.error_by_symbol[symbol][error_type] = self.error_by_symbol[symbol].get(error_type, 0) + 1
-    
+
     def get_recent_errors(self, seconds=300):
         """Gibt Fehler der letzten X Sekunden zurück"""
         cutoff = time.time() - seconds
         return [e for e in self.error_history if e['timestamp'] > cutoff]
-    
+
     def get_error_summary(self):
         """Erstellt eine Zusammenfassung aller Fehler"""
         recent_5min = self.get_recent_errors(300)
         recent_1hour = self.get_recent_errors(3600)
-        
+
         # Top-Fehlertypen
         top_errors = sorted(self.error_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        
+
         # Problematische Symbole
         problem_symbols = sorted(
             [(s, sum(counts.values())) for s, counts in self.error_by_symbol.items()],
             key=lambda x: x[1], reverse=True
         )[:5]
-        
+
         return {
             'total_errors': len(self.error_history),
             'errors_last_5min': len(recent_5min),
@@ -335,7 +336,7 @@ class ErrorTracker:
             'problem_symbols': problem_symbols,
             'unique_error_types': len(self.error_counts)
         }
-    
+
     def should_alert(self, threshold_5min=10):
         """Prüft ob eine Fehler-Warnung ausgegeben werden sollte"""
         recent = self.get_recent_errors(300)
@@ -423,7 +424,7 @@ def setup_logger(use_queue=True):
 
     # Import console configuration
     try:
-        from config import SHOW_EVENT_TYPE_IN_CONSOLE, CONSOLE_LEVEL, SHOW_THREAD_NAME_IN_CONSOLE
+        from config import CONSOLE_LEVEL, SHOW_EVENT_TYPE_IN_CONSOLE, SHOW_THREAD_NAME_IN_CONSOLE
     except ImportError:
         SHOW_EVENT_TYPE_IN_CONSOLE = True
         CONSOLE_LEVEL = "INFO"
@@ -437,7 +438,7 @@ def setup_logger(use_queue=True):
         "ERROR": logging.ERROR
     }
     console_log_level = console_level_mapping.get(CONSOLE_LEVEL.upper(), logging.INFO)
-    
+
     # Build console format string with optional thread name
     console_fmt = '%(asctime)s - %(levelname)s - '
     if SHOW_THREAD_NAME_IN_CONSOLE:
@@ -445,14 +446,13 @@ def setup_logger(use_queue=True):
     if SHOW_EVENT_TYPE_IN_CONSOLE:
         console_fmt += '%(event_type)s - '
     console_fmt += '%(message)s'
-    
+
     console_formatter = logging.Formatter(console_fmt, datefmt='%Y-%m-%d %H:%M:%S')
     console_handler = logging.StreamHandler()
     console_handler.setLevel(console_log_level)  # Use configured console level
     console_handler.setFormatter(console_formatter)
 
     # Fix Unicode encoding issues for Windows console
-    import sys
     if hasattr(console_handler.stream, 'reconfigure'):
         try:
             console_handler.stream.reconfigure(encoding='utf-8')
@@ -478,10 +478,10 @@ def setup_logger(use_queue=True):
 # =================================================================================
 def log_detailed_error(logger, error_tracker, error_type, symbol, error, context=None, my_budget=0, held_assets={}, open_buy_orders={}, settlement_manager=None):
     """Detailliertes Error-Logging mit vollständigem Kontext"""
-    
+
     # Track im Error-Tracker
     error_tracker.track_error(error_type, symbol, str(error))
-    
+
     # Basis-Error-Info
     error_data = {
         'event_type': error_type,
@@ -490,29 +490,28 @@ def log_detailed_error(logger, error_tracker, error_type, symbol, error, context
         'error_message': str(error),
         'timestamp': datetime.now(timezone.utc).isoformat()
     }
-    
+
     # Exchange-spezifische Fehler parsen
     if hasattr(error, 'code'):
         error_data['exchange_error_code'] = error.code
-    
+
     # CCXT-spezifische Details
     if 'ccxt' in str(type(error)):
         try:
-            import json
             if hasattr(error, 'response') and error.response:
                 error_data['exchange_response'] = error.response
         except (AttributeError, TypeError, ValueError):
             # Failed to parse exchange response
             pass
-    
+
     # Füge Kontext hinzu wenn vorhanden
     if context:
         error_data.update(context)
-    
+
     # Stack-Trace für kritische Fehler
     if error_type in ['BUY_ORDER_PLACE_ERROR', 'CRITICAL_ERROR', 'STATE_CORRUPTION']:
         error_data['stack_trace'] = traceback.format_exc()
-    
+
     # System-Status beim Fehler
     try:
         error_data['system_status'] = {
@@ -525,14 +524,14 @@ def log_detailed_error(logger, error_tracker, error_type, symbol, error, context
     except (AttributeError, TypeError, KeyError):
         # System status collection failed, skip
         pass
-    
+
     # Prüfe auf kritische Fehler-Häufung
     if error_tracker.should_alert():
         error_data['ALERT'] = 'High error rate detected!'
         error_data['error_summary'] = error_tracker.get_error_summary()
-    
+
     # Log mit allen Details
-    logger.error(f"DETAILED ERROR: {error_type} for {symbol}: {str(error)}", 
+    logger.error(f"DETAILED ERROR: {error_type} for {symbol}: {str(error)}",
                 extra=error_data)
 
 # =================================================================================

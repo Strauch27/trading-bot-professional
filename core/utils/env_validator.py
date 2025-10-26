@@ -6,11 +6,11 @@ Validates required environment variables at startup and provides clear error mes
 Implements fail-fast behavior for missing or invalid configuration.
 """
 
+import logging
 import os
 import sys
-import logging
-from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

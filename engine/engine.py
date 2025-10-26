@@ -12,74 +12,76 @@ All implementation details extracted to specialized modules:
 This file contains ONLY orchestration logic (~700 lines vs original 2011)
 """
 
-import time
-import threading
 import logging
-from typing import Dict, List, Optional, Any
+import threading
+import time
+from typing import Any, Dict, List, Optional
 
 # Core Dependencies
 import config
 
-# Service Imports (All Drops)
-from services import (
-    # Drop 1: PnL Service
-    PnLService, PnLSummary,
-
-    # Drop 2: Trailing & Signals
-    TrailingStopManager, SignalManager,
-
-    # Drop 3: Exchange Adapter & Orders
-    OrderService, OrderCache,
-
-    # Drop 4: Exit Management & Market Data
-    ExitManager, MarketDataProvider,
-
-    # Drop 5: Buy Signals & Market Guards
-    BuySignalService, MarketGuards,
-)
-
 # Adapter Imports
 from adapters.exchange import ExchangeAdapter
-
-# Logging Imports
-from core.logging.logger import JsonlLogger
 from core.logging.adaptive_logger import get_adaptive_logger, guard_stats_maybe_summarize
-
-# Buy Flow Logger
-from services.buy_flow_logger import get_buy_flow_logger, shutdown_buy_flow_logger
 
 # Debug Tracing System
 from core.logging.debug_tracer import trace_function, trace_step
 
-# Shutdown Coordinator
-from services.shutdown_coordinator import get_shutdown_coordinator
+# Logging Imports
+from core.logging.logger import JsonlLogger
 
-# Drop-Trigger System
-from signals.drop_trigger import DropTrigger
-from signals.confirm import Stabilizer
+# P1: Debounced State Writer for Intent Persistence
+from core.state_writer import DebouncedStateWriter
 
 # PnL and Telemetry System
 from core.utils.pnl import PnLTracker
 from core.utils.telemetry import RollingStats, heartbeat_emit
+from interfaces.exchange_wrapper import ExchangeWrapper
 
-# Refactored Modules
-from .monitoring import EngineMonitoring
-from .buy_decision import BuyDecisionHandler
-from .position_manager import PositionManager
-from .exit_handler import ExitHandler
-from .engine_config import EngineConfig
+# Service Imports (All Drops)
+from services import (
+    # Drop 5: Buy Signals & Market Guards
+    BuySignalService,
+    # Drop 4: Exit Management & Market Data
+    ExitManager,
+    MarketDataProvider,
+    MarketGuards,
+    OrderCache,
+    # Drop 3: Exchange Adapter & Orders
+    OrderService,
+    # Drop 1: PnL Service
+    PnLService,
+    PnLSummary,
+    SignalManager,
+    # Drop 2: Trailing & Signals
+    TrailingStopManager,
+)
+
+# Buy Flow Logger
+from services.buy_flow_logger import get_buy_flow_logger, shutdown_buy_flow_logger
 
 # NEW: Order Router & Reconciliation System
 from services.order_router import OrderRouter, RouterConfig
 from services.reconciler import Reconciler
-from interfaces.exchange_wrapper import ExchangeWrapper
+
+# Shutdown Coordinator
+from services.shutdown_coordinator import get_shutdown_coordinator
+from signals.confirm import Stabilizer
+
+# Drop-Trigger System
+from signals.drop_trigger import DropTrigger
 from telemetry.jsonl_writer import JsonlWriter
+
+from .buy_decision import BuyDecisionHandler
+from .engine_config import EngineConfig
 
 # NEW: Exit Engine for Prioritized Exit Rules
 from .exit_engine import ExitEngine
+from .exit_handler import ExitHandler
 
-# P1: Debounced State Writer for Intent Persistence
-from core.state_writer import DebouncedStateWriter
+# Refactored Modules
+from .monitoring import EngineMonitoring
+from .position_manager import PositionManager
 
 logger = logging.getLogger(__name__)
 
@@ -678,6 +680,7 @@ class TradingEngine:
         # DEBUG_DROPS: Watchdog - check if snapshots arrive within 5s
         if getattr(config, "DEBUG_DROPS", False):
             import time
+
             from core.events import topic_counters
 
             t0 = time.time()
@@ -855,7 +858,7 @@ class TradingEngine:
                         self.position_manager.manage_positions()
                         co.beat("after_position_management")
                         self.last_position_check = cycle_start
-                        logger.debug(f"[ENGINE] Position management completed",
+                        logger.debug("[ENGINE] Position management completed",
                                    extra={'event_type': 'ENGINE_POSITION_CHECK_DONE'})
                     else:
                         logger.debug(f"[ENGINE] Position management skipped (time_since_last={time_since_last_check:.1f}s < 2.0s)",
@@ -1625,7 +1628,7 @@ class TradingEngine:
 
                         logger.debug(f"UI_FALLBACK_FEED fed {len(snaps)} snapshots")
 
-                except Exception as e:
+                except Exception:
                     logger.exception("UI_FALLBACK_FEED_ERR")
 
                 # Use event wait instead of sleep for responsive shutdown

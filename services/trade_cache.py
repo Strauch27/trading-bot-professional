@@ -3,16 +3,15 @@ Trade Cache Service
 Intelligent caching for API calls with bulk operations and performance optimization
 """
 
-import time
-import logging
-import threading
-from typing import Dict, List, Optional, Any, Set, Tuple, Union
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
-from threading import RLock
 import hashlib
 import json
-
+import logging
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from threading import RLock
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +409,7 @@ class TradeCache:
         expired_count = 0
 
         with self._lock:
-            current_time = time.time()
+            time.time()
             keys_to_remove = []
 
             for key, entry in self._cache.items():

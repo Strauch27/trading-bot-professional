@@ -3,11 +3,10 @@ Order Cache - Einfacher, thread-sicherer Cache für Order-Daten
 Reduziert Exchange-API-Calls und verbessert Performance.
 """
 
-import time
-import threading
-from typing import Dict, Optional, Any
-from datetime import datetime, timezone
 import logging
+import threading
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -10,17 +10,16 @@ Tests the full lifecycle:
 5. State persistence works
 """
 
-import pytest
 import time
-from unittest.mock import Mock, MagicMock, patch
-from typing import Dict, Any
+from unittest.mock import Mock, patch
+
+import pytest
+
+from core.portfolio.portfolio import PortfolioManager
 
 # Import components to test
 from engine.buy_decision import BuyDecisionHandler
 from services.order_router import OrderRouter, RouterConfig
-from services.reconciler import Reconciler
-from core.portfolio.portfolio import PortfolioManager
-from core.state_writer import DebouncedStateWriter
 
 
 class TestFullOrderFlow:

@@ -5,15 +5,17 @@ Unit Tests for AnchorManager (V9_3 Phase 8)
 Tests all 4 anchor modes, clamps, and stale-reset logic.
 """
 
-import pytest
-import time
-import tempfile
 import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 # Import AnchorManager
 import sys
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from market.anchor_manager import AnchorManager
@@ -301,7 +303,7 @@ class TestPersistence:
 
         with patch('config.DROP_TRIGGER_MODE', 4), \
              patch('config.ANCHOR_STALE_MINUTES', 60):
-            anchor = manager1.compute_anchor(
+            manager1.compute_anchor(
                 symbol=symbol,
                 last=100.0,
                 now=now,

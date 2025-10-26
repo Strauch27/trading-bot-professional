@@ -5,9 +5,9 @@ Standard event types emitted during phase transitions.
 These events are logged to JSONL for audit trail and replay.
 """
 
-from enum import Enum
-from typing import Dict, Any
 from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict
 
 
 class EventType(str, Enum):

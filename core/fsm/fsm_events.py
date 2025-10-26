@@ -6,9 +6,9 @@ Events that trigger FSM transitions.
 Different from events.py (which is for logging), these are transition triggers.
 """
 
-from enum import Enum, auto
-from typing import Dict, Any, Optional
 import time
+from enum import Enum, auto
+from typing import Any, Dict, Optional
 
 
 class FSMEvent(Enum):

@@ -6,7 +6,7 @@ Computes features from price observations for market snapshots.
 Minimal implementation with ATR-like volatility estimate.
 """
 
-from typing import Iterable, Tuple, Dict, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 
 def _atr_like(view: Iterable[Tuple[float, float]]) -> Optional[float]:

@@ -12,11 +12,11 @@ Usage:
 
 import json
 import sys
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-import config
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+import config
 
 # Centralized path constants
 LOG_PATHS = {
@@ -297,7 +297,7 @@ def print_latency_report(report: Dict[str, Any]):
         report: Latency report dict
     """
     print(f"\n{'='*80}")
-    print(f"Intent-to-Fill Latency Report")
+    print("Intent-to-Fill Latency Report")
     print(f"{'='*80}\n")
 
     if report["count"] == 0:
@@ -305,7 +305,7 @@ def print_latency_report(report: Dict[str, Any]):
         return
 
     print(f"Total Samples: {report['count']}")
-    print(f"\nLatency Distribution:")
+    print("\nLatency Distribution:")
     print(f"  Average: {report['avg_latency_ms']:.1f}ms")
     print(f"  Median:  {report['p50_latency_ms']:.1f}ms")
     print(f"  P95:     {report['p95_latency_ms']:.1f}ms")
@@ -313,7 +313,7 @@ def print_latency_report(report: Dict[str, Any]):
     print(f"  Max:     {report['max_latency_ms']:.1f}ms")
 
     if report.get("avg_breakdown"):
-        print(f"\nAverage Breakdown:")
+        print("\nAverage Breakdown:")
         breakdown = report["avg_breakdown"]
         print(f"  Placement:     {breakdown.get('placement_ms', 0):.1f}ms")
         print(f"  Exchange Fill: {breakdown.get('exchange_fill_ms', 0):.1f}ms")

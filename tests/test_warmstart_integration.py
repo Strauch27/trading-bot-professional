@@ -9,19 +9,22 @@ Tests 5-minute run + restart scenario to verify:
 - State restoration
 """
 
-import pytest
-import time
-import tempfile
 import shutil
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # Import components
 import sys
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import from io package (avoid conflict with built-in io module)
 import importlib.util
+
 spec = importlib.util.spec_from_file_location("jsonl_module", str(Path(__file__).parent.parent / "io" / "jsonl.py"))
 jsonl_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jsonl_module)
@@ -29,9 +32,9 @@ spec.loader.exec_module(jsonl_module)
 RotatingJSONLWriter = jsonl_module.RotatingJSONLWriter
 read_jsonl_tail = jsonl_module.read_jsonl_tail
 
-from market.anchor_manager import AnchorManager
-from core.rolling_windows import RollingWindowManager
 from core.price_cache import PriceCache
+from core.rolling_windows import RollingWindowManager
+from market.anchor_manager import AnchorManager
 
 
 class TestWarmStartIntegration:
@@ -200,7 +203,7 @@ class TestWarmStartIntegration:
         print(f"  Restored anchor: {restored_session_peak}")
 
         # Session peak should be close to original
-        original_session_peak = anchor_manager.get_session_peak(symbol) if 'anchor_manager' in locals() else final_peak
+        # Using final_peak as reference since original anchor_manager is from earlier phase
         assert abs(restored_session_peak - final_peak) < 0.01, \
             f"Session peak mismatch: restored={restored_session_peak}, expected={final_peak}"
 

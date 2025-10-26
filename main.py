@@ -1,5 +1,7 @@
 ﻿# main_new.py - Schlanker Entry Point für den Trading Bot
-import faulthandler, os
+import faulthandler
+import os
+
 faulthandler.enable()
 os.environ.setdefault("PYTHONFAULTHANDLER", "1")
 
@@ -11,19 +13,23 @@ try:
 except Exception:
     pass
 
-import ccxt
+import faulthandler
 import json
+import logging
 import os
+import pathlib
 import shutil
 import signal
 import sys
-import time as tmod
-import pathlib
-import faulthandler
 import threading
+import time as tmod
 from collections import deque
-from datetime import datetime as dt_datetime, timezone
+from datetime import datetime as dt_datetime
+from datetime import timezone
 from pathlib import Path
+
+import ccxt
+
 try:
     from dotenv import load_dotenv  # type: ignore[assignment]
     load_dotenv()  # Load .env early for Telegram
@@ -36,29 +42,27 @@ except ImportError:
 
 # Einheitlicher Config-Import + Alias
 import config as config_module  # config.py liegt im Projektwurzelordner
+from core.logging.logger_setup import error_tracker, log_detailed_error, logger, setup_split_logging
 
 # CRITICAL FIX (C-MAIN-01): Remove wildcard import to prevent namespace pollution
 # All config variables are now accessed via config_module.VARIABLE for clarity
 from scripts import config_lint
-from core.logging.logger_setup import logger, error_tracker, log_detailed_error, setup_split_logging
 
 # --- direkt nach dem Import von config.py ---
 logger.debug("CFG_SNAPSHOT: GLOBAL_TRADING=%s, ON_INSUFFICIENT_BUDGET=%s",
             config_module.GLOBAL_TRADING, getattr(config_module, "ON_INSUFFICIENT_BUDGET", None))
-from core.logging.loggingx import log_event, get_run_summary, setup_rotating_logger
-from core.utils import (
-    SettlementManager, DustSweeper, log_initial_config
-)
+from core.logging.loggingx import get_run_summary, log_event, setup_rotating_logger
 from core.portfolio import PortfolioManager
+from core.utils import DustSweeper, SettlementManager, log_initial_config
 from engine import TradingEngine
+
 # HybridEngine wird nur bei Bedarf importiert (wenn FSM_ENABLED=True)
-from integrations.telegram import init_telegram_from_config, tg
-from integrations.telegram import start_telegram_command_server
+from integrations.telegram import init_telegram_from_config, start_telegram_command_server, tg
+from telemetry import mem
 
 # UI Module für Rich Terminal Output
-from ui.console_ui import banner, start_summary, line, ts
+from ui.console_ui import banner, line, start_summary, ts
 from ui.live_monitors import LiveHeartbeat, PortfolioMonitorView
-from telemetry import mem
 
 
 def _ensure_runtime_dirs():
@@ -78,7 +82,7 @@ def _ensure_runtime_dirs():
 
 def legacy_signal_handler(signum, frame):
     """Legacy handler - now delegates to shutdown coordinator"""
-    from services.shutdown_coordinator import get_shutdown_coordinator, ShutdownRequest, ShutdownReason
+    from services.shutdown_coordinator import ShutdownReason, ShutdownRequest, get_shutdown_coordinator
 
     coordinator = get_shutdown_coordinator()
     request = ShutdownRequest(
@@ -96,7 +100,7 @@ def setup_exchange():
     # Validate environment variables (fail-fast on missing/invalid config)
     try:
         from core.utils.env_validator import validate_environment
-        env_vars = validate_environment(strict=True)  # Exit if validation fails
+        validate_environment(strict=True)  # Exit if validation fails
         logger.info("Environment validation passed", extra={'event_type': 'ENV_VALIDATION_SUCCESS'})
     except SystemExit:
         # Validation failed and already logged - re-raise to exit
@@ -112,7 +116,7 @@ def setup_exchange():
     if not api_key or not api_secret:
         log_event("API_KEYS_MISSING", message="API_KEY oder API_SECRET nicht in Umgebungsvariablen gefunden. Bot startet im Observe-Modus.", level="ERROR")
         return None, False
-    
+
     # Konservative requests Session für TLS-Stabilität (verhindert Windows crashes)
     import requests
     from requests.adapters import HTTPAdapter
@@ -188,7 +192,7 @@ def setup_exchange():
         if 'timestamp' in str(e).lower() or 'recvWindow' in str(e):
             logger.warning("Timestamp-Fehler: Systemzeit möglicherweise nicht synchron mit MEXC-Servern",
                           extra={'event_type': 'TIMESTAMP_ERROR_WARNING'})
-    
+
     return exchange, True
 
 
@@ -196,7 +200,7 @@ def setup_topcoins(exchange):
     """Initialisiert handelbare Coins"""
     if not exchange:
         return {}
-    
+
     # Versuche Markets zu laden mit robustem Error-Handling
     try:
         if not hasattr(exchange, 'symbols') or not exchange.symbols:
@@ -207,10 +211,10 @@ def setup_topcoins(exchange):
         if not hasattr(exchange, 'symbols') or not exchange.symbols:
             logger.error("Keine Märkte verfügbar - Bot kann nicht starten", extra={'event_type': 'NO_MARKETS_AVAILABLE'})
             return {}
-    
+
     # Initialize memory manager for better resource management
-    from services.memory_manager import get_memory_manager, create_managed_deque
-    memory_manager = get_memory_manager()
+    from services.memory_manager import create_managed_deque, get_memory_manager
+    get_memory_manager()
 
     supported = set(exchange.symbols)
     normalized = {symbol.replace("/", ""): symbol for symbol in supported}
@@ -227,7 +231,7 @@ def setup_topcoins(exchange):
                 max_age_seconds=7200  # 2 hours max age for price data
             )
             topcoins[symbol] = managed_deque
-    
+
     logger.info(f"{len(topcoins)} handelbare Coins gefunden")
     return topcoins
 
@@ -273,11 +277,11 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
             # Check for Ctrl+C während des Wartens
             if 'engine' in globals() and hasattr(engine, 'running') and not engine.running:  # type: ignore[attr-defined]
                 return False
-    
+
 
     elif config_module.on_insufficient_budget == "observe":
         if portfolio.my_budget < config_module.safe_min_budget:
-            logger.info(f"Budget unter Minimum. Bot laeuft im Observe-Modus.",
+            logger.info("Budget unter Minimum. Bot laeuft im Observe-Modus.",
                        extra={'event_type': 'OBSERVE_MODE_LOW_BUDGET',
                              'budget': portfolio.my_budget,
                              'required': config_module.safe_min_budget})
@@ -358,7 +362,7 @@ def main():
         raise
 
     # Initialize thread-safe shutdown coordinator with warn-only heartbeat monitoring
-    from services.shutdown_coordinator import get_shutdown_coordinator, ShutdownCoordinator
+    from services.shutdown_coordinator import ShutdownCoordinator, get_shutdown_coordinator
     shutdown_coordinator = ShutdownCoordinator(
         shutdown_timeout=30.0,
         auto_shutdown_on_missed_heartbeat=False  # Warn-only mode, no auto-shutdown
@@ -386,8 +390,8 @@ def main():
     )
 
     # Phase 3: Set session ID and log config snapshot
+    from core.logger_factory import AUDIT_LOG, log_config_diff, log_config_snapshot, log_event
     from core.trace_context import set_session_id
-    from core.logger_factory import AUDIT_LOG, log_event, log_config_snapshot, log_config_diff
 
     set_session_id(SESSION_ID)
 
@@ -429,23 +433,24 @@ def main():
         exchange="MEXC",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     )
-    
+
     # Config bereits oben validiert
-    
+
     # Config-Backup erstellen
     backup_config = config_module.backup_config
     backup_config()
-    
+
     # Split-Logs gleich zu Beginn aktivieren (an Root-Logger)
-    from core.logging.logger_setup import setup_split_logging
     import logging
+
+    from core.logging.logger_setup import setup_split_logging
     setup_split_logging(logging.getLogger())  # Root-Logger bekommt die Split-Handler
 
     # Config-Snapshot loggen
     from core.logging.loggingx import config_snapshot
     C = config_module
     config_snapshot({k: getattr(C, k) for k in dir(C) if k.isupper()})
-    
+
     # Rotating Logger initialisieren (jeder Logger -> eigene Datei)
     # Config-Werte sind bereits über 'from config import *' verfügbar
     setup_rotating_logger(
@@ -473,7 +478,7 @@ def main():
         backups=config_module.LOG_BACKUP_COUNT
     )
     # KEIN eigener Rotator für "engine" – Engine-Logs laufen über logger_setup.LOG_FILE
-    
+
     # Log Konfiguration
     log_initial_config({
         'max_trades': config_module.max_trades,
@@ -486,7 +491,7 @@ def main():
         'reset_portfolio_on_start': config_module.reset_portfolio_on_start,
         'use_ml_gatekeeper': config_module.use_ml_gatekeeper
     })
-    
+
     # Exchange Setup
     exchange, has_api_keys = setup_exchange()
 
@@ -500,27 +505,27 @@ def main():
         # CRITICAL FIX (C-MAIN-02): Remove unsafe global mutation, use thread-safe override
         config_module.set_config_override('GLOBAL_TRADING', False)
         config_module.set_config_override('global_trading', False)
-    
+
     # Topcoins Setup
     try:
         topcoins = setup_topcoins(exchange)
         if not topcoins:
-            logger.error("Keine handelbare Coins gefunden - Bot kann nicht starten", 
+            logger.error("Keine handelbare Coins gefunden - Bot kann nicht starten",
                         extra={'event_type': 'NO_TRADEABLE_COINS'})
             return
     except Exception as e:
-        logger.error(f"Kritischer Fehler beim Topcoins-Setup: {e}", 
+        logger.error(f"Kritischer Fehler beim Topcoins-Setup: {e}",
                     extra={'event_type': 'TOPCOINS_SETUP_ERROR'})
         return
-    
+
     # State Backup
     backup_state_files()
-    
+
     # Manager initialisieren
     DUST_MIN_COST_USD = config_module.DUST_MIN_COST_USD
     dust_sweeper = DustSweeper(exchange, min_sweep_value=DUST_MIN_COST_USD) if exchange else None
     settlement_manager = SettlementManager(dust_sweeper)
-    
+
     # Portfolio Manager
     portfolio = PortfolioManager(exchange, settlement_manager, dust_sweeper)
 
@@ -610,7 +615,7 @@ def main():
         logger.debug("Periodischer Dust-Sweeper aktiviert",
                    extra={'event_type': 'DUST_SWEEP_ACTIVATED',
                           'interval_min': DUST_SWEEP_INTERVAL_MIN})
-    
+
     # Sanity Check und Reconciliation mit robuster Market Data
     preise: dict[str, float] = {}
     if exchange:
@@ -647,15 +652,15 @@ def main():
         except Exception as basic_error:
             logger.error(f"Basic market data fetch failed: {basic_error}")
             preise = {}
-        
+
         portfolio.sanity_check_and_reconcile(preise)
-    
+
     # Drop-Anchors initialisieren wenn BACKFILL_MINUTES=0 und Mode 4
     if config_module.BACKFILL_MINUTES == 0 and config_module.DROP_TRIGGER_MODE == 4 and config_module.USE_DROP_ANCHOR:
         # Setze initiale Anchors für alle Coins ohne persistente Anchors
         current_ts = dt_datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         initialized_anchors = 0
-        
+
         for symbol, price in preise.items():
             if symbol in topcoins and price > 0:
                 # Prüfe ob schon ein Anchor existiert
@@ -664,13 +669,13 @@ def main():
                     # Setze initialen Anchor auf aktuellen Preis
                     portfolio.set_drop_anchor(symbol, price, current_ts)
                     initialized_anchors += 1
-        
+
         if initialized_anchors > 0:
             logger.debug(f"Initiale Drop-Anchors für {initialized_anchors} Coins gesetzt (BACKFILL_MINUTES=0)",
                        extra={'event_type': 'DROP_ANCHORS_INITIALIZED',
                               'count': initialized_anchors,
                               'mode': config_module.DROP_TRIGGER_MODE})
-    
+
     # Portfolio Reset wenn konfiguriert
     if config_module.reset_portfolio_on_start and exchange:
         reset_env_confirmed = os.getenv("CONFIRM_PORTFOLIO_RESET", "").upper() == "YES"
@@ -688,7 +693,7 @@ def main():
                    'confirmation_source': 'env' if reset_env_confirmed else 'cli'}
         )
         portfolio.perform_startup_reset(preise)
-    
+
     # Budget pruefen
     if not portfolio.check_startup_budget():
         if not wait_for_sufficient_budget(portfolio, exchange):
@@ -703,7 +708,7 @@ def main():
     }
     logger.info("EFFECTIVE_MODE: global_trading=%s (post-gates), has_api_keys=%s, budget_gate=%s",
                 config_module.GLOBAL_TRADING, state.get('has_api_keys'), state.get('budget_gate'))
-    
+
     # Trading Engine initialisieren und starten
     # Settings fuer Dependency Injection (robust)
     try:
@@ -738,7 +743,7 @@ def main():
         f"Mode={dt_mode}, LB={dt_lookback}m",
         extra={'event_type': 'SETTINGS_INIT', 'settings': settings.to_dict() if hasattr(settings, 'to_dict') else {}}  # type: ignore[attr-defined]
     )
-    
+
     # Create simple orderbookprovider (mock implementation)
     class SimpleOrderbookProvider:
         def _decision_bump(self, side: str, gate: str, reason: str):
@@ -861,7 +866,7 @@ def main():
                      extra={'event_type': 'ENGINE_INIT_FAILED', 'error': str(engine_init_error)})
         logger.exception("Full engine init traceback:")
         raise
-    
+
     # --- Telegram: init + Startup ---
     try:
         init_telegram_from_config()  # liest .env
@@ -908,8 +913,9 @@ def main():
 
         if ENABLE_RICH_TABLE:
             try:
-                from interfaces.status_table import run_live_table
                 import threading
+
+                from interfaces.status_table import run_live_table
 
                 RICH_TABLE_REFRESH_HZ = getattr(config_module, 'RICH_TABLE_REFRESH_HZ', 2.0)
                 RICH_TABLE_SHOW_IDLE = getattr(config_module, 'RICH_TABLE_SHOW_IDLE', False)
@@ -953,8 +959,9 @@ def main():
 
     if ENABLE_LIVE_DROP_MONITOR:
         try:
-            from interfaces.drop_monitor import run_live_drop_monitor
             import threading
+
+            from interfaces.drop_monitor import run_live_drop_monitor
 
             LIVE_DROP_MONITOR_REFRESH_S = getattr(config_module, 'LIVE_DROP_MONITOR_REFRESH_S', 5.0)
             LIVE_DROP_MONITOR_TOP_N = getattr(config_module, 'LIVE_DROP_MONITOR_TOP_N', 10)
@@ -1013,8 +1020,9 @@ def main():
 
     if ENABLE_LIVE_DASHBOARD:
         try:
-            from ui.dashboard import run_dashboard
             import threading
+
+            from ui.dashboard import run_dashboard
 
             # CRITICAL FIX (C-MAIN-05): Non-daemon thread with proper shutdown coordination
             dashboard_thread = threading.Thread(
@@ -1039,7 +1047,7 @@ def main():
             handler.flush()
         sys.stdout.flush()
         sys.stderr.flush()
-    except (OSError, AttributeError, ValueError) as e:
+    except (OSError, AttributeError, ValueError):
         # Ignore flush errors (file closed, invalid state, etc.)
         pass
 
@@ -1200,7 +1208,7 @@ def main():
                         logger.warning("Engine stopped unexpectedly - requesting shutdown",
                                      extra={'event_type': 'ENGINE_STOPPED_UNEXPECTEDLY'})
 
-                        from services.shutdown_coordinator import ShutdownRequest, ShutdownReason
+                        from services.shutdown_coordinator import ShutdownReason, ShutdownRequest
                         request = ShutdownRequest(
                             reason=ShutdownReason.ENGINE_ERROR,
                             initiator="main_heartbeat_loop",
@@ -1220,7 +1228,7 @@ def main():
                     if heartbeat_failures >= max_heartbeat_failures:
                         logger.error("Max heartbeat failures reached - requesting emergency shutdown")
 
-                        from services.shutdown_coordinator import ShutdownRequest, ShutdownReason
+                        from services.shutdown_coordinator import ShutdownReason, ShutdownRequest
                         request = ShutdownRequest(
                             reason=ShutdownReason.HEALTH_CHECK_FAIL,
                             initiator="main_heartbeat_loop",
@@ -1273,7 +1281,7 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user (Ctrl+C)", extra={'event_type': 'USER_SHUTDOWN'})
-        from services.shutdown_coordinator import ShutdownRequest, ShutdownReason
+        from services.shutdown_coordinator import ShutdownReason, ShutdownRequest
         request = ShutdownRequest(
             reason=ShutdownReason.USER_INTERRUPT,
             initiator="keyboard_interrupt_handler",
@@ -1284,7 +1292,7 @@ def main():
     except Exception as e:
         log_detailed_error(logger, error_tracker, 'BOT_CRITICAL_ERROR', None, e,
                           {'event_type': 'BOT_CRITICAL_ERROR'})
-        from services.shutdown_coordinator import ShutdownRequest, ShutdownReason
+        from services.shutdown_coordinator import ShutdownReason, ShutdownRequest
         request = ShutdownRequest(
             reason=ShutdownReason.ENGINE_ERROR,
             initiator="exception_handler",

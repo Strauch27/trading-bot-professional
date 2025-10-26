@@ -17,7 +17,8 @@ import logging
 import threading
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 logger = logging.getLogger(__name__)

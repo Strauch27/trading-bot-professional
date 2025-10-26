@@ -19,11 +19,11 @@ Example:
     >>> # After 6s:   status = "MISS" (hard miss)
 """
 
-import time
 import threading
-from typing import Any, Optional, Tuple, Dict
-from dataclasses import dataclass, field
+import time
 from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass

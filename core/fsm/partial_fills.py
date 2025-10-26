@@ -3,10 +3,11 @@
 Partial fill handling and accumulation
 """
 
-from core.fsm.state_data import OrderContext
-from core.fsm.fsm_events import FSMEvent, EventContext
-import time
 import logging
+import time
+
+from core.fsm.fsm_events import EventContext, FSMEvent
+from core.fsm.state_data import OrderContext
 
 logger = logging.getLogger(__name__)
 
