@@ -73,6 +73,16 @@ class LogManager:
                 return
 
             self._running = True
+            # Ensure base log directory exists and is valid
+            try:
+                if isinstance(self.base_log_dir, (str, os.PathLike)) and self.base_log_dir:
+                    Path(self.base_log_dir).mkdir(parents=True, exist_ok=True)
+                else:
+                    # Fallback to LOG_DIR
+                    self.base_log_dir = LOG_DIR
+                    Path(self.base_log_dir).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                self.logger.warning(f"Could not ensure base log dir: {e}")
             self._rotation_thread = threading.Thread(target=self._rotation_worker, daemon=True)
             self._rotation_thread.start()
 
@@ -102,9 +112,8 @@ class LogManager:
 
     def _check_rotation_needed(self):
         """Check if any log files need rotation"""
-        session_log_dir = os.path.join(self.base_log_dir)
-
-        if not os.path.exists(session_log_dir):
+        session_log_dir = self.base_log_dir if isinstance(self.base_log_dir, (str, os.PathLike)) else None
+        if not session_log_dir or not os.path.exists(session_log_dir):
             return
 
         for filename in os.listdir(session_log_dir):

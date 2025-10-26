@@ -21,11 +21,17 @@ import threading
 import traceback
 import inspect
 import sys
+import os
 from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from functools import wraps
 from datetime import datetime, timezone
 import json
+
+try:
+    from config import LOG_DIR
+except ImportError:
+    LOG_DIR = "logs"
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,22 @@ class DebugTracer:
         # Setup logger
         self.logger = logging.getLogger(f"{__name__}.tracer")
         self.logger.setLevel(log_level)
+        self.logger.propagate = False
+        # Replace existing handlers with file-based handler to avoid console spam
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            trace_log_file = os.path.join(LOG_DIR, "trace_steps.log")
+            file_handler = logging.FileHandler(trace_log_file, encoding="utf-8")
+            file_handler.setFormatter(logging.Formatter(
+                "%(asctime)s %(levelname)s:%(name)s:%(message)s"
+            ))
+            self.logger.addHandler(file_handler)
+        except Exception as e:
+            # Fallback: at least avoid propagation
+            logging.getLogger(__name__).warning(f"Debug tracer file handler setup failed: {e}")
 
     def get_context_key(self) -> str:
         """Eindeutiger Kontext-Schlüssel für Thread + Function"""

@@ -33,6 +33,7 @@ import json
 import logging
 import gzip
 import os
+import threading
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from typing import Any, Dict, Optional
@@ -459,7 +460,7 @@ def log_config_snapshot(config_module: Any, session_id: str = None) -> str:
         hash_file.parent.mkdir(parents=True, exist_ok=True)
         hash_file.write_text(config_hash)
     except Exception as e:
-        logger.debug(f"Failed to save config hash: {e}")
+        logging.debug(f"Failed to save config hash: {e}")
 
     return config_hash
 
@@ -524,11 +525,11 @@ def log_config_diff(config_module: Any, current_hash: str, session_id: str = Non
                             drift=False,
                             session_id=session_id
                         )
-                        logger.debug(f"CONFIG_DIFF: No drift (hash: {current_hash})")
+                        logging.debug(f"CONFIG_DIFF: No drift (hash: {current_hash})")
                 else:
-                    logger.debug(f"No previous config hash found in {prev_session_dir}")
+                    logging.debug(f"No previous config hash found in {prev_session_dir}")
     except Exception as e:
-        logger.debug(f"Failed to calculate config diff: {e}")
+        logging.debug(f"Failed to calculate config diff: {e}")
 
 
 def log_config_change(

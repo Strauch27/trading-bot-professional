@@ -404,6 +404,10 @@ class MarketDataProvider:
         self._last_cycle_stats: Dict[str, Any] = {}
         self._last_health_log_ts = time.time()
 
+        # FIX: Permanent skip-list for BadSymbol errors (non-existent symbols)
+        # These symbols will be permanently skipped instead of repeatedly retried
+        self._bad_symbols_skip_list: set = set()
+
         # V9_3: Per-symbol retry state tracking (Phase 3)
         # {symbol: {"attempts": int, "next_retry": float, "last_error": str}}
         self._retry_state: Dict[str, Dict[str, Any]] = {}
@@ -541,7 +545,12 @@ class MarketDataProvider:
         return self._last_cycle_stats.copy()
 
     def _is_degraded(self, symbol: str, now: float) -> bool:
-        """Check if symbol is currently rate-limited via degrade mode."""
+        """Check if symbol is currently rate-limited via degrade mode or permanently skipped."""
+        # FIX: Check permanent skip-list first (BadSymbol errors)
+        if symbol in self._bad_symbols_skip_list:
+            return True
+
+        # Check temporary degradation
         until = self._degraded_until.get(symbol)
         if until and now < until:
             return True
@@ -569,6 +578,32 @@ class MarketDataProvider:
 
     def _record_failure(self, symbol: str, now: float, reason: Optional[str] = None) -> None:
         """Increment failure counters and trigger degrade mode if necessary."""
+        # FIX: Check for BadSymbol errors and add to permanent skip-list
+        if reason and ('does not have market' in reason.lower() or 'badsymbol' in reason.lower() or 'symbol not found' in reason.lower()):
+            if symbol not in self._bad_symbols_skip_list:
+                self._bad_symbols_skip_list.add(symbol)
+                logger.warning(
+                    f"BadSymbol detected: {symbol} permanently added to skip-list (reason: {reason})",
+                    extra={
+                        'event_type': 'MD_BAD_SYMBOL_SKIP',
+                        'symbol': symbol,
+                        'reason': reason
+                    }
+                )
+
+                # Emit dashboard event
+                try:
+                    from ui.dashboard import emit_dashboard_event
+                    emit_dashboard_event(
+                        "MD_BAD_SYMBOL",
+                        f"{symbol} skipped permanently (not tradeable)"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not emit dashboard event: {e}")
+
+            # Don't increment failure counters for bad symbols - just skip them
+            return
+
         count = self._failure_counts[symbol] + 1
         self._failure_counts[symbol] = count
         self._statistics['ticker_failures'] += 1
@@ -2380,9 +2415,16 @@ class MarketDataProvider:
                         time.sleep(remaining_sleep)
                     elif remaining_sleep < -1.0:
                         # Warn if cycle took significantly longer than poll interval
+                        # FIX: Add event_type for Dashboard/Monitoring
                         logger.warning(
                             f"MD_POLL cycle overrun: {cycle_duration:.2f}s > {poll_s:.2f}s "
-                            f"(overrun={abs(remaining_sleep):.2f}s)"
+                            f"(overrun={abs(remaining_sleep):.2f}s)",
+                            extra={
+                                'event_type': 'MD_POLL_OVERRUN',
+                                'cycle_duration_s': cycle_duration,
+                                'poll_interval_s': poll_s,
+                                'overrun_s': abs(remaining_sleep)
+                            }
                         )
 
                 except Exception as e:

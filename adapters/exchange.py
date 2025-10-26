@@ -437,56 +437,24 @@ class ExchangeAdapter(ExchangeInterface):
                 pass
 
     def _execute_with_timeout(self, func, *args, **kwargs):
+        """Execute ccxt call with shared HTTP lock and optional timeout hint.
+
+        We rely on ccxt's own timeout (self.exchange.timeout) to abort slow calls
+        and only measure elapsed time for telemetry. Avoids orphaned threads that
+        would otherwise hold the lock indefinitely.
         """
-        CRITICAL FIX (C-ADAPTER-01): Execute request with timeout outside lock.
-
-        Prevents complete trading halt when network calls hang while holding _http_lock.
-        Uses thread-based timeout to detect hung requests and raise TimeoutError.
-
-        Args:
-            func: Function to execute (ccxt call)
-            *args, **kwargs: Arguments for the function
-
-        Returns:
-            Result from func
-
-        Raises:
-            TimeoutError: If request exceeds timeout
-            Exception: Any exception from func
-        """
-        result_container = {'result': None, 'error': None, 'completed': False}
-
-        def run_with_lock():
-            """Worker thread that acquires lock and runs request"""
-            try:
-                with self._http_lock:
-                    # ccxt akzeptiert "params={'timeout': sec}" je nach Methode
-                    if "params" in kwargs and isinstance(kwargs["params"], dict):
-                        kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
-                    result_container['result'] = func(*args, **kwargs)
-                    result_container['completed'] = True
-            except Exception as e:
-                result_container['error'] = e
-                result_container['completed'] = True
-
-        # Spawn worker thread with daemon=True (will be killed on process exit)
-        worker = threading.Thread(target=run_with_lock, daemon=True)
-        worker.start()
-
-        # Wait for completion with timeout
-        worker.join(timeout=self._timeout_s)
-
-        # Check if thread completed
-        if not result_container['completed']:
-            error_msg = f"Request exceeded timeout ({self._timeout_s}s) - worker thread still running"
-            logger.error(error_msg, extra={'event_type': 'HTTP_TIMEOUT'})
-            raise TimeoutError(error_msg)
-
-        # Check for errors
-        if result_container['error']:
-            raise result_container['error']
-
-        return result_container['result']
+        start = time.time()
+        with self._http_lock:
+            if "params" in kwargs and isinstance(kwargs["params"], dict):
+                kwargs["params"] = {**kwargs["params"], "timeout": self._timeout_s}
+            result = func(*args, **kwargs)
+        elapsed = time.time() - start
+        if elapsed > self._timeout_s:
+            logger.warning(
+                "HTTP request exceeded timeout hint",
+                extra={'event_type': 'HTTP_TIMEOUT_HINT', 'elapsed_s': elapsed}
+            )
+        return result
 
     def _retry_request(self, func, *args, **kwargs):
         """

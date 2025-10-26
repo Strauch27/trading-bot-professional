@@ -217,13 +217,13 @@ def setup_topcoins(exchange):
 
     # Create managed deques instead of unlimited deques
     topcoins = {}
-    for k in topcoins_keys:
+    for k in config_module.topcoins_keys:
         symbol = normalized.get(k)
         if symbol in supported:
             # Create managed deque with reasonable limits and auto-cleanup
             managed_deque = create_managed_deque(
                 name=f"price_history_{symbol}",
-                max_size=min(MAX_HISTORY_LEN, 1000),  # Cap at 1000 to prevent memory issues
+                max_size=min(config_module.MAX_HISTORY_LEN, 1000),  # Cap at 1000 to prevent memory issues
                 max_age_seconds=7200  # 2 hours max age for price data
             )
             topcoins[symbol] = managed_deque
@@ -254,14 +254,14 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
     """Wartet auf ausreichendes Budget wenn konfiguriert"""
     from services.shutdown_coordinator import get_shutdown_coordinator
 
-    if on_insufficient_budget == "wait" and exchange:
+    if config_module.on_insufficient_budget == "wait" and exchange:
         shutdown_coordinator = get_shutdown_coordinator()
-        while portfolio.my_budget < safe_min_budget:
+        while portfolio.my_budget < config_module.safe_min_budget:
             logger.info(f"Warte auf Budget... Aktuell: {portfolio.my_budget:.2f} USDT, "
-                       f"Benötigt: {safe_min_budget:.2f} USDT",
+                       f"Benötigt: {config_module.safe_min_budget:.2f} USDT",
                        extra={'event_type': 'WAITING_FOR_BUDGET',
                              'current': portfolio.my_budget,
-                             'required': safe_min_budget})
+                             'required': config_module.safe_min_budget})
 
             # Use shutdown-aware wait instead of blocking sleep
             if shutdown_coordinator.wait_for_shutdown(timeout=60.0):
@@ -275,12 +275,12 @@ def wait_for_sufficient_budget(portfolio: PortfolioManager, exchange):
                 return False
     
 
-    elif on_insufficient_budget == "observe":
-        if portfolio.my_budget < safe_min_budget:
+    elif config_module.on_insufficient_budget == "observe":
+        if portfolio.my_budget < config_module.safe_min_budget:
             logger.info(f"Budget unter Minimum. Bot laeuft im Observe-Modus.",
                        extra={'event_type': 'OBSERVE_MODE_LOW_BUDGET',
                              'budget': portfolio.my_budget,
-                             'required': safe_min_budget})
+                             'required': config_module.safe_min_budget})
             # CRITICAL FIX (C-MAIN-02): Remove unsafe global mutation, use thread-safe override
             config_module.set_config_override('GLOBAL_TRADING', False)
             config_module.set_config_override('global_trading', False)
@@ -297,7 +297,9 @@ def main():
 
     # Create stackdump file in session directory for debugging
     try:
-        stackdump_file = pathlib.Path(config_module.SESSION_DIR) / "stackdump.txt"
+        # Fallback to current dir if SESSION_DIR not initialized yet
+        session_dir = config_module.SESSION_DIR if config_module.SESSION_DIR else "."
+        stackdump_file = pathlib.Path(session_dir) / "stackdump.txt"
         stackdump_file.parent.mkdir(parents=True, exist_ok=True)
         # Handle offen halten!
         global STACKDUMP_FP
@@ -446,23 +448,43 @@ def main():
     
     # Rotating Logger initialisieren (jeder Logger -> eigene Datei)
     # Config-Werte sind bereits über 'from config import *' verfügbar
-    setup_rotating_logger("events", log_file=EVENTS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
-    setup_rotating_logger("mexc", log_file=MEXC_ORDERS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
-    setup_rotating_logger("audit", log_file=AUDIT_EVENTS_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
-    setup_rotating_logger("drop", log_file=DROP_AUDIT_LOG, max_bytes=LOG_MAX_BYTES, backups=LOG_BACKUP_COUNT)
+    setup_rotating_logger(
+        "events",
+        log_file=config_module.EVENTS_LOG,
+        max_bytes=config_module.LOG_MAX_BYTES,
+        backups=config_module.LOG_BACKUP_COUNT
+    )
+    setup_rotating_logger(
+        "mexc",
+        log_file=config_module.MEXC_ORDERS_LOG,
+        max_bytes=config_module.LOG_MAX_BYTES,
+        backups=config_module.LOG_BACKUP_COUNT
+    )
+    setup_rotating_logger(
+        "audit",
+        log_file=config_module.AUDIT_EVENTS_LOG,
+        max_bytes=config_module.LOG_MAX_BYTES,
+        backups=config_module.LOG_BACKUP_COUNT
+    )
+    setup_rotating_logger(
+        "drop",
+        log_file=config_module.DROP_AUDIT_LOG,
+        max_bytes=config_module.LOG_MAX_BYTES,
+        backups=config_module.LOG_BACKUP_COUNT
+    )
     # KEIN eigener Rotator für "engine" – Engine-Logs laufen über logger_setup.LOG_FILE
     
     # Log Konfiguration
     log_initial_config({
-        'max_trades': max_trades,
-        'drop_trigger_value': drop_trigger_value,
-        'take_profit_threshold': take_profit_threshold,
-        'stop_loss_threshold': stop_loss_threshold,
-        'use_trailing_stop': use_trailing_stop,
-        'symbol_cooldown_minutes': symbol_cooldown_minutes,
-        'min_order_buffer': min_order_buffer,
-        'reset_portfolio_on_start': reset_portfolio_on_start,
-        'use_ml_gatekeeper': use_ml_gatekeeper
+        'max_trades': config_module.max_trades,
+        'drop_trigger_value': config_module.drop_trigger_value,
+        'take_profit_threshold': config_module.take_profit_threshold,
+        'stop_loss_threshold': config_module.stop_loss_threshold,
+        'use_trailing_stop': config_module.use_trailing_stop,
+        'symbol_cooldown_minutes': config_module.symbol_cooldown_minutes,
+        'min_order_buffer': config_module.min_order_buffer,
+        'reset_portfolio_on_start': config_module.reset_portfolio_on_start,
+        'use_ml_gatekeeper': config_module.use_ml_gatekeeper
     })
     
     # Exchange Setup
@@ -650,7 +672,7 @@ def main():
                               'mode': config_module.DROP_TRIGGER_MODE})
     
     # Portfolio Reset wenn konfiguriert
-    if reset_portfolio_on_start and exchange:
+    if config_module.reset_portfolio_on_start and exchange:
         reset_env_confirmed = os.getenv("CONFIRM_PORTFOLIO_RESET", "").upper() == "YES"
         cli_force_reset = any(arg == "--force-reset" for arg in sys.argv)
         if not (reset_env_confirmed or cli_force_reset):
@@ -677,7 +699,7 @@ def main():
     # --- direkt danach ---
     state = {
         'has_api_keys': has_api_keys,
-        'budget_gate': portfolio.my_budget >= safe_min_budget if portfolio else False
+        'budget_gate': portfolio.my_budget >= config_module.safe_min_budget if portfolio else False
     }
     logger.info("EFFECTIVE_MODE: global_trading=%s (post-gates), has_api_keys=%s, budget_gate=%s",
                 config_module.GLOBAL_TRADING, state.get('has_api_keys'), state.get('budget_gate'))
@@ -845,7 +867,7 @@ def main():
         init_telegram_from_config()  # liest .env
         # Set session ID on the global tg instance
         tg.set_session_id(SESSION_ID)
-        _mode_for_tg = "LIVE" if (global_trading and exchange) else "OBSERVE"
+        _mode_for_tg = "LIVE" if (config_module.global_trading and exchange) else "OBSERVE"
         tg.notify_startup(_mode_for_tg, portfolio.my_budget if portfolio else 0.0)
         logger.info("Telegram notifications activated", extra={'event_type': 'TELEGRAM_INIT_SUCCESS'})
     except Exception as e:
@@ -970,7 +992,7 @@ def main():
 
     # Display Rich Start Summary
     start_budget = portfolio.my_budget if portfolio else 0.0
-    mode_str = "LIVE" if global_trading and exchange else "OBSERVE"
+    mode_str = "LIVE" if config_module.global_trading and exchange else "OBSERVE"
 
     start_summary(
         coins=len(topcoins),
@@ -1109,7 +1131,7 @@ def main():
             if tmod.time() >= next_heartbeat:
                 try:
                     budget = portfolio.my_budget if portfolio else 0.0
-                    mode = "LIVE" if global_trading and exchange else "OBSERVE"
+                    mode = "LIVE" if config_module.global_trading and exchange else "OBSERVE"
                     engine_running = engine.is_running() if engine else False
 
                     # Gather extended heartbeat information

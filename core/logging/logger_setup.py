@@ -132,15 +132,21 @@ class TimeoutUTCJsonFormatter(UTCJsonFormatter):
         if sys.platform == 'win32':
             return super().format(record)
 
+        import threading
         result = [None]
         timed_out = [False]
 
-        def timeout_handler(signum, frame):
-            timed_out[0] = True
-            raise TimeoutError("Formatter timeout")
+        # CRITICAL FIX: signal.signal() only works in main thread
+        # Skip timeout handling in background threads
+        is_main_thread = threading.current_thread() is threading.main_thread()
 
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.setitimer(signal.ITIMER_REAL, self.timeout_ms / 1000.0)
+        if is_main_thread:
+            def timeout_handler(signum, frame):
+                timed_out[0] = True
+                raise TimeoutError("Formatter timeout")
+
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.setitimer(signal.ITIMER_REAL, self.timeout_ms / 1000.0)
 
         try:
             result[0] = super().format(record)
@@ -153,8 +159,9 @@ class TimeoutUTCJsonFormatter(UTCJsonFormatter):
         except Exception as e:
             result[0] = f'{{"level":"{record.levelname}","event":"FORMATTER_ERROR","error":"{str(e)}"}}'
         finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, old_handler)
+            if is_main_thread:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, old_handler)
 
         return result[0]
 

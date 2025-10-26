@@ -163,8 +163,12 @@ class RollingWindowManager:
             logger.info(f"RollingWindowManager initialized (no persistence)")
 
     def _path(self, sym: str) -> str:
-        """Get file path for symbol's persisted window."""
-        return os.path.join(self.base_path, f"{sym}.json")
+        """Get file path for symbol's persisted window.
+
+        Sanitize symbol to avoid directory separators in filenames (e.g., "BTC/USDT").
+        """
+        safe = str(sym).replace("/", "_").replace(os.sep, "_").replace(":", "_")
+        return os.path.join(self.base_path, f"{safe}.json")
 
     def ensure(self, sym: str) -> RollingWindow:
         """
@@ -223,6 +227,11 @@ class RollingWindowManager:
         try:
             path = self._path(symbol)
             tmp_path = f"{path}.tmp"
+
+            # Ensure parent directory exists (defensive)
+            parent_dir = os.path.dirname(path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             data = {
                 "lookback_s": rw.lookback_s,

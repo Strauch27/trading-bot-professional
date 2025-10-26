@@ -1020,9 +1020,10 @@ class TradingEngine:
             # Calculate BTC change factor
             btc_price = self.market_data.get_price("BTC/USDT")
             if btc_price:
-                btc_history = self.market_data.get_ohlcv_history("BTC/USDT", limit=60)
-                if btc_history and len(btc_history.bars) >= 2:
-                    recent_bars = btc_history.bars[-60:]
+                # FIX: Use fetch_ohlcv instead of get_ohlcv_history (method doesn't exist)
+                btc_history = self.market_data.fetch_ohlcv("BTC/USDT", timeframe='1m', limit=60, store=True)
+                if btc_history and len(btc_history) >= 2:
+                    recent_bars = btc_history[-60:]
                     if len(recent_bars) >= 2:
                         btc_60m_ago = recent_bars[0].close
                         btc_change_factor = btc_price / btc_60m_ago
@@ -1040,9 +1041,10 @@ class TradingEngine:
                 if not current_price:
                     continue
 
-                history = self.market_data.get_ohlcv_history(symbol, limit=60)
-                if history and len(history.bars) >= 2:
-                    recent_bars = history.bars[-60:]
+                # FIX: Use fetch_ohlcv instead of get_ohlcv_history (method doesn't exist)
+                history = self.market_data.fetch_ohlcv(symbol, timeframe='1m', limit=60, store=True)
+                if history and len(history) >= 2:
+                    recent_bars = history[-60:]
                     if len(recent_bars) >= 2:
                         price_60m_ago = recent_bars[0].close
                         if current_price < price_60m_ago:

@@ -739,9 +739,9 @@ topcoins_keys = [
     'SOONUSDT', 'STBLUSDT', 'STXUSDT', 'SUIUSDT', 'TAOUSDT', 'TIAUSDT', 'TLMUSDT', 'TONUSDT',
     'TOWNSUSDT', 'TRUMPUSDT', 'TRXUSDT', 'UCNUSDT', 'ULTIUSDT', 'UMAUSDT', 'UNIUSDT', 'USELESSUSDT',
     'VETUSDT', 'VIRTUALUSDT', 'WALUSDT', 'WBTCUSDT', 'WIFUSDT', 'WLDUSDT', 'WLFIUSDT', 'XDCUSDT',
-    'XLMUSDT', 'XMRUSDT', 'XPINUSDT', 'XPLUSUSDT', 'XRPUSDT', 'XTZUSDT', 'ZBTUSDT', 'ZECUSDT',
+    'XLMUSDT', 'XMRUSDT', 'XPINUSDT', 'XRPUSDT', 'XTZUSDT', 'ZBTUSDT', 'ZECUSDT',
     'ZENUSDT', 'ZORAUSDT'
-]
+]  # FIX: XPLUS/USDT removed - symbol not tradeable on exchange (causes BadSymbol errors)
 
 # Convert to CCXT format (with slash) for market data loop
 TOPCOINS_SYMBOLS = [key.replace('USDT', '/USDT') for key in topcoins_keys]

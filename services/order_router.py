@@ -19,6 +19,7 @@ import time
 import math
 import logging
 import threading
+import hashlib
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import ccxt
@@ -121,7 +122,9 @@ class OrderRouter:
         Returns:
             clientOrderId for exchange
         """
-        return f"TBP-{intent_id}"
+        # Mexc allows only 32 chars [0-9a-zA-Z_-], so hash the intent_id
+        digest = hashlib.sha1(intent_id.encode("utf-8")).hexdigest()[:18]
+        return f"TBP{digest}"
 
     def _reserve_budget(
         self,

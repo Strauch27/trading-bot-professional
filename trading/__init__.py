@@ -34,6 +34,7 @@ from .orderbook import (
 
 from .settlement import (
     refresh_budget_from_exchange,
+    refresh_budget_from_exchange_safe,
     wait_for_balance_settlement,
     sync_active_order_and_state,
 )
@@ -63,6 +64,7 @@ __all__ = [
     'compute_limit_buy_price_from_book',
     # Settlement
     'refresh_budget_from_exchange',
+    'refresh_budget_from_exchange_safe',
     'wait_for_balance_settlement',
     'sync_active_order_and_state',
     # Helpers
