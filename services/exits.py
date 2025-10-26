@@ -764,13 +764,17 @@ class ExitManager:
                          current_price: float) -> bool:
         """Queue an exit signal for processing"""
         try:
+            # Filter out 'symbol' from position_data to avoid duplicate kwarg
+            # (position_data may contain 'symbol' key which would conflict with symbol parameter)
+            extra_data = {k: v for k, v in position_data.items() if k != 'symbol'}
+
             # Use the SignalManager's add_exit_signal method
             self.signal_manager.add_exit_signal(
                 symbol=symbol,
                 signal_type=reason,
                 reason=reason,
                 current_price=current_price,
-                **position_data
+                **extra_data
             )
             return True
 

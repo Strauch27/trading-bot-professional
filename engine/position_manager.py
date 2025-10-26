@@ -39,29 +39,50 @@ class PositionManager:
 
     def manage_positions(self):
         """Manage all active positions"""
+        logger.info(f"[POSITION_MGMT] Starting position management - positions count: {len(self.engine.positions)}",
+                   extra={'event_type': 'POSITION_MGMT_START'})
+
         with self.engine._lock:
             for symbol, data in list(self.engine.positions.items()):
                 try:
+                    logger.debug(f"[POSITION_MGMT] Processing {symbol}", extra={'event_type': 'POSITION_MGMT_SYMBOL'})
+
                     current_price = self.engine.get_current_price(symbol)
                     if not current_price:
+                        logger.warning(f"[POSITION_MGMT] No price available for {symbol}",
+                                     extra={'event_type': 'POSITION_MGMT_NO_PRICE', 'symbol': symbol})
                         continue
+
+                    logger.debug(f"[POSITION_MGMT] {symbol} current_price={current_price}",
+                               extra={'event_type': 'POSITION_MGMT_PRICE', 'symbol': symbol, 'price': current_price})
 
                     # 1. Update trailing stops
                     if self.engine.config.enable_trailing_stops:
+                        logger.debug(f"[POSITION_MGMT] Updating trailing stops for {symbol}",
+                                   extra={'event_type': 'POSITION_MGMT_TRAILING'})
                         self.update_trailing_stops(symbol, data, current_price)
 
                     # 2. Restore missing exit protections
+                    logger.debug(f"[POSITION_MGMT] Restoring exit protections for {symbol}",
+                               extra={'event_type': 'POSITION_MGMT_PROTECTIONS'})
                     self.restore_exit_protections(symbol, data, current_price)
 
                     # 3. Evaluate exit conditions
                     if self.engine.config.enable_auto_exits:
+                        logger.info(f"[POSITION_MGMT] Evaluating exits for {symbol} (enable_auto_exits=True)",
+                                  extra={'event_type': 'POSITION_MGMT_EXIT_EVAL_START', 'symbol': symbol})
                         self.evaluate_position_exits(symbol, data, current_price)
+                    else:
+                        logger.warning(f"[POSITION_MGMT] Exit evaluation SKIPPED for {symbol} (enable_auto_exits=False)",
+                                     extra={'event_type': 'POSITION_MGMT_EXIT_EVAL_DISABLED', 'symbol': symbol})
 
                     # 4. Update unrealized PnL
+                    logger.debug(f"[POSITION_MGMT] Updating PnL for {symbol}",
+                               extra={'event_type': 'POSITION_MGMT_PNL'})
                     self.update_unrealized_pnl(symbol, data, current_price)
 
                 except Exception as e:
-                    logger.error(f"Position management error for {symbol}: {e}")
+                    logger.error(f"Position management error for {symbol}: {e}", exc_info=True)
 
     def update_trailing_stops(self, symbol: str, data: Dict, current_price: float):
         """Update trailing stops via Trailing Manager"""

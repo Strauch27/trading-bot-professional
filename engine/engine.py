@@ -847,11 +847,19 @@ class TradingEngine:
                         self.last_exit_processing = cycle_start
 
                     # 3. Position Management (every 2s) - Delegated to PositionManager
-                    if cycle_start - self.last_position_check > 2.0:
+                    time_since_last_check = cycle_start - self.last_position_check
+                    if time_since_last_check > 2.0:
+                        logger.info(f"[ENGINE] Position management triggered (time_since_last={time_since_last_check:.1f}s, positions={len(self.positions)})",
+                                  extra={'event_type': 'ENGINE_POSITION_CHECK_TRIGGER'})
                         co.beat("before_position_management")
                         self.position_manager.manage_positions()
                         co.beat("after_position_management")
                         self.last_position_check = cycle_start
+                        logger.debug(f"[ENGINE] Position management completed",
+                                   extra={'event_type': 'ENGINE_POSITION_CHECK_DONE'})
+                    else:
+                        logger.debug(f"[ENGINE] Position management skipped (time_since_last={time_since_last_check:.1f}s < 2.0s)",
+                                   extra={'event_type': 'ENGINE_POSITION_CHECK_SKIP'})
 
                     # 4. Buy Opportunities (every 3s) - Delegated to BuyDecisionHandler
                     trace_step("buy_opportunities_eval_start", cycle=loop_counter, symbols_count=len(self.topcoins))
