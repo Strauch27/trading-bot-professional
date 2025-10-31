@@ -141,9 +141,12 @@ class MinimalTradingEngine:
         """
         try:
             # Iterate over all open positions
-            # FIX HIGH-3: Use thread-safe iteration
-            positions = self.portfolio.get_all_positions()
-            for symbol, pos in positions.items():
+            # FIX HIGH-3: Use thread-safe iteration (snapshot pattern)
+            positions_snapshot = list(self.portfolio.positions.keys())
+            for symbol in positions_snapshot:
+                pos = self.portfolio.positions.get(symbol)
+                if not pos:
+                    continue
 
                 # Skip positions with no qty (closed)
                 if not pos or pos.qty == 0:
@@ -184,8 +187,8 @@ class MinimalTradingEngine:
         For this example, we create simplified snapshots.
         """
         try:
-            # FIX HIGH-3: Use thread-safe iteration
-            for symbol in list(self.portfolio.get_all_positions().keys()):
+            # FIX HIGH-3: Use thread-safe iteration (snapshot pattern)
+            for symbol in list(self.portfolio.positions.keys()):
                 # Fetch current ticker
                 ticker = self.exchange_wrapper.fetch_ticker(symbol)
 
