@@ -176,11 +176,15 @@ SWITCH_TO_TP_THRESHOLD = 1.002  # Bei +0.2% zurück zu TP
 SWITCH_COOLDOWN_S = 20  # Mindestens 20s zwischen Umschaltungen
 
 # ATR-basierte dynamische Exits (Fortgeschritten)
-USE_ATR_BASED_EXITS = False  # False = Feste %, True = Volatilitäts-basiert
-ATR_PERIOD = 14
-ATR_SL_MULTIPLIER = 0.6
-ATR_TP_MULTIPLIER = 1.6
-ATR_MIN_SAMPLES = 15
+# ⚠️ NOTE: ATR-based exits are NOT YET IMPLEMENTED (Code Review Finding)
+# These configs are defined for future use but currently have no effect.
+# The bot uses fixed percentage TP/SL thresholds (see above).
+# Implementation planned for future release.
+USE_ATR_BASED_EXITS = False  # NOT IMPLEMENTED - Do not enable!
+ATR_PERIOD = 14  # Not used (planned feature)
+ATR_SL_MULTIPLIER = 0.6  # Not used (planned feature)
+ATR_TP_MULTIPLIER = 1.6  # Not used (planned feature)
+ATR_MIN_SAMPLES = 15  # Not used (planned feature)
 
 # =============================================================================
 # 3. ENTRY STRATEGIE (V9_3-Compatible Anchor-based Drop Trigger)
@@ -394,6 +398,24 @@ DEPTH_MIN_NOTIONAL_USD = 200  # Min kumulierte Depth (Notional)
 EXIT_MIN_LIQUIDITY_SPREAD_PCT = 10.0  # Block exit if spread exceeds this percentage
 EXIT_LOW_LIQUIDITY_ACTION = "skip"  # "skip" = return error, "market" = use market order, "wait" = requeue
 EXIT_LOW_LIQUIDITY_REQUEUE_DELAY_S = 60  # Requeue delay if action="wait"
+
+# =============================================================================
+# ADVANCED TUNING PARAMETERS (ACTION 3.1 - From Code Review)
+# =============================================================================
+
+# Buy Flow Management
+MAX_PENDING_BUY_INTENTS = 100  # Maximum pending buy intents before eviction
+PENDING_INTENT_TTL_S = 300  # Auto-clear intents older than 5 minutes
+
+# Exit Flow Management
+EXIT_INTENT_TTL_S = 300  # Auto-clear stuck exit intents after 5 minutes
+
+# Position Management
+POSITION_LOCK_TIMEOUT_S = 30  # Max wait time for position lock (deadlock prevention)
+
+# Order Router Cleanup (from H5 fix - previously hardcoded)
+ROUTER_CLEANUP_INTERVAL_S = 3600  # Run cleanup every hour
+ROUTER_COMPLETED_ORDER_TTL_S = 7200  # Keep completed orders for 2 hours
 
 # =============================================================================
 # ORDER FLOW HARDENING (Phases 2-12) - Feature Flags
@@ -951,8 +973,62 @@ def validate_config():
     expected_pct = 1.0 + (PREDICTIVE_BUY_ZONE_BPS / 10_000.0)
     if abs(PREDICTIVE_BUY_ZONE_PCT - expected_pct) > 1e-9:
         problems.append("PREDICTIVE_BUY_ZONE_PCT weicht von BPS-Ableitung ab")
+
+    # ========================================================================
+    # FIX ACTION 3.3: Cross-Parameter Validation
+    # ========================================================================
+
+    # TP/SL Threshold Logical Ordering
+    if not (STOP_LOSS_THRESHOLD < 1.0 < TAKE_PROFIT_THRESHOLD):
+        problems.append(
+            f"Invalid TP/SL thresholds: SL({STOP_LOSS_THRESHOLD}) must be < 1.0 < TP({TAKE_PROFIT_THRESHOLD})"
+        )
+
+    if not (STOP_LOSS_THRESHOLD < SWITCH_TO_SL_THRESHOLD < 1.0):
+        problems.append(
+            f"Invalid switch thresholds: SL({STOP_LOSS_THRESHOLD}) < SWITCH_TO_SL({SWITCH_TO_SL_THRESHOLD}) < 1.0"
+        )
+
+    if not (1.0 < SWITCH_TO_TP_THRESHOLD < TAKE_PROFIT_THRESHOLD):
+        problems.append(
+            f"Invalid switch thresholds: 1.0 < SWITCH_TO_TP({SWITCH_TO_TP_THRESHOLD}) < TP({TAKE_PROFIT_THRESHOLD})"
+        )
+
+    # Market Data TTL Logic
+    if MD_CACHE_SOFT_TTL_MS >= MD_CACHE_TTL_MS:
+        problems.append(
+            f"Soft TTL must be < hard TTL: soft({MD_CACHE_SOFT_TTL_MS}) >= hard({MD_CACHE_TTL_MS})"
+        )
+
+    if MD_PORTFOLIO_SOFT_TTL_MS >= MD_PORTFOLIO_TTL_MS:
+        problems.append(
+            f"Portfolio soft TTL must be < hard TTL: soft({MD_PORTFOLIO_SOFT_TTL_MS}) >= hard({MD_PORTFOLIO_TTL_MS})"
+        )
+
+    # Budget vs Position Size
+    if SAFE_MIN_BUDGET < POSITION_SIZE_USDT:
+        logger.warning(
+            f"SAFE_MIN_BUDGET({SAFE_MIN_BUDGET}) < POSITION_SIZE_USDT({POSITION_SIZE_USDT}) - "
+            "Bot may not be able to open positions"
+        )
+
+    # Drop Trigger Value
+    if DROP_TRIGGER_VALUE >= 1.0:
+        problems.append(
+            f"DROP_TRIGGER_VALUE({DROP_TRIGGER_VALUE}) must be < 1.0 (represents drop from peak)"
+        )
+
+    # Anchor Clamps
+    if ANCHOR_MAX_START_DROP_PCT < 0:
+        problems.append(f"ANCHOR_MAX_START_DROP_PCT must be >= 0 (is {ANCHOR_MAX_START_DROP_PCT})")
+
+    if ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT < 0:
+        problems.append(f"ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT must be >= 0 (is {ANCHOR_CLAMP_MAX_ABOVE_PEAK_PCT})")
+
     if problems:
         raise ValueError("Config validation failed: " + "; ".join(problems))
+
+    logger.info("✅ Config validation passed (including cross-parameter checks)")
     return True
 
 def validate_config_schema():

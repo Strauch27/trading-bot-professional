@@ -576,7 +576,7 @@ class BuyDecisionHandler:
             }
 
             # CRITICAL FIX (H-ENG-01): Enforce capacity limit on pending_buy_intents
-            MAX_PENDING_INTENTS = 100  # Prevent unbounded memory growth
+            MAX_PENDING_INTENTS = getattr(config, 'MAX_PENDING_BUY_INTENTS', 100)  # Prevent unbounded memory growth
             if len(self.engine.pending_buy_intents) >= MAX_PENDING_INTENTS:
                 # Evict oldest intent to make room
                 oldest_intent = min(

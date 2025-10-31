@@ -103,9 +103,10 @@ class OrderRouter:
         self._order_meta: Dict[str, Dict[str, Any]] = {}
 
         # FIX H5: Memory leak prevention - track last cleanup time
+        import config as cfg
         self._last_cleanup_time = time.time()
-        self._cleanup_interval_s = 3600  # Cleanup every hour
-        self._completed_order_ttl_s = 7200  # Keep completed orders for 2 hours
+        self._cleanup_interval_s = getattr(cfg, 'ROUTER_CLEANUP_INTERVAL_S', 3600)  # Cleanup every hour
+        self._completed_order_ttl_s = getattr(cfg, 'ROUTER_COMPLETED_ORDER_TTL_S', 7200)  # Keep completed orders for 2 hours
 
         # P1: Debounced state persistence for order metadata
         self._init_state_persistence()
