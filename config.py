@@ -352,7 +352,7 @@ SMA_GUARD_WINDOW = 50
 USE_VOLUME_GUARD = False  # Volumen-Filter (deaktiviert)
 VOLUME_GUARD_WINDOW = 15
 VOLUME_GUARD_FACTOR = 1.020
-MIN_24HUSD_VOLUME = 150000
+MIN_24HUSD_VOLUME = 500_000  # LIQUIDITY FIX: Increased from 150k to 500k for better liquidity
 
 USE_SPREAD_GUARD = False  # Spread-Filter (deaktiviert)
 GUARD_MAX_SPREAD_BPS = 35
@@ -436,7 +436,7 @@ USE_FIRST_FILL_TS_FOR_TTL = True  # Use first_fill_ts instead of order timestamp
 ENABLE_SYMBOL_LOCKS = True  # Thread-safe per-symbol locking for portfolio ops
 
 # Phase 7: Spread/Depth Guards (already defined above)
-ENABLE_SPREAD_GUARD_ENTRY = False  # Block buys when spread > MAX_SPREAD_BPS_ENTRY
+ENABLE_SPREAD_GUARD_ENTRY = True  # LIQUIDITY FIX: Enable spread check to block illiquid coins
 ENABLE_DEPTH_GUARD_ENTRY = False  # Block buys when depth < DEPTH_MIN_NOTIONAL_USD
 # MAX_SPREAD_BPS_ENTRY and DEPTH_MIN_NOTIONAL_USD defined above
 
@@ -565,6 +565,13 @@ SELL_SLIPPAGE_PCT = 0.001
 UNIVERSE_TOP_N_BY_VOL = 72
 MIN_NOTIONAL_USDT = 5.0
 EXCLUDE_SYMBOL_PREFIXES = ["BULL/", "BEAR/", "3L/", "3S/", "UP/", "DOWN/"]
+
+# LIQUIDITY FIX: Blacklist for known illiquid coins (manual maintenance)
+LIQUIDITY_BLACKLIST = [
+    "COAI/USDT",   # Low liquidity - 216 Oversold errors in testing
+    "SOON/USDT",   # Had 100+ Oversold errors
+    "MBG/USDT",    # Known liquidity issues
+]
 MIN_ORDER_VALUE = 5.1
 MIN_ORDER_BUFFER = 0.002
 DUST_FACTOR = 0.9995

@@ -219,10 +219,19 @@ def setup_topcoins(exchange):
     supported = set(exchange.symbols)
     normalized = {symbol.replace("/", ""): symbol for symbol in supported}
 
+    # LIQUIDITY FIX: Filter out blacklisted coins
+    liquidity_blacklist = getattr(config_module, 'LIQUIDITY_BLACKLIST', [])
+
     # Create managed deques instead of unlimited deques
     topcoins = {}
     for k in config_module.topcoins_keys:
         symbol = normalized.get(k)
+
+        # Skip blacklisted coins
+        if symbol in liquidity_blacklist:
+            logger.debug(f"Skipping blacklisted coin (low liquidity): {symbol}")
+            continue
+
         if symbol in supported:
             # Create managed deque with reasonable limits and auto-cleanup
             managed_deque = create_managed_deque(
