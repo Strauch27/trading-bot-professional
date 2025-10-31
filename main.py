@@ -13,7 +13,7 @@ try:
 except Exception:
     pass
 
-import faulthandler
+# FIX: Removed duplicate faulthandler import (was here on line 15)
 import json
 import logging
 import os

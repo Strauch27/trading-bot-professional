@@ -2131,7 +2131,8 @@ class MarketDataProvider:
         self._last_success_rate = None
 
         import threading
-        self._thread = threading.Thread(target=self._loop, name="MarketDataLoop", daemon=True)
+        # FIX ACTION 1.3: Wrap _loop with auto-restart capability
+        self._thread = threading.Thread(target=self._loop_with_auto_restart, name="MarketDataLoop", daemon=True)
         self._thread.start()
 
         # ULTRA DEBUG
@@ -2224,6 +2225,67 @@ class MarketDataProvider:
             logger.error(f"Error during JSONL writer cleanup: {e}")
 
         logger.info("Market data loop stopped")
+
+    def _loop_with_auto_restart(self):
+        """
+        Wrapper for _loop() with auto-restart capability.
+
+        FIX ACTION 1.3: Implements MD_AUTO_RESTART_ON_CRASH config
+        """
+        import config
+        import time
+
+        restart_count = 0
+        max_restarts = getattr(config, 'MD_MAX_AUTO_RESTARTS', 5)
+        restart_delay_s = getattr(config, 'MD_AUTO_RESTART_DELAY_S', 5.0)
+
+        while self._running:
+            try:
+                # Run main loop
+                self._loop()
+
+                # If we get here, loop exited normally
+                logger.info("Market data loop exited normally")
+                break
+
+            except Exception as e:
+                logger.error(
+                    f"Market data thread crashed: {e}",
+                    extra={
+                        'event_type': 'MD_THREAD_CRASH',
+                        'error': str(e),
+                        'restart_count': restart_count
+                    },
+                    exc_info=True
+                )
+
+                # Check if auto-restart is enabled
+                if not getattr(config, 'MD_AUTO_RESTART_ON_CRASH', False):
+                    logger.critical(
+                        "Market data thread crashed and auto-restart is DISABLED - thread exiting",
+                        extra={'event_type': 'MD_THREAD_EXIT_NO_RESTART'}
+                    )
+                    self._running = False
+                    break
+
+                # Check restart limit
+                restart_count += 1
+                if restart_count > max_restarts:
+                    logger.critical(
+                        f"Market data thread exceeded max auto-restarts ({max_restarts}) - giving up",
+                        extra={'event_type': 'MD_THREAD_MAX_RESTARTS_EXCEEDED', 'restart_count': restart_count}
+                    )
+                    self._running = False
+                    break
+
+                # Auto-restart with delay
+                logger.warning(
+                    f"Auto-restarting market data thread in {restart_delay_s}s (restart #{restart_count})",
+                    extra={'event_type': 'MD_THREAD_AUTO_RESTART', 'restart_count': restart_count, 'delay_s': restart_delay_s}
+                )
+
+                time.sleep(restart_delay_s)
+                # Loop continues - thread restarts
 
     def _loop(self):
         """Market data polling loop - fetches and publishes snapshots"""

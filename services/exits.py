@@ -566,12 +566,53 @@ class ExitOrderManager:
                                 extra={'event_type': 'LOW_LIQUIDITY_WARNING', 'symbol': context.symbol}
                             )
 
-                        # If spread is extreme (>10%), this is very risky
-                        if spread_pct > 10.0:
+                        # FIX ACTION 1.2: Block exit if spread is too wide
+                        import config as cfg
+                        max_spread = getattr(cfg, 'EXIT_MIN_LIQUIDITY_SPREAD_PCT', 10.0)
+
+                        if spread_pct > max_spread:
                             logger.error(
-                                f"CRITICAL: Extreme low liquidity for {context.symbol}, "
-                                f"spread={spread_pct:.2f}%",
-                                extra={'event_type': 'CRITICAL_LOW_LIQUIDITY', 'symbol': context.symbol}
+                                f"EXIT BLOCKED - Low Liquidity: {context.symbol} | "
+                                f"Spread={spread_pct:.2f}% > {max_spread}% | "
+                                f"Bid={bid:.8f}, Ask={ask:.8f}",
+                                extra={
+                                    'event_type': 'EXIT_BLOCKED_LOW_LIQUIDITY',
+                                    'symbol': context.symbol,
+                                    'spread_pct': spread_pct,
+                                    'threshold': max_spread
+                                }
+                            )
+
+                            # Handle based on configured action
+                            action = getattr(cfg, 'EXIT_LOW_LIQUIDITY_ACTION', 'skip')
+
+                            if action == "skip":
+                                return ExitResult(
+                                    success=False,
+                                    reason="low_liquidity",
+                                    error=f"Spread too wide: {spread_pct:.2f}% > {max_spread}%"
+                                )
+                            elif action == "wait":
+                                # Return error indicating requeue needed
+                                delay_s = getattr(cfg, 'EXIT_LOW_LIQUIDITY_REQUEUE_DELAY_S', 60)
+                                logger.info(f"Exit should be requeued for {context.symbol} after {delay_s}s")
+                                return ExitResult(
+                                    success=False,
+                                    reason="low_liquidity_requeue",
+                                    error=f"Requeue after {delay_s}s - spread too wide"
+                                )
+                            elif action == "market":
+                                logger.warning(
+                                    f"Proceeding with exit despite low liquidity for {context.symbol} (action=market)"
+                                )
+                                # Continue with execution below
+
+                        # Warn if spread is high but not blocking
+                        elif spread_pct > 5.0:
+                            logger.warning(
+                                f"Low liquidity detected for {context.symbol}: "
+                                f"Spread={spread_pct:.2f}%, Bid={bid:.8f}, Ask={ask:.8f}",
+                                extra={'event_type': 'LOW_LIQUIDITY_WARNING', 'symbol': context.symbol, 'spread_pct': spread_pct}
                             )
 
             except Exception as ticker_err:

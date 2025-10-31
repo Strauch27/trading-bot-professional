@@ -87,7 +87,7 @@ class BuyDecisionHandler:
             # 0. NEW PIPELINE: Read drop data from MarketSnapshot store
             # RollingWindows are now updated centrally in MarketDataService
             snapshot, snapshot_ts = self.engine.get_snapshot_entry(symbol)
-            stale_ttl = getattr(config, 'SNAPSHOT_STALE_TTL_S', 30.0)
+            stale_ttl = config.SNAPSHOT_STALE_TTL_S
             if snapshot and snapshot_ts is not None and (time.time() - snapshot_ts) > stale_ttl:
                 trace_step("snapshot_stale", symbol=symbol, age=time.time() - snapshot_ts)
                 snapshot = None

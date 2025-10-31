@@ -200,7 +200,7 @@ def get_config_data(config_module, start_time: float) -> Dict[str, Any]:
         "TP": (tp - 1.0) * 100,
         "SL": (sl - 1.0) * 100,
         "DT": (dt - 1.0) * 100,
-        "MAX_TRADES": getattr(config_module, 'MAX_TRADES', 0),
+        "MAX_POSITIONS": getattr(config_module, 'MAX_CONCURRENT_POSITIONS', 10),
         "uptime": time.strftime("%H:%M:%S", time.gmtime(uptime_seconds)),
     }
 
@@ -258,7 +258,7 @@ def get_drop_data(engine, portfolio, config_module) -> List[Dict[str, Any]]:
         # Access drop snapshot store (long-term solution)
         drop_snapshot_store = getattr(engine, 'drop_snapshot_store', {})
         stale_symbols: List[str] = []
-        stale_ttl = getattr(config_module, 'SNAPSHOT_STALE_TTL_S', 30.0)
+        stale_ttl = config_module.SNAPSHOT_STALE_TTL_S
         now_ts = time.time()
 
         # If snapshot store is available and populated, use it (preferred)
@@ -462,7 +462,7 @@ def get_health_data(engine, config_module) -> Dict[str, Any]:
         'snapshot_age': snapshot_age,
         'stale_count': len(stale_symbols),
         'stale_symbols': stale_symbols,
-        'snapshot_ttl': getattr(config_module, 'SNAPSHOT_STALE_TTL_S', 30.0)
+        'snapshot_ttl': config_module.SNAPSHOT_STALE_TTL_S
     }
 
 
@@ -497,7 +497,7 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
         (" | ", "dim white"),
         (f"DT: {config_data.get('DT', 0):+.1f}%", "cyan"),
         (" | ", "dim white"),
-        (f"MAX TRADES: {config_data.get('MAX_TRADES', 0)}", "cyan"),
+        (f"MAX POS: {config_data.get('MAX_POSITIONS', 0)}", "cyan"),
     )
 
     # Combine

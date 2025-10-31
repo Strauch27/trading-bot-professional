@@ -189,6 +189,17 @@ class PositionManager:
 
                 if time_since_last_switch < switch_cooldown_s:
                     # Still in cooldown
+                    logger.debug(
+                        f"Switch cooldown active for {symbol}: "
+                        f"{time_since_last_switch:.1f}s < {switch_cooldown_s}s | "
+                        f"Skipping switch request",
+                        extra={
+                            'event_type': 'SWITCH_COOLDOWN_ACTIVE',
+                            'symbol': symbol,
+                            'time_since_last_s': time_since_last_switch,
+                            'cooldown_s': switch_cooldown_s
+                        }
+                    )
                     return
 
                 # Get current protection state (re-check inside lock!)

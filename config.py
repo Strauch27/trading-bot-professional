@@ -249,7 +249,9 @@ MD_DEBUG_LOG_FILE = "market_data_debug.log"  # Dedicated log file for market dat
 MD_HEALTH_CHECK_INTERVAL_S = 60  # Check thread liveness every 60s
 MD_HEARTBEAT_INTERVAL_CYCLES = 100  # Log heartbeat every 100 cycles
 MD_SNAPSHOT_TIMEOUT_S = 45  # Alert if no snapshots for 45s (increased headroom for batch processing)
-MD_AUTO_RESTART_ON_CRASH = False  # Auto-restart thread if it dies (experimental)
+MD_AUTO_RESTART_ON_CRASH = True  # Auto-restart thread if it dies (ACTION 1.3 - now implemented!)
+MD_MAX_AUTO_RESTARTS = 5  # Maximum auto-restart attempts before giving up
+MD_AUTO_RESTART_DELAY_S = 5.0  # Delay between restart attempts (seconds)
 MD_SUCCESS_RATE_WARNING_THRESHOLD = 0.80  # Warn if success rate < 80%
 
 # Rate Limiting (Token Bucket)
@@ -282,6 +284,8 @@ UI_FALLBACK_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]  # Symbols for fallba
 
 # V9_3 Persistence - 4-Stream JSONL (Ticks, Snapshots, Windows, Anchors)
 SNAPSHOT_MIN_PERIOD_MS = 500  # Minimum time between snapshots (ms)
+SNAPSHOT_STALE_TTL_S = 30.0  # Maximum age for snapshot data before considered stale (ACTION 1.4)
+SNAPSHOT_REQUIRED_FOR_BUY = False  # Block buy decisions if no fresh snapshot available (strict mode)
 MAX_FILE_MB = 50  # JSONL rotation threshold (MB)
 PERSIST_TICKS = True  # Enable per-symbol tick persistence
 PERSIST_SNAPSHOTS = True  # Enable snapshot stream persistence
@@ -385,6 +389,11 @@ BUY_LIMIT_PREMIUM_BPS = 8
 # Phase 7: Spread & Depth Guards
 MAX_SPREAD_BPS_ENTRY = 20  # Increased from 10 to 20 (0.2%) for volatile altcoins
 DEPTH_MIN_NOTIONAL_USD = 200  # Min kumulierte Depth (Notional)
+
+# Exit Liquidity Protection (ACTION 1.2 - Code Review Fix)
+EXIT_MIN_LIQUIDITY_SPREAD_PCT = 10.0  # Block exit if spread exceeds this percentage
+EXIT_LOW_LIQUIDITY_ACTION = "skip"  # "skip" = return error, "market" = use market order, "wait" = requeue
+EXIT_LOW_LIQUIDITY_REQUEUE_DELAY_S = 60  # Requeue delay if action="wait"
 
 # =============================================================================
 # ORDER FLOW HARDENING (Phases 2-12) - Feature Flags
