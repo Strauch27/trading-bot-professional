@@ -576,25 +576,53 @@ class BuyDecisionHandler:
             }
 
             # CRITICAL FIX (H-ENG-01): Enforce capacity limit on pending_buy_intents
-            MAX_PENDING_INTENTS = getattr(config, 'MAX_PENDING_BUY_INTENTS', 100)  # Prevent unbounded memory growth
+            # FIX BUY-01: Improved eviction - prioritize stale intents first
+            MAX_PENDING_INTENTS = getattr(config, 'MAX_PENDING_BUY_INTENTS', 100)
+            INTENT_TTL_S = getattr(config, 'PENDING_INTENT_TTL_S', 300)
+
             if len(self.engine.pending_buy_intents) >= MAX_PENDING_INTENTS:
-                # Evict oldest intent to make room
-                oldest_intent = min(
-                    self.engine.pending_buy_intents.items(),
-                    key=lambda x: x[1].get('start_ts', float('inf'))
-                )
-                oldest_id, oldest_meta = oldest_intent
-                logger.warning(
-                    f"Pending intents at capacity ({MAX_PENDING_INTENTS}), "
-                    f"evicting oldest intent {oldest_id} for {oldest_meta.get('symbol')}",
-                    extra={
-                        'event_type': 'INTENT_CAPACITY_EVICTION',
-                        'evicted_id': oldest_id,
-                        'evicted_symbol': oldest_meta.get('symbol'),
-                        'age_s': time.time() - oldest_meta.get('start_ts', time.time())
-                    }
-                )
-                self.engine.clear_intent(oldest_id, reason="capacity_eviction")
+                current_time = time.time()
+
+                # First, try to evict stale intents (older than TTL)
+                stale_intents = [
+                    (iid, meta) for iid, meta in self.engine.pending_buy_intents.items()
+                    if (current_time - meta.get('start_ts', current_time)) > INTENT_TTL_S
+                ]
+
+                if stale_intents:
+                    # Evict stale intent
+                    evict_id, evict_meta = stale_intents[0]
+                    age_s = current_time - evict_meta.get('start_ts', current_time)
+                    logger.warning(
+                        f"Evicting stale intent {evict_id} for {evict_meta.get('symbol')} (age={age_s:.1f}s > TTL={INTENT_TTL_S}s)",
+                        extra={
+                            'event_type': 'INTENT_STALE_EVICTION',
+                            'evicted_id': evict_id,
+                            'evicted_symbol': evict_meta.get('symbol'),
+                            'age_s': age_s,
+                            'ttl_s': INTENT_TTL_S
+                        }
+                    )
+                    self.engine.clear_intent(evict_id, reason="stale_ttl")
+                else:
+                    # No stale intents - evict oldest
+                    oldest_intent = min(
+                        self.engine.pending_buy_intents.items(),
+                        key=lambda x: x[1].get('start_ts', float('inf'))
+                    )
+                    oldest_id, oldest_meta = oldest_intent
+                    age_s = current_time - oldest_meta.get('start_ts', current_time)
+                    logger.warning(
+                        f"Pending intents at capacity ({MAX_PENDING_INTENTS}), "
+                        f"evicting oldest intent {oldest_id} for {oldest_meta.get('symbol')} (age={age_s:.1f}s)",
+                        extra={
+                            'event_type': 'INTENT_CAPACITY_EVICTION',
+                            'evicted_id': oldest_id,
+                            'evicted_symbol': oldest_meta.get('symbol'),
+                            'age_s': age_s
+                        }
+                    )
+                    self.engine.clear_intent(oldest_id, reason="capacity_eviction")
 
             self.engine.pending_buy_intents[intent.intent_id] = intent_metadata
 
