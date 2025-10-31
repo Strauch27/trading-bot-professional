@@ -212,6 +212,59 @@ class ShutdownCoordinator:
         else:
             logger.warning("Signal handlers can only be installed from main thread")
 
+    def update_settings(
+        self,
+        *,
+        shutdown_timeout: Optional[float] = None,
+        join_timeout_s: Optional[float] = None,
+        join_grace_s: Optional[float] = None,
+        auto_shutdown_on_missed_heartbeat: Optional[bool] = None
+    ) -> None:
+        """
+        Update coordinator runtime settings safely.
+
+        This method allows modification of shutdown coordinator settings after initialization,
+        useful for dynamic reconfiguration without recreating the singleton instance.
+
+        Args:
+            shutdown_timeout: Legacy parameter name for join_timeout_s (in seconds)
+            join_timeout_s: Maximum time to wait for thread joins during shutdown (in seconds)
+            join_grace_s: Additional grace period after join timeout expires (in seconds)
+            auto_shutdown_on_missed_heartbeat: Enable/disable automatic shutdown on heartbeat timeout
+
+        Thread Safety:
+            This method is thread-safe and uses the internal _shutdown_lock to prevent
+            concurrent modifications during shutdown operations.
+
+        Example:
+            >>> coordinator = get_shutdown_coordinator()
+            >>> coordinator.update_settings(
+            ...     join_timeout_s=60.0,
+            ...     auto_shutdown_on_missed_heartbeat=True
+            ... )
+
+        Note:
+            - Only provided parameters (not None) will be updated
+            - shutdown_timeout and join_timeout_s are aliases (join_timeout_s takes precedence)
+            - Changes take effect immediately but do not affect already-initiated shutdowns
+        """
+        with self._shutdown_lock:
+            timeout_value: Optional[float] = None
+            if join_timeout_s is not None:
+                timeout_value = float(join_timeout_s)
+            elif shutdown_timeout is not None:
+                timeout_value = float(shutdown_timeout)
+
+            if timeout_value is not None:
+                self._join_timeout_s = timeout_value
+                self.shutdown_timeout = timeout_value
+
+            if join_grace_s is not None:
+                self._join_grace_s = float(join_grace_s)
+
+            if auto_shutdown_on_missed_heartbeat is not None:
+                self.auto_shutdown_on_missed_heartbeat = bool(auto_shutdown_on_missed_heartbeat)
+
     def beat(self, label: str = "engine"):
         """Record a heartbeat with label and thread info"""
         ts = time.time()
@@ -587,11 +640,21 @@ class ShutdownCoordinator:
 _global_coordinator: Optional[ShutdownCoordinator] = None
 
 
-def get_shutdown_coordinator() -> ShutdownCoordinator:
+def get_shutdown_coordinator(**kwargs) -> ShutdownCoordinator:
     """Get or create global shutdown coordinator"""
     global _global_coordinator
     if _global_coordinator is None:
-        _global_coordinator = ShutdownCoordinator()
+        _global_coordinator = ShutdownCoordinator(**kwargs)
+    elif kwargs:
+        supported_keys = {
+            'shutdown_timeout',
+            'join_timeout_s',
+            'join_grace_s',
+            'auto_shutdown_on_missed_heartbeat'
+        }
+        update_kwargs = {k: v for k, v in kwargs.items() if k in supported_keys}
+        if update_kwargs:
+            _global_coordinator.update_settings(**update_kwargs)
     return _global_coordinator
 
 

@@ -216,7 +216,7 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 # CRITICAL FIX (C-CONFIG-03): Consolidate duplicate poll interval parameters
-MD_POLL_MS = 30000  # Market data polling interval (30 seconds - reduced load, system tested at 6.5s avg)
+MD_POLL_MS = 25000  # Market data polling interval (25 seconds - improved headroom for stale detection)
 POLL_MS = MD_POLL_MS  # DEPRECATED: Use MD_POLL_MS instead (maintained for backward compatibility)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
@@ -242,7 +242,7 @@ MD_DEBUG_LOG_FILE = "market_data_debug.log"  # Dedicated log file for market dat
 # Market Data Health Monitoring
 MD_HEALTH_CHECK_INTERVAL_S = 60  # Check thread liveness every 60s
 MD_HEARTBEAT_INTERVAL_CYCLES = 100  # Log heartbeat every 100 cycles
-MD_SNAPSHOT_TIMEOUT_S = 30  # Alert if no snapshots for 30s
+MD_SNAPSHOT_TIMEOUT_S = 45  # Alert if no snapshots for 45s (increased headroom for batch processing)
 MD_AUTO_RESTART_ON_CRASH = False  # Auto-restart thread if it dies (experimental)
 MD_SUCCESS_RATE_WARNING_THRESHOLD = 0.80  # Warn if success rate < 80%
 
@@ -353,6 +353,11 @@ BTC_CHANGE_THRESHOLD = None
 USE_FALLING_COINS_FILTER = False  # Falling-Coins-Filter (deaktiviert)
 FALLING_COINS_THRESHOLD = 0.55
 USE_BTC_TREND_GUARD = False
+
+# PERFORMANCE: Market condition updates (expensive - requires OHLCV data for all symbols)
+# Set to False to skip market condition calculations and prevent main loop blocking
+# Only enable if you use BTC_FILTER or FALLING_COINS_FILTER guards (both disabled above)
+ENABLE_EXPENSIVE_MARKET_CONDITIONS = False
 
 # Machine Learning
 USE_ML_GATEKEEPER = False  # ML-Gatekeeper (deaktiviert)
@@ -708,6 +713,7 @@ TICKER_THREADPOOL_SIZE = 6
 SYMBOL_MIN_COST_OVERRIDE = {"OKB/USDT": 10.0}
 MAX_POSITION_SIZE_USD = 1000
 MAX_PORTFOLIO_RISK_PCT = 0.05
+MAX_SYMBOL_EXPOSURE_PCT = 0.30  # Maximum portfolio exposure per symbol (30%)
 SESSION_GRANULARITY = "minute"
 BUY_ESCALATION_EXTRA_BPS = 20
 ALLOW_MARKET_FALLBACK = True
@@ -733,8 +739,8 @@ topcoins_keys = [
     'HUSDT', 'HYPERUSDT', 'ICPUSDT', 'IDOLUSDT', 'IMXUSDT', 'INITUSDT', 'INJUSDT', 'IOTAUSDT',
     'JUPUSDT', 'KASUSDT', 'KCSUSDT', 'KERNELUSDT', 'KGENUSDT', 'LABUSDT', 'LDOUSDT', 'LGCTUSDT',
     'LINKUSDT', 'LTCUSDT', 'MANAUSDT', 'MBGUSDT', 'METYAUSDT', 'MLNUSDT', 'MNTUSDT', 'MOVEUSDT',
-    'MXUSDT', 'NEARUSDT', 'NEXOUSDT', 'NFPUSDT', 'OKBUSDT', 'OMUSDT', 'ONDOUSDT', 'OPNODEUSDT',
-    'OPUSDT', 'PAXGUSDT', 'PENGUUSDT', 'PEPEUSDT', 'PHBUSDT', 'PKAMUSDT', 'POLUSDT', 'POPCATUSDT',
+    'MXUSDT', 'NEARUSDT', 'NEXOUSDT', 'NFPUSDT', 'OKBUSDT', 'OMUSDT', 'ONDOUSDT', 'OPUSDT',
+    'PAXGUSDT', 'PENGUUSDT', 'PEPEUSDT', 'PHBUSDT', 'POLUSDT', 'POPCATUSDT',
     'PROVEUSDT', 'PUMPUSDT', 'QNTUSDT', 'RAYUSDT', 'RDACUSDT', 'READYUSDT', 'RECALLUSDT', 'RENDERUSDT',
     'RIVERUSDT', 'RUNEUSDT', 'RVVUSDT', 'SANDUSDT', 'SEIUSDT', 'SHIBUSDT', 'SNXUSDT', 'SOLUSDT',
     'SOONUSDT', 'STBLUSDT', 'STXUSDT', 'SUIUSDT', 'TAOUSDT', 'TIAUSDT', 'TLMUSDT', 'TONUSDT',

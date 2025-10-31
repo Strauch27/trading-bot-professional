@@ -402,6 +402,8 @@ class MarketDataProvider:
         self._last_success_ts: Dict[str, float] = {}
         self._last_cycle_stats: Dict[str, Any] = {}
         self._last_health_log_ts = time.time()
+        self._error_lock = RLock()
+        self._last_fetch_errors: Dict[str, str] = {}
 
         # FIX: Permanent skip-list for BadSymbol errors (non-existent symbols)
         # These symbols will be permanently skipped instead of repeatedly retried
@@ -567,6 +569,8 @@ class MarketDataProvider:
         if symbol in self._degraded_until:
             self._degraded_until.pop(symbol, None)
         self._last_success_ts[symbol] = now
+        with self._error_lock:
+            self._last_fetch_errors.pop(symbol, None)
 
         # Emit dashboard event if recovering from degraded state
         if was_degraded:
@@ -602,6 +606,8 @@ class MarketDataProvider:
                     logger.debug(f"Could not emit dashboard event: {e}")
 
             # Don't increment failure counters for bad symbols - just skip them
+            with self._error_lock:
+                self._last_fetch_errors.pop(symbol, None)
             return
 
         count = self._failure_counts[symbol] + 1
@@ -760,6 +766,8 @@ class MarketDataProvider:
                         )
 
                     co.beat(f"get_ticker_success:{symbol}")
+                    with self._error_lock:
+                        self._last_fetch_errors.pop(symbol, None)
 
                     # Nur bei kritischen Symbolen oder nach längerer Zeit loggen
                     if symbol in ["BTC/USDT"] or self._statistics['ticker_requests'] % 50 == 0:
@@ -784,6 +792,8 @@ class MarketDataProvider:
                     logger.error(f"Error fetching ticker for {symbol}: {e}")
                     logger.info(f"HEARTBEAT - Ticker fetch failed but handled: {symbol}",
                                extra={"event_type": "HEARTBEAT"})
+                    with self._error_lock:
+                        self._last_fetch_errors[symbol] = str(e)
                     return None
         finally:
             co.beat(f"get_ticker_exit:{symbol}")
@@ -1475,11 +1485,14 @@ class MarketDataProvider:
         def fetch_single_ticker(symbol: str):
             """Fetch single ticker with retry/backoff."""
             retries_used = 0
-            last_error: Optional[Exception] = None
+            last_error: Optional[Any] = None
             for attempt in range(self.max_retries + 1):
                 fetch_t0 = time.time()
+                recent_error: Optional[str] = None
                 try:
                     ticker = self.get_ticker(symbol, use_cache=False)
+                    with self._error_lock:
+                        recent_error = self._last_fetch_errors.pop(symbol, None)
                     fetch_duration_ms = (time.time() - fetch_t0) * 1000
 
                     if getattr(config, 'MD_DEBUG_PER_COIN', False):
@@ -1495,7 +1508,8 @@ class MarketDataProvider:
 
                     if ticker and ticker.last:
                         return symbol, ticker, None, retries_used
-                    last_error = None  # missing last price
+                    if recent_error:
+                        last_error = recent_error
                 except Exception as e:
                     last_error = e
                     if getattr(config, 'MD_DEBUG_PER_COIN', False):

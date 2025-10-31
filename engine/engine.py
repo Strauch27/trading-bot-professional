@@ -902,7 +902,7 @@ class TradingEngine:
                         co.beat("after_heartbeat_emit")
 
                     # 5b. Portfolio Display (every 60s if enabled)
-                    if cycle_start % 60 < 1.0 and self.config.enable_pnl_monitor:
+                    if cycle_start % 60 < 1.0 and getattr(config, 'ENABLE_PNL_MONITOR', True):
                         co.beat("before_portfolio_display")
                         try:
                             from services.portfolio_display import display_portfolio
@@ -1026,21 +1026,35 @@ class TradingEngine:
             return False
 
     def _update_market_conditions(self, symbols: List[str]):
-        """Update market conditions for MarketGuards service"""
+        """
+        Update market conditions for MarketGuards service.
+
+        PERFORMANCE FIX: Use cached OHLCV data instead of synchronous API calls.
+        Previously this method made 136+ API calls per cycle (BTC + all symbols),
+        blocking the main loop for 20+ seconds and preventing trading signal processing.
+        """
         try:
-            # Calculate BTC change factor
+            # Check if expensive market condition updates are enabled
+            enable_expensive_updates = getattr(config, 'ENABLE_EXPENSIVE_MARKET_CONDITIONS', False)
+
+            if not enable_expensive_updates:
+                # Skip expensive calculations - market guards are disabled in config anyway
+                logger.debug("Skipping expensive market condition updates (disabled in config)")
+                return
+
+            # Calculate BTC change factor using cached data
             btc_price = self.market_data.get_price("BTC/USDT")
             if btc_price:
-                # FIX: Use fetch_ohlcv instead of get_ohlcv_history (method doesn't exist)
-                btc_history = self.market_data.fetch_ohlcv("BTC/USDT", timeframe='1m', limit=60, store=True)
+                # Use get_bars() to access cached OHLCV data - no API call
+                btc_history = self.market_data.get_bars("BTC/USDT", timeframe='1m', limit=60)
                 if btc_history and len(btc_history) >= 2:
-                    recent_bars = btc_history[-60:]
-                    if len(recent_bars) >= 2:
-                        btc_60m_ago = recent_bars[0].close
-                        btc_change_factor = btc_price / btc_60m_ago
-                        self.market_guards.update_market_conditions(btc_change_factor=btc_change_factor)
+                    btc_60m_ago = btc_history[0].close
+                    btc_change_factor = btc_price / btc_60m_ago
+                    self.market_guards.update_market_conditions(btc_change_factor=btc_change_factor)
+                else:
+                    logger.debug("BTC history not available in cache for market conditions")
 
-            # Calculate percentage of falling coins
+            # Calculate percentage of falling coins using cached data
             falling_count = 0
             total_count = 0
 
@@ -1052,19 +1066,18 @@ class TradingEngine:
                 if not current_price:
                     continue
 
-                # FIX: Use fetch_ohlcv instead of get_ohlcv_history (method doesn't exist)
-                history = self.market_data.fetch_ohlcv(symbol, timeframe='1m', limit=60, store=True)
+                # Use cached OHLCV data instead of synchronous fetch
+                history = self.market_data.get_bars(symbol, timeframe='1m', limit=60)
                 if history and len(history) >= 2:
-                    recent_bars = history[-60:]
-                    if len(recent_bars) >= 2:
-                        price_60m_ago = recent_bars[0].close
-                        if current_price < price_60m_ago:
-                            falling_count += 1
-                        total_count += 1
+                    price_60m_ago = history[0].close
+                    if current_price < price_60m_ago:
+                        falling_count += 1
+                    total_count += 1
 
             if total_count > 0:
                 percentage_falling = falling_count / total_count
                 self.market_guards.update_market_conditions(percentage_falling=percentage_falling)
+                logger.debug(f"Market conditions updated: {percentage_falling:.1%} falling ({falling_count}/{total_count})")
 
         except Exception as e:
             logger.warning(f"Market conditions update failed: {e}")

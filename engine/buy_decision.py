@@ -283,27 +283,34 @@ class BuyDecisionHandler:
                     pass
 
             # Phase 1: Log structured drop_trigger_eval event
-            with Trace(decision_id=decision_id):
-                # Get peak (anchor) price from MarketSnapshot
-                anchor_price = None
-                if snapshot:
-                    anchor_price = snapshot.get('windows', {}).get('peak')
+            # CRITICAL: Wrap in try-except to prevent logging errors from blocking order execution
+            try:
+                with Trace(decision_id=decision_id):
+                    # Get peak (anchor) price from MarketSnapshot
+                    anchor_price = None
+                    if snapshot:
+                        anchor_price = snapshot.get('windows', {}).get('peak')
 
-                # Fallback to context if snapshot not available
-                if anchor_price is None:
-                    anchor_price = context.get('anchor')
+                    # Fallback to context if snapshot not available
+                    if anchor_price is None:
+                        anchor_price = context.get('anchor')
 
-                log_event(
-                    DECISION_LOG(),
-                    "drop_trigger_eval",
-                    symbol=symbol,
-                    anchor=anchor_price,
-                    current_price=current_price,
-                    drop_pct=context.get('drop_pct', 0),
-                    threshold=getattr(config, 'DROP_TRIGGER_VALUE', 0.96) * 100 - 100,  # Convert to pct
-                    threshold_hit=buy_triggered,
-                    mode=context.get('mode')
-                )
+                    log_event(
+                        DECISION_LOG(),
+                        "drop_trigger_eval",
+                        symbol=symbol,
+                        anchor=anchor_price,
+                        current_price=current_price,
+                        drop_pct=context.get('drop_pct', 0),
+                        threshold=getattr(config, 'DROP_TRIGGER_VALUE', 0.96) * 100 - 100,  # Convert to pct
+                        threshold_hit=buy_triggered,
+                        mode=context.get('mode')
+                    )
+            except Exception as log_error:
+                # CRITICAL: Don't let logging errors prevent order execution!
+                print(f"\n[ERROR] Structured logging failed for {symbol}: {type(log_error).__name__}: {log_error}\n", flush=True)
+                logger.warning(f"Structured logging failed for {symbol}, continuing with order: {log_error}")
+                # Continue with order execution anyway
 
             if buy_triggered:
                 signal_reason = f"DROP_TRIGGER_MODE_{context['mode']}"
@@ -373,6 +380,11 @@ class BuyDecisionHandler:
             return None
 
         except Exception as e:
+            # CRITICAL: Force console output for debugging
+            print(f"\n[EXCEPTION] evaluate_buy_signal() failed for {symbol}: {type(e).__name__}: {e}\n", flush=True)
+            import traceback
+            traceback.print_exc()
+
             trace_error(e, symbol=symbol, decision_id=decision_id, context="buy_signal_evaluation")
 
             # Track error for adaptive logging
@@ -410,6 +422,7 @@ class BuyDecisionHandler:
     @trace_function(include_args=True, include_result=False)
     def execute_buy_order(self, symbol: str, coin_data: Dict, current_price: float, signal: str):
         """Execute buy order via Order Service"""
+        print(f"\n[CRITICAL DEBUG] execute_buy_order() ENTRY for {symbol}\n", flush=True)
         decision_id = self.engine.current_decision_id or new_decision_id()
 
         # CRITICAL: Log buy candidate for debugging
@@ -429,8 +442,11 @@ class BuyDecisionHandler:
             pass
 
         try:
+            print(f"\n[DEBUG TRACE] execute_buy_order: Entering try block for {symbol}\n", flush=True)
             # Calculate position size
             quote_budget = self._calculate_position_size(symbol, current_price, usdt_balance)
+            print(f"\n[DEBUG TRACE] execute_buy_order: quote_budget={quote_budget} for {symbol}\n", flush=True)
+            logger.debug(f"DEBUG: quote_budget={quote_budget} for {symbol}")
             if not quote_budget:
                 logger.warning(
                     f"BUY SKIP {symbol} - Position sizing returned None (likely missing market data or insufficient budget)",
@@ -443,46 +459,70 @@ class BuyDecisionHandler:
                         'has_bid_ask': bool(coin_data and 'bid' in coin_data and 'ask' in coin_data) if coin_data else False
                     }
                 )
+                print(f"\n[DEBUG] BUY SKIP: quote_budget=None for {symbol}\n", flush=True)
                 return
 
             # Phase 1: Risk Limits Check - BEFORE order placement
             # Note: RiskLimitChecker is initialized once in __init__ to avoid hot-path overhead
+            print(f"\n[DEBUG TRACE] execute_buy_order: Starting risk limits check for {symbol}\n", flush=True)
             try:
                 all_passed, limit_checks = self.risk_checker.check_limits(symbol, quote_budget)
+                print(f"\n[DEBUG TRACE] execute_buy_order: Risk check passed={all_passed} for {symbol}\n", flush=True)
 
-                risk_eval = RiskLimitsEval(
-                    symbol=symbol,
-                    limit_checks=limit_checks,
-                    all_passed=all_passed,
-                    blocking_limit=[c['limit'] for c in limit_checks if c['hit']][0] if not all_passed else None
-                )
-
-                with Trace(decision_id=decision_id):
-                    log_event(DECISION_LOG(), "risk_limits_eval", **risk_eval.model_dump())
-
+                # Determine blocking limit (with safe fallback)
+                blocking_limit = None
                 if not all_passed:
-                    blocking_limit = risk_eval.blocking_limit
-                    logger.info(f"BUY BLOCKED {symbol} - Risk limit exceeded: {blocking_limit}")
+                    hit_limits = [c['limit'] for c in limit_checks if c.get('hit')]
+                    blocking_limit = hit_limits[0] if hit_limits else 'unknown'
 
-                    self.engine.jsonl_logger.decision_end(
-                        decision_id=decision_id,
+                # CRITICAL: Wrap risk evaluation logging in try-except to prevent blocking orders
+                try:
+                    risk_eval = RiskLimitsEval(
                         symbol=symbol,
-                        decision="blocked",
-                        reason=f"risk_limit:{blocking_limit}",
-                        limit_checks=limit_checks
+                        limit_checks=limit_checks,
+                        all_passed=all_passed,
+                        blocking_limit=blocking_limit
                     )
 
-                    # Log structured decision_outcome event
                     with Trace(decision_id=decision_id):
-                        log_event(
-                            DECISION_LOG(),
-                            "decision_outcome",
-                            symbol=symbol,
-                            action="blocked",
-                            reason=f"risk_limit:{blocking_limit}",
-                            blocking_limit=blocking_limit
-                        )
+                        log_event(DECISION_LOG(), "risk_limits_eval", **risk_eval.model_dump())
+                except Exception as risk_eval_error:
+                    print(f"\n[ERROR] Risk eval logging failed for {symbol}: {type(risk_eval_error).__name__}: {risk_eval_error}\n", flush=True)
+                    logger.warning(f"Risk evaluation logging failed for {symbol}: {risk_eval_error}")
 
+                if not all_passed:
+                    print(f"\n[BUY BLOCKED] {symbol} - Risk limit: {blocking_limit}\n", flush=True)
+                    logger.info(f"BUY BLOCKED {symbol} - Risk limit exceeded: {blocking_limit}")
+
+                    # Wrap all logging in try-except to ensure we return and don't place order
+                    try:
+                        self.engine.jsonl_logger.decision_end(
+                            decision_id=decision_id,
+                            symbol=symbol,
+                            decision="blocked",
+                            reason=f"risk_limit:{blocking_limit}",
+                            limit_checks=limit_checks
+                        )
+                    except Exception as decision_end_error:
+                        print(f"\n[ERROR] decision_end logging failed for {symbol}: {decision_end_error}\n", flush=True)
+                        logger.warning(f"decision_end logging failed for {symbol}: {decision_end_error}")
+
+                    # Log structured decision_outcome event (with error protection)
+                    try:
+                        with Trace(decision_id=decision_id):
+                            log_event(
+                                DECISION_LOG(),
+                                "decision_outcome",
+                                symbol=symbol,
+                                action="blocked",
+                                reason=f"risk_limit:{blocking_limit}",
+                                blocking_limit=blocking_limit
+                            )
+                    except Exception as outcome_log_error:
+                        print(f"\n[ERROR] Decision outcome logging failed for {symbol}: {outcome_log_error}\n", flush=True)
+                        logger.warning(f"Decision outcome logging failed for {symbol}: {outcome_log_error}")
+
+                    print(f"\n[DEBUG] ORDER BLOCKED - RETURNING for {symbol}\n", flush=True)
                     return
 
             except Exception as risk_check_error:
@@ -491,8 +531,11 @@ class BuyDecisionHandler:
 
             # Generate client order ID for tracking
             # Apply Symbol-specific Spread/Slippage Caps
+            print(f"\n[DEBUG TRACE] execute_buy_order: Checking spread/slippage for {symbol}\n", flush=True)
             current_price = self._apply_spread_slippage_caps(symbol, coin_data, current_price, decision_id)
+            print(f"\n[DEBUG TRACE] execute_buy_order: Spread check returned price={current_price} for {symbol}\n", flush=True)
             if not current_price:
+                print(f"\n[DEBUG] BUY SKIP: spread/slippage check failed for {symbol}\n", flush=True)
                 return
 
             amount = quote_budget / current_price
@@ -502,8 +545,11 @@ class BuyDecisionHandler:
                        extra={'event_type':'BUY_ORDER_PREP','symbol':symbol,'amount':amount,'value':quote_budget,'price':current_price,'decision_id':decision_id})
 
             # Dry-Run Preview
+            print(f"\n[DEBUG TRACE] execute_buy_order: Checking dry-run preview for {symbol}\n", flush=True)
             if not self._handle_dry_run_preview(symbol, current_price, amount, quote_budget, signal, decision_id):
+                print(f"\n[DEBUG] BUY SKIP: dry-run preview blocked for {symbol}\n", flush=True)
                 return
+            print(f"\n[DEBUG TRACE] execute_buy_order: Dry-run check passed for {symbol}\n", flush=True)
 
             # Assemble intent for OrderRouter execution
             signal_payload = {
@@ -594,6 +640,7 @@ class BuyDecisionHandler:
             )
 
         except Exception as e:
+            print(f"\n[DEBUG TRACE] EXCEPTION IN execute_buy_order for {symbol}: {type(e).__name__}: {e}\n", flush=True)
             # Track error for adaptive logging
             track_error("BUY_ORDER_EXECUTION_ERROR", symbol, str(e))
 

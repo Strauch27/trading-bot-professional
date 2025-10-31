@@ -362,8 +362,8 @@ def main():
         raise
 
     # Initialize thread-safe shutdown coordinator with warn-only heartbeat monitoring
-    from services.shutdown_coordinator import ShutdownCoordinator, get_shutdown_coordinator
-    shutdown_coordinator = ShutdownCoordinator(
+    from services.shutdown_coordinator import get_shutdown_coordinator
+    shutdown_coordinator = get_shutdown_coordinator(
         shutdown_timeout=30.0,
         auto_shutdown_on_missed_heartbeat=False  # Warn-only mode, no auto-shutdown
     )

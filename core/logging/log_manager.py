@@ -72,14 +72,31 @@ class LogManager:
             self._running = True
             # Ensure base log directory exists and is valid
             try:
+                candidate_dir: Optional[str] = None
+
                 if isinstance(self.base_log_dir, (str, os.PathLike)) and self.base_log_dir:
-                    Path(self.base_log_dir).mkdir(parents=True, exist_ok=True)
+                    candidate_dir = self.base_log_dir
                 else:
-                    # Fallback to LOG_DIR
-                    self.base_log_dir = LOG_DIR
-                    Path(self.base_log_dir).mkdir(parents=True, exist_ok=True)
+                    runtime_log_dir = None
+                    try:
+                        import config as runtime_config  # Local import to capture runtime paths
+                        runtime_log_dir = getattr(runtime_config, 'LOG_DIR', None)
+                    except Exception:
+                        runtime_log_dir = None
+
+                    if runtime_log_dir:
+                        candidate_dir = runtime_log_dir
+                    elif isinstance(LOG_DIR, (str, os.PathLike)) and LOG_DIR:
+                        candidate_dir = LOG_DIR
+
+                if not candidate_dir:
+                    raise ValueError("log directory is not configured")
+
+                self.base_log_dir = candidate_dir
+                Path(self.base_log_dir).mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                self.logger.warning(f"Could not ensure base log dir: {e}")
+                self.logger.error(f"Could not ensure base log dir: {e}")
+                raise  # Re-raise exception as LogManager cannot function without valid log directory
             self._rotation_thread = threading.Thread(target=self._rotation_worker, daemon=True)
             self._rotation_thread.start()
 
