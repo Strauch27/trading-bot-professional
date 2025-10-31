@@ -35,7 +35,7 @@ from core.state_writer import DebouncedStateWriter
 
 # PnL and Telemetry System
 from core.utils.pnl import PnLTracker
-from core.utils.telemetry import RollingStats, heartbeat_emit
+from core.utils.telemetry import RollingStats, heartbeat_emit_legacy as heartbeat_emit
 from interfaces.exchange_wrapper import ExchangeWrapper
 
 # Service Imports (All Drops)
@@ -1272,14 +1272,15 @@ class TradingEngine:
 
             # Clear the pending intent using canonical helper
             symbol = event_data.get("symbol", "UNKNOWN")
-            exchange_error = event_data.get("exchange_error", "")
+            exchange_error = event_data.get("exchange_error") or ""
 
             cleared = self.clear_intent(intent_id, reason="order_failed")
 
             if cleared:
+                error_msg = exchange_error[:100] if exchange_error else "Unknown error"
                 logger.info(
                     f"Cleared failed intent {intent_id}: symbol={symbol} "
-                    f"error={exchange_error[:100]}"
+                    f"error={error_msg}"
                 )
             else:
                 logger.debug(

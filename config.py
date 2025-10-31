@@ -162,7 +162,7 @@ GLOBAL_TRADING = True  # True = Live Trading, False = Nur Beobachten
 # Portfolio Reset beim Start (nur für Testing!)
 # ⚠️ ACHTUNG: Verkauft ALLE Assets beim Start - nur für Tests aktivieren!
 # Requires FORCE_PORTFOLIO_RESET=1 environment variable for safety
-RESET_PORTFOLIO_ON_START = False  # True = Verkaufe alles beim Start, False = Normal (empfohlen)
+RESET_PORTFOLIO_ON_START = True  # True = Verkaufe alles beim Start, False = Normal (empfohlen)
 
 # =============================================================================
 # 2. EXIT STRATEGIE

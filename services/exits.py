@@ -729,12 +729,13 @@ class ExitManager:
                     )
 
                     # Execute exit
-                    result = self.order_manager.execute_exit_order(context, signal['signal_type'])
+                    signal_type = signal.get('signal_type', 'UNKNOWN')
+                    result = self.order_manager.execute_exit_order(context, signal_type)
 
                     results.append((signal, result))
 
                     if result.success:
-                        logger.info(f"Exit executed for {signal['symbol']}: {signal['signal_type']}")
+                        logger.info(f"Exit executed for {signal['symbol']}: {signal_type}")
                     else:
                         logger.warning(f"Exit failed for {signal['symbol']}: {result.error}")
 

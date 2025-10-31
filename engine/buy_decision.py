@@ -422,7 +422,6 @@ class BuyDecisionHandler:
     @trace_function(include_args=True, include_result=False)
     def execute_buy_order(self, symbol: str, coin_data: Dict, current_price: float, signal: str):
         """Execute buy order via Order Service"""
-        print(f"\n[CRITICAL DEBUG] execute_buy_order() ENTRY for {symbol}\n", flush=True)
         decision_id = self.engine.current_decision_id or new_decision_id()
 
         # CRITICAL: Log buy candidate for debugging
@@ -442,10 +441,8 @@ class BuyDecisionHandler:
             pass
 
         try:
-            print(f"\n[DEBUG TRACE] execute_buy_order: Entering try block for {symbol}\n", flush=True)
             # Calculate position size
             quote_budget = self._calculate_position_size(symbol, current_price, usdt_balance)
-            print(f"\n[DEBUG TRACE] execute_buy_order: quote_budget={quote_budget} for {symbol}\n", flush=True)
             logger.debug(f"DEBUG: quote_budget={quote_budget} for {symbol}")
             if not quote_budget:
                 logger.warning(
@@ -464,10 +461,8 @@ class BuyDecisionHandler:
 
             # Phase 1: Risk Limits Check - BEFORE order placement
             # Note: RiskLimitChecker is initialized once in __init__ to avoid hot-path overhead
-            print(f"\n[DEBUG TRACE] execute_buy_order: Starting risk limits check for {symbol}\n", flush=True)
             try:
                 all_passed, limit_checks = self.risk_checker.check_limits(symbol, quote_budget)
-                print(f"\n[DEBUG TRACE] execute_buy_order: Risk check passed={all_passed} for {symbol}\n", flush=True)
 
                 # Determine blocking limit (with safe fallback)
                 blocking_limit = None
@@ -531,9 +526,7 @@ class BuyDecisionHandler:
 
             # Generate client order ID for tracking
             # Apply Symbol-specific Spread/Slippage Caps
-            print(f"\n[DEBUG TRACE] execute_buy_order: Checking spread/slippage for {symbol}\n", flush=True)
             current_price = self._apply_spread_slippage_caps(symbol, coin_data, current_price, decision_id)
-            print(f"\n[DEBUG TRACE] execute_buy_order: Spread check returned price={current_price} for {symbol}\n", flush=True)
             if not current_price:
                 print(f"\n[DEBUG] BUY SKIP: spread/slippage check failed for {symbol}\n", flush=True)
                 return
@@ -545,11 +538,9 @@ class BuyDecisionHandler:
                        extra={'event_type':'BUY_ORDER_PREP','symbol':symbol,'amount':amount,'value':quote_budget,'price':current_price,'decision_id':decision_id})
 
             # Dry-Run Preview
-            print(f"\n[DEBUG TRACE] execute_buy_order: Checking dry-run preview for {symbol}\n", flush=True)
             if not self._handle_dry_run_preview(symbol, current_price, amount, quote_budget, signal, decision_id):
                 print(f"\n[DEBUG] BUY SKIP: dry-run preview blocked for {symbol}\n", flush=True)
                 return
-            print(f"\n[DEBUG TRACE] execute_buy_order: Dry-run check passed for {symbol}\n", flush=True)
 
             # Assemble intent for OrderRouter execution
             signal_payload = {
@@ -640,7 +631,6 @@ class BuyDecisionHandler:
             )
 
         except Exception as e:
-            print(f"\n[DEBUG TRACE] EXCEPTION IN execute_buy_order for {symbol}: {type(e).__name__}: {e}\n", flush=True)
             # Track error for adaptive logging
             track_error("BUY_ORDER_EXECUTION_ERROR", symbol, str(e))
 

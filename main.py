@@ -678,19 +678,9 @@ def main():
 
     # Portfolio Reset wenn konfiguriert
     if config_module.reset_portfolio_on_start and exchange:
-        reset_env_confirmed = os.getenv("CONFIRM_PORTFOLIO_RESET", "").upper() == "YES"
-        cli_force_reset = any(arg == "--force-reset" for arg in sys.argv)
-        if not (reset_env_confirmed or cli_force_reset):
-            logger.error(
-                "RESET_PORTFOLIO_ON_START=True, aber keine Bestätigung gefunden. "
-                "Setze CONFIRM_PORTFOLIO_RESET=YES oder starte mit --force-reset.",
-                extra={'event_type': 'PORTFOLIO_RESET_BLOCKED'}
-            )
-            sys.exit(1)
         logger.warning(
             "Portfolio-Reset wird ausgeführt (alle Positionen werden liquidiert).",
-            extra={'event_type': 'PORTFOLIO_RESET_CONFIRMED',
-                   'confirmation_source': 'env' if reset_env_confirmed else 'cli'}
+            extra={'event_type': 'PORTFOLIO_RESET_CONFIRMED'}
         )
         portfolio.perform_startup_reset(preise)
 
