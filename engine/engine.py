@@ -201,13 +201,14 @@ class TradingEngine:
         from core.events import get_event_bus
         self.event_bus = get_event_bus()
 
-        # Drop 4: Market Data Service (with drop tracking)
+        # Drop 4: Market Data Service (with drop tracking and priority updates)
         self.market_data = MarketDataProvider(
             self.exchange_adapter,
             ticker_cache_ttl=self.config.ticker_cache_ttl,
             max_cache_size=1000,
             enable_drop_tracking=True,
-            event_bus=self.event_bus
+            event_bus=self.event_bus,
+            portfolio_provider=self.portfolio  # Enable priority updates for portfolio coins
         )
 
         # Subscribe to market snapshots (new pipeline)

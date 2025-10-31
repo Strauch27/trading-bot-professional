@@ -1073,6 +1073,64 @@ class BuyDecisionHandler:
             }
             self.engine.positions[symbol] = position_data
 
+            # ENTRY HOOK: Automatically place TP order after successful buy
+            try:
+                tp_distance = getattr(config, 'TP_DISTANCE_PCT', 1.5)  # Default 1.5%
+                tp_price = position_avg * (1.0 + tp_distance / 100.0)
+
+                logger.info(
+                    f"ENTRY HOOK: Placing automatic TP order for {symbol} | "
+                    f"Entry={position_avg:.8f} | TP={tp_price:.8f} | "
+                    f"Distance={tp_distance:.2f}% | Qty={position_qty:.8f}"
+                )
+
+                tp_order_id = self.engine.exit_manager.place_exit_protection(
+                    symbol=symbol,
+                    exit_type="TAKE_PROFIT",
+                    amount=position_qty,
+                    target_price=tp_price
+                )
+
+                if tp_order_id:
+                    # FIX H2: Store TP order ID in BOTH locations for consistency
+                    # 1. Legacy engine.positions dict
+                    position_data['tp_order_id'] = tp_order_id
+                    position_data['current_protection'] = 'TP'
+                    position_data['last_switch_time'] = time.time()
+                    self.engine.positions[symbol] = position_data
+
+                    # 2. Portfolio.positions.meta (persistent, proper state)
+                    if portfolio_position:
+                        try:
+                            portfolio_position.meta['tp_order_id'] = tp_order_id
+                            portfolio_position.meta['current_protection'] = 'TP'
+                            portfolio_position.meta['last_switch_time'] = time.time()
+                            portfolio_position.meta['tp_target_price'] = tp_price
+                            logger.debug(
+                                f"ENTRY HOOK: Updated Portfolio.positions.meta for {symbol} with TP info",
+                                extra={'event_type': 'ENTRY_HOOK_META_UPDATE', 'symbol': symbol}
+                            )
+                        except Exception as meta_update_error:
+                            logger.warning(
+                                f"ENTRY HOOK: Failed to update Portfolio.positions.meta for {symbol}: {meta_update_error}",
+                                extra={'event_type': 'ENTRY_HOOK_META_UPDATE_FAILED', 'symbol': symbol}
+                            )
+
+                    logger.info(
+                        f"ENTRY HOOK SUCCESS: TP order placed for {symbol} | "
+                        f"TP Order ID={tp_order_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"ENTRY HOOK FAILED: TP order placement returned None for {symbol}"
+                    )
+
+            except Exception as entry_hook_error:
+                logger.error(
+                    f"ENTRY HOOK ERROR: Failed to place TP order for {symbol}: {entry_hook_error}",
+                    exc_info=True
+                )
+
             try:
                 from datetime import datetime
 

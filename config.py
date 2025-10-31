@@ -169,6 +169,7 @@ RESET_PORTFOLIO_ON_START = True  # True = Verkaufe alles beim Start, False = Nor
 # =============================================================================
 
 TAKE_PROFIT_THRESHOLD = 1.005  # +0.5% Gewinn
+TP_DISTANCE_PCT = 0.5  # TP Distance in % (derived from TAKE_PROFIT_THRESHOLD - 1.0) * 100
 STOP_LOSS_THRESHOLD = 0.990  # -1.0% Verlust
 SWITCH_TO_SL_THRESHOLD = 0.995  # Bei -0.5% auf SL umschalten
 SWITCH_TO_TP_THRESHOLD = 1.002  # Bei +0.2% zurück zu TP
@@ -234,6 +235,11 @@ MD_CACHE_TTL_MS = 5000  # Hard TTL for ticker cache (ms)
 MD_CACHE_SOFT_TTL_MS = 2000  # Soft TTL (serves stale while refreshing)
 MD_CACHE_MAX_SIZE = 2000  # Max cached tickers
 MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
+
+# Priority-based Market Data Updates (Portfolio positions get faster updates)
+MD_ENABLE_PRIORITY_UPDATES = True  # Enable priority-based TTL for portfolio coins
+MD_PORTFOLIO_TTL_MS = 1500  # Portfolio coins: 1.5s updates (vs 5s default)
+MD_PORTFOLIO_SOFT_TTL_MS = 800  # Portfolio coins soft TTL (vs 2s default)
 
 # Per-Coin Market Data Debugging
 MD_DEBUG_PER_COIN = True  # Enable detailed per-coin fetch logging
@@ -1024,6 +1030,7 @@ LOG_LEVEL = os.getenv("BOT_LOG_LEVEL", LOG_LEVEL)
 
 drop_trigger_value = DROP_TRIGGER_VALUE
 take_profit_threshold = TAKE_PROFIT_THRESHOLD
+tp_distance_pct = TP_DISTANCE_PCT
 stop_loss_threshold = STOP_LOSS_THRESHOLD
 switch_to_sl_threshold = SWITCH_TO_SL_THRESHOLD
 switch_to_tp_threshold = SWITCH_TO_TP_THRESHOLD

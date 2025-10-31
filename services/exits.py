@@ -68,18 +68,54 @@ class ExitEvaluator:
         with self._lock:
             reasons = []
 
-            # Phase 3: Log sell trigger evaluations
+            # Phase 3: Log comprehensive exit evaluation
             try:
                 from core.event_schemas import SellTriggerEval
                 from core.logger_factory import DECISION_LOG, log_event
-                from core.trace_context import Trace
+                from core.trace_context import Trace, trace_step
 
                 unrealized_pct = ((context.current_price / context.buying_price) - 1.0) * 100 if context.buying_price > 0 else 0
+                hold_time_s = context.elapsed_minutes * 60
+
+                # Log exit evaluation start
+                trace_step("exit_evaluation_start", symbol=context.symbol,
+                          entry_price=context.buying_price,
+                          current_price=context.current_price,
+                          pnl_pct=unrealized_pct,
+                          hold_time_min=context.elapsed_minutes)
+
+                # Comprehensive exit evaluation log
+                log_event(
+                    DECISION_LOG(),
+                    "exit_evaluation",
+                    symbol=context.symbol,
+                    side="sell",
+                    entry_price=context.buying_price,
+                    current_price=context.current_price,
+                    position_qty=context.amount,
+                    pnl_pct=round(unrealized_pct, 4),
+                    hold_time_s=round(hold_time_s, 2),
+                    hold_time_min=round(context.elapsed_minutes, 2),
+                    ttl_threshold_min=self.trade_ttl_min
+                )
 
                 # Emergency Sell (TTL Timeout)
                 ttl_hit = context.elapsed_minutes >= self.trade_ttl_min
                 if ttl_hit:
                     reasons.append("TTL_EMERGENCY")
+
+                    # Log TTL trigger
+                    logger.info(
+                        f"EXIT TRIGGERED: {context.symbol} | Rule=TTL_EMERGENCY | "
+                        f"Entry={context.buying_price:.8f} | Current={context.current_price:.8f} | "
+                        f"PnL={unrealized_pct:+.2f}% | Hold={context.elapsed_minutes:.1f}min",
+                        extra={
+                            'event_type': 'EXIT_TRIGGERED',
+                            'symbol': context.symbol,
+                            'rule_code': 'TTL_EMERGENCY',
+                            'reason': 'max_hold_time'
+                        }
+                    )
 
                 # Log TTL trigger evaluation
                 ttl_eval = SellTriggerEval(
@@ -95,6 +131,21 @@ class ExitEvaluator:
 
                 with Trace(decision_id=context.decision_id) if context.decision_id else Trace():
                     log_event(DECISION_LOG(), "sell_trigger_eval", **ttl_eval.model_dump())
+
+                # Log if no exit triggered
+                if not reasons:
+                    trace_step("exit_evaluation_no_trigger", symbol=context.symbol,
+                              pnl_pct=unrealized_pct, hold_time_min=context.elapsed_minutes)
+
+                    log_event(
+                        DECISION_LOG(),
+                        "exit_evaluation_no_trigger",
+                        symbol=context.symbol,
+                        entry_price=context.buying_price,
+                        current_price=context.current_price,
+                        pnl_pct=round(unrealized_pct, 4),
+                        hold_time_min=round(context.elapsed_minutes, 2)
+                    )
 
             except Exception as e:
                 # Don't fail evaluation if logging fails
@@ -133,6 +184,11 @@ class ExitOrderManager:
         self.exit_ioc_ttl_ms = exit_ioc_ttl_ms
         self.skip_under_min = skip_under_min
         self._lock = RLock()
+
+        # FIX H1: Exit intent deduplication
+        self.pending_exit_intents = {}  # symbol -> exit_metadata
+        self._exit_intents_lock = RLock()
+
         self._statistics = {
             'exits_placed': 0,
             'exits_filled': 0,
@@ -144,12 +200,61 @@ class ExitOrderManager:
     def execute_exit_order(self, context: ExitContext, reason: str) -> ExitResult:
         """Execute exit order with escalation strategy"""
         with self._lock:
+            # FIX H1: Check if exit already in progress for this symbol
+            with self._exit_intents_lock:
+                if context.symbol in self.pending_exit_intents:
+                    existing_intent = self.pending_exit_intents[context.symbol]
+                    logger.warning(
+                        f"EXIT DEDUPLICATION: Exit already in progress for {context.symbol} | "
+                        f"Existing reason={existing_intent['reason']}, age={time.time() - existing_intent['start_ts']:.1f}s | "
+                        f"Skipping new exit with reason={reason}",
+                        extra={
+                            'event_type': 'EXIT_DEDUPLICATED',
+                            'symbol': context.symbol,
+                            'existing_reason': existing_intent['reason'],
+                            'new_reason': reason,
+                            'intent_age_s': time.time() - existing_intent['start_ts']
+                        }
+                    )
+                    return ExitResult(
+                        success=False,
+                        reason="exit_already_in_progress",
+                        error=f"Exit already in progress (reason: {existing_intent['reason']})"
+                    )
+
+                # Register exit intent
+                self.pending_exit_intents[context.symbol] = {
+                    'reason': reason,
+                    'start_ts': time.time(),
+                    'amount': context.amount,
+                    'price': context.current_price
+                }
+                logger.debug(
+                    f"EXIT INTENT REGISTERED: {context.symbol} | Reason={reason}",
+                    extra={'event_type': 'EXIT_INTENT_REGISTERED', 'symbol': context.symbol}
+                )
+
             idempotency_store = None
             try:
                 self._statistics['exits_placed'] += 1
 
+                # Log exit order execution start with full context
+                entry_price = context.buying_price
+                pnl_pct = ((context.current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                logger.info(
+                    f"EXIT ORDER START: {context.symbol} | Reason={reason} | "
+                    f"Entry={entry_price:.8f} | Current={context.current_price:.8f} | "
+                    f"Qty={context.amount:.8f} | PnL={pnl_pct:+.2f}%",
+                    extra={
+                        'event_type': 'EXIT_ORDER_START',
+                        'symbol': context.symbol,
+                        'reason': reason,
+                        'decision_id': context.decision_id
+                    }
+                )
+
                 # Phase 2: Generate order_req_id for idempotency tracking
-                from core.id_generator import new_order_req_id
+                from core.trace_context import new_order_req_id
                 order_req_id = new_order_req_id()
 
                 # Phase 2: Idempotency Check - Prevent duplicate sell orders
@@ -279,6 +384,24 @@ class ExitOrderManager:
                 if result.success:
                     self._statistics['exits_filled'] += 1
 
+                    # Log successful exit with comprehensive details
+                    entry_price = context.buying_price
+                    realized_pnl_pct = ((result.avg_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                    logger.info(
+                        f"EXIT ORDER SUCCESS (IOC): {context.symbol} | Reason={reason} | "
+                        f"Entry={entry_price:.8f} | Exit={result.avg_price:.8f} | "
+                        f"Filled={result.filled_amount:.8f} | PnL={realized_pnl_pct:+.2f}% | "
+                        f"Order={result.order_id}",
+                        extra={
+                            'event_type': 'EXIT_ORDER_SUCCESS',
+                            'symbol': context.symbol,
+                            'reason': reason,
+                            'strategy': 'limit_ioc',
+                            'order_id': result.order_id,
+                            'decision_id': context.decision_id
+                        }
+                    )
+
                     # Phase 2: Update idempotency store with exchange order ID
                     if result.order_id and idempotency_store:
                         try:
@@ -293,11 +416,34 @@ class ExitOrderManager:
                     return result
 
                 # Escalation strategy if limit IOC fails
+                logger.warning(
+                    f"EXIT IOC FAILED: {context.symbol} | Escalating to market order",
+                    extra={'event_type': 'EXIT_IOC_FAILED', 'symbol': context.symbol}
+                )
+
                 if not self.never_market_sells:
                     result = self._try_market_exit(context, reason)
                     if result.success:
                         self._statistics['market_fallbacks'] += 1
                         self._statistics['exits_filled'] += 1
+
+                        # Log successful market exit
+                        entry_price = context.buying_price
+                        realized_pnl_pct = ((result.avg_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                        logger.info(
+                            f"EXIT ORDER SUCCESS (MARKET): {context.symbol} | Reason={reason} | "
+                            f"Entry={entry_price:.8f} | Exit={result.avg_price:.8f} | "
+                            f"Filled={result.filled_amount:.8f} | PnL={realized_pnl_pct:+.2f}% | "
+                            f"Order={result.order_id}",
+                            extra={
+                                'event_type': 'EXIT_ORDER_SUCCESS',
+                                'symbol': context.symbol,
+                                'reason': reason,
+                                'strategy': 'market',
+                                'order_id': result.order_id,
+                                'decision_id': context.decision_id
+                            }
+                        )
 
                         # Phase 2: Update idempotency store with exchange order ID
                         if result.order_id and idempotency_store:
@@ -333,6 +479,18 @@ class ExitOrderManager:
 
                 self._statistics['exits_failed'] += 1
 
+                # Log final exit failure with all attempted strategies
+                logger.error(
+                    f"EXIT ORDER FAILED: {context.symbol} | Reason={reason} | "
+                    f"All strategies exhausted (IOC, Market/IOC Fallback)",
+                    extra={
+                        'event_type': 'EXIT_ORDER_FAILED',
+                        'symbol': context.symbol,
+                        'reason': reason,
+                        'decision_id': context.decision_id
+                    }
+                )
+
                 # Phase 2: Update idempotency store with failure status
                 if idempotency_store:
                     try:
@@ -352,16 +510,73 @@ class ExitOrderManager:
 
             except Exception as e:
                 self._statistics['exits_failed'] += 1
-                logger.error(f"Exit execution error for {context.symbol}: {e}")
+
+                # Log exception with full context
+                logger.error(
+                    f"EXIT EXECUTION EXCEPTION: {context.symbol} | Reason={reason} | Error={str(e)}",
+                    extra={
+                        'event_type': 'EXIT_EXECUTION_ERROR',
+                        'symbol': context.symbol,
+                        'reason': reason,
+                        'error': str(e),
+                        'decision_id': context.decision_id
+                    },
+                    exc_info=True
+                )
+
                 return ExitResult(
                     success=False,
                     reason=reason,
                     error=str(e)
                 )
 
+            finally:
+                # FIX H1: Always clear exit intent when done (success or failure)
+                with self._exit_intents_lock:
+                    if context.symbol in self.pending_exit_intents:
+                        duration = time.time() - self.pending_exit_intents[context.symbol]['start_ts']
+                        self.pending_exit_intents.pop(context.symbol, None)
+                        logger.debug(
+                            f"EXIT INTENT CLEARED: {context.symbol} | Duration={duration:.2f}s",
+                            extra={'event_type': 'EXIT_INTENT_CLEARED', 'symbol': context.symbol, 'duration_s': duration}
+                        )
+
     def _try_limit_ioc_exit(self, context: ExitContext, reason: str) -> ExitResult:
-        """Try limit IOC exit order with aggressive BID-based pricing"""
+        """Try limit IOC exit order with aggressive BID-based pricing and liquidity check"""
         try:
+            # Phase 1: Check for low liquidity conditions
+            # This prevents orders from failing with 'Oversold' errors
+            ticker = None
+            try:
+                ticker = self.exchange_adapter.fetch_ticker(context.symbol)
+
+                # Check if bid/ask spread is too wide (indicates low liquidity)
+                if ticker and 'bid' in ticker and 'ask' in ticker:
+                    bid = ticker.get('bid', 0)
+                    ask = ticker.get('ask', 0)
+
+                    if bid > 0 and ask > 0:
+                        spread_pct = ((ask - bid) / bid) * 100
+
+                        # Warn if spread is excessive (>5%)
+                        if spread_pct > 5.0:
+                            logger.warning(
+                                f"Low liquidity detected for {context.symbol}: "
+                                f"Spread={spread_pct:.2f}%, Bid={bid:.8f}, Ask={ask:.8f}",
+                                extra={'event_type': 'LOW_LIQUIDITY_WARNING', 'symbol': context.symbol}
+                            )
+
+                        # If spread is extreme (>10%), this is very risky
+                        if spread_pct > 10.0:
+                            logger.error(
+                                f"CRITICAL: Extreme low liquidity for {context.symbol}, "
+                                f"spread={spread_pct:.2f}%",
+                                extra={'event_type': 'CRITICAL_LOW_LIQUIDITY', 'symbol': context.symbol}
+                            )
+
+            except Exception as ticker_err:
+                logger.debug(f"Failed to fetch ticker for liquidity check: {ticker_err}")
+
             # Get BID price from ticker for aggressive SELL pricing
             # (consistent with BUY using ASK + premium)
             bid = context.current_price  # Default fallback
@@ -436,15 +651,45 @@ class ExitOrderManager:
             return ExitResult(success=False, reason=reason, error="Limit IOC not filled")
 
         except Exception as e:
-            return ExitResult(success=False, reason=reason, error=str(e))
+            error_msg = str(e)
+
+            # Check for known low-liquidity errors
+            if 'Oversold' in error_msg or '30005' in error_msg:
+                logger.error(
+                    f"EXIT FAILED - NO LIQUIDITY: {context.symbol} | "
+                    f"Exchange reports 'Oversold' - no buyers available",
+                    extra={
+                        'event_type': 'EXIT_NO_LIQUIDITY',
+                        'symbol': context.symbol,
+                        'error_code': '30005',
+                        'error': 'Oversold'
+                    }
+                )
+
+            return ExitResult(success=False, reason=reason, error=error_msg)
 
     def _try_market_exit(self, context: ExitContext, reason: str) -> ExitResult:
-        """Try market exit order"""
+        """Try market exit order with aggressive pricing"""
         try:
-            order = self.order_service.place_market_ioc(
+            # MEXC requires price parameter even for market IOC orders
+            # Use current price or bid as reference
+            exit_price = context.current_price
+
+            # Try to get bid price for more aggressive fill
+            try:
+                ticker = self.exchange_adapter.fetch_ticker(context.symbol)
+                if ticker and 'bid' in ticker and ticker['bid']:
+                    exit_price = ticker['bid']
+            except Exception:
+                pass  # Use current price as fallback
+
+            # Use limit IOC at bid price instead of market order
+            # This works better on MEXC and provides price protection
+            order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
+                price=exit_price,
                 client_order_id=f"market_exit_{reason}_{int(time.time())}"
             )
 
@@ -532,7 +777,7 @@ class ExitOrderManager:
         with self._lock:
             try:
                 # Phase 2: Generate order_req_id for idempotency tracking
-                from core.id_generator import new_order_req_id
+                from core.trace_context import new_order_req_id
                 order_req_id = new_order_req_id()
 
                 # Phase 2: Idempotency Check - Prevent duplicate TP/SL orders
@@ -704,6 +949,10 @@ class ExitManager:
         )
         self.signal_manager = signal_manager
         self._lock = RLock()
+
+        # FIX H1: Exit Intent Registry for deduplication
+        self.pending_exit_intents = {}  # symbol -> exit_metadata
+        self._exit_intents_lock = RLock()
 
     def process_exit_signals(self, max_per_cycle: int = 5) -> List[Tuple[Dict, ExitResult]]:
         """Process pending exit signals from signal queue"""

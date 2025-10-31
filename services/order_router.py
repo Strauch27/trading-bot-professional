@@ -102,6 +102,11 @@ class OrderRouter:
         self._seen: set = set()
         self._order_meta: Dict[str, Dict[str, Any]] = {}
 
+        # FIX H5: Memory leak prevention - track last cleanup time
+        self._last_cleanup_time = time.time()
+        self._cleanup_interval_s = 3600  # Cleanup every hour
+        self._completed_order_ttl_s = 7200  # Keep completed orders for 2 hours
+
         # P1: Debounced state persistence for order metadata
         self._init_state_persistence()
 
@@ -109,6 +114,56 @@ class OrderRouter:
             f"OrderRouter initialized: tif={config.tif}, "
             f"max_retries={config.max_retries}, slippage={config.slippage_bps}bp"
         )
+
+    def _cleanup_old_orders(self):
+        """
+        FIX H5: Cleanup old completed orders to prevent memory leak.
+
+        Removes orders from _order_meta that are:
+        - Older than _completed_order_ttl_s
+        - In a terminal state (filled, cancelled, failed)
+        """
+        current_time = time.time()
+
+        # Only run cleanup periodically
+        if current_time - self._last_cleanup_time < self._cleanup_interval_s:
+            return
+
+        with self._meta_lock:
+            orders_to_remove = []
+
+            for intent_id, meta in self._order_meta.items():
+                # Check if order is in terminal state
+                state = meta.get('state', '')
+                terminal_states = ['filled', 'cancelled', 'failed', 'rejected']
+
+                if state in terminal_states:
+                    # Check age
+                    order_ts = meta.get('ts', current_time)
+                    age = current_time - order_ts
+
+                    if age > self._completed_order_ttl_s:
+                        orders_to_remove.append(intent_id)
+
+            # Remove old orders
+            removed_count = 0
+            for intent_id in orders_to_remove:
+                self._order_meta.pop(intent_id, None)
+                self._seen.discard(intent_id)
+                removed_count += 1
+
+            self._last_cleanup_time = current_time
+
+            if removed_count > 0:
+                logger.info(
+                    f"ORDER_ROUTER_CLEANUP: Removed {removed_count} old orders | "
+                    f"Remaining: {len(self._order_meta)} orders in memory",
+                    extra={
+                        'event_type': 'ORDER_ROUTER_CLEANUP',
+                        'removed_count': removed_count,
+                        'remaining_count': len(self._order_meta)
+                    }
+                )
 
     def _client_oid(self, intent_id: str) -> str:
         """
@@ -421,6 +476,9 @@ class OrderRouter:
         Returns:
             None (async execution, results via audit log)
         """
+        # FIX H5: Periodic cleanup of old completed orders
+        self._cleanup_old_orders()
+
         # Extract intent fields
         intent_id = intent.get("intent_id")
         symbol = intent.get("symbol")

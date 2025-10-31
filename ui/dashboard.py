@@ -210,10 +210,11 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
     positions_data = []
     total_value = portfolio.my_budget
 
-    # Get all held assets
+    # Get all held assets - create a copy to avoid race conditions
     held_assets = getattr(portfolio, 'held_assets', {}) or {}
+    held_assets_copy = dict(held_assets)
 
-    for symbol, asset in held_assets.items():
+    for symbol, asset in held_assets_copy.items():
         try:
             # Get current price
             current_price = engine.get_current_price(symbol)

@@ -329,7 +329,8 @@ class MarketDataProvider:
         enable_coalescing: bool = True,
         enable_rate_limiting: bool = True,
         enable_drop_tracking: bool = True,
-        event_bus = None
+        event_bus = None,
+        portfolio_provider = None
     ):
         """
         Initialize market data provider.
@@ -346,8 +347,10 @@ class MarketDataProvider:
             enable_rate_limiting: Enable API rate limiting (token bucket)
             enable_drop_tracking: Enable RollingWindowManager for drop tracking
             event_bus: Event bus for publishing drop snapshots (optional)
+            portfolio_provider: Portfolio instance for priority updates (optional)
         """
         self.exchange_adapter = exchange_adapter
+        self.portfolio_provider = portfolio_provider
 
         # Resolve cache configuration from config if not provided
         import config as _cfg
@@ -358,6 +361,18 @@ class MarketDataProvider:
         if max_cache_size is None:
             max_cache_size = getattr(_cfg, 'MD_CACHE_MAX_SIZE', 2000)
 
+        # Priority-based TTL configuration
+        self.enable_priority_updates = getattr(_cfg, 'MD_ENABLE_PRIORITY_UPDATES', True)
+        self.portfolio_ttl = getattr(_cfg, 'MD_PORTFOLIO_TTL_MS', 1500) / 1000.0
+        self.portfolio_soft_ttl = getattr(_cfg, 'MD_PORTFOLIO_SOFT_TTL_MS', 800) / 1000.0
+        self.default_ttl = ticker_cache_ttl
+        self.default_soft_ttl = ticker_soft_ttl
+
+        # FIX H4: Cache for portfolio symbol status (invalidate on position changes)
+        self._portfolio_symbols_cache = set()
+        self._portfolio_cache_lock = RLock()
+        self._portfolio_cache_ttl = 1.0  # Refresh every second
+
         self.ticker_cache = TickerCache(ticker_cache_ttl, ticker_soft_ttl, max_cache_size)
         logger.info(
             "Ticker cache configured",
@@ -365,9 +380,19 @@ class MarketDataProvider:
                 'event_type': 'MD_CACHE_CFG',
                 'hard_ttl_s': ticker_cache_ttl,
                 'soft_ttl_s': ticker_soft_ttl,
-                'max_items': max_cache_size
+                'max_items': max_cache_size,
+                'priority_updates_enabled': self.enable_priority_updates,
+                'portfolio_ttl_s': self.portfolio_ttl if self.enable_priority_updates else None,
+                'portfolio_soft_ttl_s': self.portfolio_soft_ttl if self.enable_priority_updates else None
             }
         )
+
+        if self.enable_priority_updates and self.portfolio_provider:
+            logger.info(
+                f"Priority Market Data Updates ENABLED: "
+                f"Portfolio coins will update every {self.portfolio_ttl:.1f}s "
+                f"(soft: {self.portfolio_soft_ttl:.1f}s) vs default {self.default_ttl:.1f}s"
+            )
         self.ohlcv_history = OHLCVHistory(max_bars_per_symbol)
         self._lock = RLock()
         self._statistics = {
@@ -638,6 +663,58 @@ class MarketDataProvider:
                 except Exception as e:
                     logger.debug(f"Could not emit dashboard event: {e}")
 
+    def _is_portfolio_symbol(self, symbol: str) -> bool:
+        """
+        Check if a symbol is currently in the portfolio (held position).
+        Portfolio symbols get priority updates with shorter TTL.
+
+        FIX H4: Uses cached portfolio symbols, refreshed periodically.
+
+        Returns:
+            True if symbol is in portfolio, False otherwise
+        """
+        if not self.enable_priority_updates or not self.portfolio_provider:
+            return False
+
+        try:
+            # Use cached portfolio symbols for performance
+            with self._portfolio_cache_lock:
+                # Check if cache needs refresh
+                current_time = time.time()
+                cache_age = current_time - getattr(self, '_portfolio_cache_last_refresh', 0)
+
+                if cache_age > self._portfolio_cache_ttl:
+                    # Refresh cache
+                    new_symbols = set()
+                    if hasattr(self.portfolio_provider, 'positions'):
+                        new_symbols = set(self.portfolio_provider.positions.keys())
+                    elif hasattr(self.portfolio_provider, 'held_assets'):
+                        held = getattr(self.portfolio_provider, 'held_assets', {}) or {}
+                        new_symbols = set(held.keys())
+
+                    self._portfolio_symbols_cache = new_symbols
+                    self._portfolio_cache_last_refresh = current_time
+                    logger.debug(
+                        f"Portfolio symbols cache refreshed: {len(new_symbols)} symbols",
+                        extra={'event_type': 'MD_PORTFOLIO_CACHE_REFRESH', 'symbol_count': len(new_symbols)}
+                    )
+
+                return symbol in self._portfolio_symbols_cache
+
+        except Exception as e:
+            logger.debug(f"Failed to check portfolio status for {symbol}: {e}")
+
+        return False
+
+    def invalidate_portfolio_cache(self):
+        """
+        FIX H4: Invalidate portfolio symbols cache.
+        Should be called when positions open/close.
+        """
+        with self._portfolio_cache_lock:
+            self._portfolio_cache_last_refresh = 0
+            logger.debug("Portfolio symbols cache invalidated", extra={'event_type': 'MD_PORTFOLIO_CACHE_INVALIDATE'})
+
     def get_ticker(self, symbol: str, use_cache: bool = True) -> Optional[TickerData]:
         """
         Get ticker data with soft-TTL caching.
@@ -748,9 +825,24 @@ class MarketDataProvider:
                         change_percent_24h=raw_ticker.get('percentage')
                     )
 
-                    # persist to soft-TTL cache so snapshot emitter sees it
+                    # Persist to soft-TTL cache with priority-based TTL
+                    # Portfolio symbols get faster updates (shorter TTL)
                     try:
-                        self.ticker_cache.store_ticker(ticker)
+                        is_portfolio = self._is_portfolio_symbol(symbol)
+                        if is_portfolio:
+                            # Use priority TTL for portfolio symbols
+                            self.ticker_cache.store_ticker(
+                                ticker,
+                                ttl=self.portfolio_ttl,
+                                soft_ttl=self.portfolio_soft_ttl
+                            )
+                            logger.debug(
+                                f"Stored {symbol} with PRIORITY TTL "
+                                f"(ttl={self.portfolio_ttl:.1f}s, soft={self.portfolio_soft_ttl:.1f}s)"
+                            )
+                        else:
+                            # Use default TTL for non-portfolio symbols
+                            self.ticker_cache.store_ticker(ticker)
                     except Exception:
                         logger.debug(f"ticker_cache.store_ticker failed for {symbol}")
 

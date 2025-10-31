@@ -11,10 +11,17 @@ Consolidates all exit logic with deterministic rule prioritization:
 Generates exit signals for OrderRouter execution.
 """
 
+import logging
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Dict, Optional
+
+from core.logger_factory import DECISION_LOG, log_event
+from core.trace_context import Trace
+from core.logging.debug_tracer import trace_step
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,6 +211,50 @@ class ExitEngine:
         if not pos or not snap or pos.qty == 0:
             return None
 
+        # Extract key market data for logging
+        last_price = snap["price"]["last"]
+        bid_price = snap["price"].get("bid", last_price)
+        ask_price = snap["price"].get("ask", last_price)
+        entry_price = pos.avg_price
+        current_pnl_pct = ((last_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        hold_time_s = time.time() - pos.opened_ts
+
+        # Extract window data for trailing stops
+        windows = snap.get("windows", {})
+        peak = windows.get("peak")
+        trough = windows.get("trough")
+
+        # Log exit evaluation start with detailed context
+        try:
+            trace_step("exit_evaluation_start", symbol=sym,
+                      entry_price=entry_price,
+                      current_price=last_price,
+                      pnl_pct=current_pnl_pct,
+                      hold_time_s=hold_time_s)
+
+            # Detailed exit evaluation log
+            log_event(
+                DECISION_LOG(),
+                "exit_evaluation",
+                symbol=sym,
+                side="sell" if pos.qty > 0 else "buy",
+                entry_price=entry_price,
+                current_price=last_price,
+                bid=bid_price,
+                ask=ask_price,
+                position_qty=pos.qty,
+                pnl_pct=round(current_pnl_pct, 4),
+                hold_time_s=round(hold_time_s, 2),
+                peak=peak,
+                trough=trough,
+                config_sl_pct=getattr(self.cfg, "EXIT_HARD_SL_PCT", None),
+                config_tp_pct=getattr(self.cfg, "EXIT_HARD_TP_PCT", None),
+                config_trail_pct=getattr(self.cfg, "EXIT_TRAILING_PCT", None),
+                config_max_hold_s=getattr(self.cfg, "EXIT_MAX_HOLD_S", None)
+            )
+        except Exception as log_err:
+            logger.debug(f"Exit evaluation logging failed for {sym}: {log_err}")
+
         # Evaluate rules in priority order (first match wins)
         rules = [
             self._hard_sl(sym, pos, snap),
@@ -215,10 +266,66 @@ class ExitEngine:
         chosen = next((r for r in rules if r is not None), None)
 
         if not chosen:
+            # Log no-exit decision
+            try:
+                trace_step("exit_evaluation_no_trigger", symbol=sym,
+                          pnl_pct=current_pnl_pct, hold_time_s=hold_time_s)
+
+                log_event(
+                    DECISION_LOG(),
+                    "exit_evaluation_no_trigger",
+                    symbol=sym,
+                    entry_price=entry_price,
+                    current_price=last_price,
+                    pnl_pct=round(current_pnl_pct, 4),
+                    hold_time_s=round(hold_time_s, 2)
+                )
+            except Exception as log_err:
+                logger.debug(f"Exit no-trigger logging failed for {sym}: {log_err}")
             return None
 
+        # Log exit trigger with comprehensive details
+        try:
+            trace_step("exit_triggered", symbol=sym,
+                      rule=chosen.code, reason=chosen.reason,
+                      pnl_pct=current_pnl_pct)
+
+            logger.info(
+                f"EXIT TRIGGERED: {sym} | Rule={chosen.code} | Reason={chosen.reason} | "
+                f"Entry={entry_price:.8f} | Current={last_price:.8f} | "
+                f"PnL={current_pnl_pct:+.2f}% | Hold={hold_time_s:.0f}s",
+                extra={
+                    'event_type': 'EXIT_TRIGGERED',
+                    'symbol': sym,
+                    'rule_code': chosen.code,
+                    'reason': chosen.reason
+                }
+            )
+
+            log_event(
+                DECISION_LOG(),
+                "exit_triggered",
+                symbol=sym,
+                side="sell" if pos.qty > 0 else "buy",
+                rule_code=chosen.code,
+                reason=chosen.reason,
+                entry_price=entry_price,
+                current_price=last_price,
+                limit_price=chosen.limit_price,
+                position_qty=pos.qty,
+                exit_qty=abs(pos.qty),
+                pnl_pct=round(current_pnl_pct, 4),
+                hold_time_s=round(hold_time_s, 2),
+                strength=chosen.strength,
+                peak=peak,
+                trough=trough,
+                bid=bid_price,
+                ask=ask_price
+            )
+        except Exception as log_err:
+            logger.error(f"Exit trigger logging failed for {sym}: {log_err}")
+
         # Build exit signal
-        last = snap["price"]["last"]
         qty = abs(pos.qty)  # Close entire position
         side = "sell" if pos.qty > 0 else "buy"  # Reverse side to close
 
@@ -226,7 +333,7 @@ class ExitEngine:
             "symbol": sym,
             "side": side,
             "qty": qty,
-            "limit_price": chosen.limit_price or last,
+            "limit_price": chosen.limit_price or last_price,
             "reason": chosen.reason,
             "rule_code": chosen.code,
             "strength": chosen.strength
