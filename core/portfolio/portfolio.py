@@ -477,7 +477,31 @@ class PortfolioManager:
         except Exception as e:
             logger.error(f"Fehler beim Portfolio-Reset: {e}",
                         extra={'event_type': 'PORTFOLIO_RESET_ERROR', 'error': str(e)})
-            return False
+
+    @synchronized
+    def get_all_positions(self) -> Dict[str, Position]:
+        """
+        Get all positions (thread-safe).
+
+        FIX HIGH-2/HIGH-3: Thread-safe getter for position iteration.
+
+        Returns:
+            Dict copy of all positions (symbol -> Position)
+        """
+        return self.positions.copy()
+
+    @synchronized
+    def get_position(self, symbol: str) -> Optional[Position]:
+        """
+        Get single position (thread-safe).
+
+        Args:
+            symbol: Trading pair
+
+        Returns:
+            Position object or None if not found
+        """
+        return self.positions.get(symbol)
 
     def check_startup_budget(self) -> bool:
         """Prüft ob genug Budget vorhanden ist"""

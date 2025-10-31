@@ -1310,7 +1310,12 @@ class TradingEngine:
         try:
             # Iterate over all open positions
             # FIX HIGH-3: Use thread-safe iteration pattern
-            positions = self.portfolio.get_all_positions()  # Returns locked copy
+            if hasattr(self.portfolio, 'get_all_positions'):
+                positions = self.portfolio.get_all_positions()  # Returns locked copy
+            else:
+                # Fallback for older PortfolioManager instances
+                positions = dict(self.portfolio.positions)  # Create copy
+
             for symbol, pos in positions.items():
 
                 # Skip positions with no qty (closed)
