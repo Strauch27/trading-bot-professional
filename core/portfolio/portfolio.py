@@ -764,6 +764,59 @@ class PortfolioManager:
         log_event("BUDGET_RELEASED", context=context)
 
     @synchronized_budget
+    def set_budget(self, amount: float, reason: str = "manual_set"):
+        """
+        Thread-safe budget setter.
+
+        FIX HIGH-4: Explicit setter for encapsulation and thread safety.
+
+        Args:
+            amount: New budget amount (USDT)
+            reason: Reason for change (for logging)
+        """
+        old_budget = self.my_budget
+        self.my_budget = float(amount)
+
+        logger.info(
+            f"Budget updated: {old_budget:.2f} → {amount:.2f} (reason: {reason})",
+            extra={
+                'event_type': 'BUDGET_UPDATED',
+                'old_budget': old_budget,
+                'new_budget': amount,
+                'reason': reason
+            }
+        )
+
+        self._persist_state()
+
+    @synchronized_budget
+    def adjust_budget(self, delta: float, reason: str = "adjustment"):
+        """
+        Thread-safe budget adjustment (add or subtract).
+
+        FIX HIGH-4: Explicit method for budget adjustments.
+
+        Args:
+            delta: Amount to add (positive) or subtract (negative)
+            reason: Reason for adjustment (for logging)
+        """
+        old_budget = self.my_budget
+        self.my_budget += delta
+
+        logger.info(
+            f"Budget adjusted: {old_budget:.2f} {delta:+.2f} = {self.my_budget:.2f} (reason: {reason})",
+            extra={
+                'event_type': 'BUDGET_ADJUSTED',
+                'old_budget': old_budget,
+                'delta': delta,
+                'new_budget': self.my_budget,
+                'reason': reason
+            }
+        )
+
+        self._persist_state()
+
+    @synchronized_budget
     def commit_budget(
         self,
         quote_amount: float,

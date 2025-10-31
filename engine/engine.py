@@ -1309,8 +1309,9 @@ class TradingEngine:
         """
         try:
             # Iterate over all open positions
-            for symbol in list(self.portfolio.positions.keys()):
-                pos = self.portfolio.positions.get(symbol)
+            # FIX HIGH-3: Use thread-safe iteration pattern
+            positions = self.portfolio.get_all_positions()  # Returns locked copy
+            for symbol, pos in positions.items():
 
                 # Skip positions with no qty (closed)
                 if not pos or pos.qty == 0:

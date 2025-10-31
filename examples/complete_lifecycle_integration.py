@@ -141,8 +141,9 @@ class MinimalTradingEngine:
         """
         try:
             # Iterate over all open positions
-            for symbol in list(self.portfolio.positions.keys()):
-                pos = self.portfolio.positions.get(symbol)
+            # FIX HIGH-3: Use thread-safe iteration
+            positions = self.portfolio.get_all_positions()
+            for symbol, pos in positions.items():
 
                 # Skip positions with no qty (closed)
                 if not pos or pos.qty == 0:
@@ -183,7 +184,8 @@ class MinimalTradingEngine:
         For this example, we create simplified snapshots.
         """
         try:
-            for symbol in self.portfolio.positions.keys():
+            # FIX HIGH-3: Use thread-safe iteration
+            for symbol in list(self.portfolio.get_all_positions().keys()):
                 # Fetch current ticker
                 ticker = self.exchange_wrapper.fetch_ticker(symbol)
 

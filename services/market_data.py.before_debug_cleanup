@@ -1473,6 +1473,14 @@ class MarketDataProvider:
         from services.shutdown_coordinator import get_shutdown_coordinator
         co = get_shutdown_coordinator()
 
+        # ULTRA DEBUG: Entry logging
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - update_market_data() ENTRY symbols={len(symbols)}\n")
+                f.flush()
+        except:
+            pass
 
         co.beat("md_update_start")
         now = time.time()
@@ -1482,8 +1490,22 @@ class MarketDataProvider:
         import config
         use_new_pipeline = getattr(config, 'USE_NEW_PIPELINE', False)
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  use_new_pipeline={use_new_pipeline}\n")
+                f.flush()
+        except:
+            pass
 
         if not use_new_pipeline or not self.enable_drop_tracking:
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/update_market_data.txt", "a") as f:
+                    f.write("  Using LEGACY pipeline\n")
+                    f.flush()
+            except:
+                pass
 
             # Fallback to legacy behavior (PARALLEL)
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1515,6 +1537,7 @@ class MarketDataProvider:
             co.beat("md_update_end")
             return results
 
+        # ULTRA DEBUG
         try:
             with open("/tmp/update_market_data.txt", "a") as f:
                 f.write(f"  Using NEW pipeline, fetching {len(symbols)} tickers...\n")
@@ -1826,14 +1849,42 @@ class MarketDataProvider:
                 except Exception as export_err:
                     logger.debug(f"Could not export health stats: {export_err}")
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Tickers fetched: {len(tickers)}/{len(symbols)} in {fetch_duration:.2f}s\n")
+                f.flush()
+        except:
+            pass
 
         # Update PriceCache with all current prices
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write("  Updating PriceCache...\n")
+                f.flush()
+        except:
+            pass
 
         if self.price_cache:
             price_dict = {sym: t.last for sym, t in tickers.items()}
             self.price_cache.update(price_dict, now)
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write("  PriceCache updated\n")
+                f.flush()
+        except:
+            pass
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Building snapshots for {len(tickers)} symbols...\n")
+                f.flush()
+        except:
+            pass
 
         # Update RollingWindows and build snapshots
         snapshots = []
@@ -1897,8 +1948,22 @@ class MarketDataProvider:
             except Exception as e:
                 logger.debug(f"Failed to build snapshot for {symbol}: {e}")
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Snapshots built: {len(snapshots)}\n")
+                f.flush()
+        except:
+            pass
 
         # Publish all snapshots via EventBus
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write(f"  Publishing {len(snapshots)} snapshots to EventBus...\n")
+                f.flush()
+        except:
+            pass
 
         if snapshots and self.event_bus:
             try:
@@ -1906,8 +1971,22 @@ class MarketDataProvider:
                 self.event_bus.publish("market.snapshots", snapshots)
                 self._statistics['drop_snapshots_emitted'] += 1
 
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/update_market_data.txt", "a") as f:
+                        f.write("  EventBus publish SUCCESS\n")
+                        f.flush()
+                except:
+                    pass
             except Exception as e:
                 logger.debug(f"Failed to publish snapshots: {e}")
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/update_market_data.txt", "a") as f:
+                        f.write(f"  EventBus publish FAILED: {e}\n")
+                        f.flush()
+                except:
+                    pass
 
         # V9_3 Phase 4: Persist snapshots to JSONL
         if snapshots and self.snapshot_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
@@ -1974,6 +2053,13 @@ class MarketDataProvider:
 
         co.beat("md_update_end")
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/update_market_data.txt", "a") as f:
+                f.write("  update_market_data() COMPLETE\n")
+                f.flush()
+        except:
+            pass
 
         logger.info(f"HEARTBEAT - Market data update completed: {len(symbols)} symbols, {sum(results.values())} successful, {len(snapshots)} snapshots",
                    extra={"event_type": "HEARTBEAT"})
@@ -2016,9 +2102,24 @@ class MarketDataProvider:
 
     def start(self):
         """Start market data polling loop in background thread"""
+        # ULTRA DEBUG: Write to file
+        try:
+            with open("/tmp/market_data_start.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - MarketDataProvider.start() ENTRY\n")
+                f.flush()
+        except:
+            pass
 
         if hasattr(self, '_running') and self._running:
             logger.warning("Market data loop already running")
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_start.txt", "a") as f:
+                    f.write("  Already running, returning early\n")
+                    f.flush()
+            except:
+                pass
             return
 
         self._running = True
@@ -2034,6 +2135,13 @@ class MarketDataProvider:
         self._thread = threading.Thread(target=self._loop_with_auto_restart, name="MarketDataLoop", daemon=True)
         self._thread.start()
 
+        # ULTRA DEBUG
+        try:
+            with open("/tmp/market_data_start.txt", "a") as f:
+                f.write(f"  Thread started, thread={self._thread}, is_alive={self._thread.is_alive() if self._thread else False}\n")
+                f.flush()
+        except:
+            pass
 
         # Log thread start with explicit event
         logger.info("MARKET_DATA_THREAD_STARTED", extra={"event_type":"MARKET_DATA_LOOP_STARTED"})
@@ -2181,6 +2289,14 @@ class MarketDataProvider:
 
     def _loop(self):
         """Market data polling loop - fetches and publishes snapshots"""
+        # ULTRA DEBUG: Write to file
+        try:
+            with open("/tmp/market_data_loop.txt", "a") as f:
+                import datetime
+                f.write(f"{datetime.datetime.now()} - _loop() ENTRY\n")
+                f.flush()
+        except:
+            pass
 
         import traceback
         from pathlib import Path
@@ -2188,9 +2304,38 @@ class MarketDataProvider:
         import config
 
         try:
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write("  Inside try block\n")
+                    f.flush()
+            except:
+                pass
 
+            # ULTRA DEBUG - Test 1
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write("  Test 1: About to check self.persist\n")
+                    f.flush()
+                    persist_value = self.persist
+                    f.write(f"  Test 2: self.persist={persist_value}\n")
+                    f.flush()
+            except Exception as e:
+                try:
+                    with open("/tmp/market_data_loop.txt", "a") as f:
+                        f.write(f"  ERROR accessing self.persist: {e}\n")
+                        f.flush()
+                except:
+                    pass
             # Pfade vorbereiten (falls Persistenz aktiviert)
             if self.persist:
+                # ULTRA DEBUG
+                try:
+                    with open("/tmp/market_data_loop.txt", "a") as f:
+                        f.write("  Creating paths...\n")
+                        f.flush()
+                except:
+                    pass
                 Path(self.base_path).mkdir(parents=True, exist_ok=True)
                 Path(f"{self.base_path}/snapshots").mkdir(parents=True, exist_ok=True)
                 Path(f"{self.base_path}/drop_windows").mkdir(parents=True, exist_ok=True)
@@ -2201,12 +2346,26 @@ class MarketDataProvider:
             poll_s = poll_ms / 1000.0
             debug_drops = getattr(config, "DEBUG_DROPS", False)
 
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  poll_ms={poll_ms}, debug_drops={debug_drops}\n")
+                    f.flush()
+            except:
+                pass
 
             logger.info(f"Market data loop started with poll interval {poll_ms}ms")
 
             # Get symbols from config or use defaults
             symbols = getattr(config, 'TOPCOINS_SYMBOLS', [])
 
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  symbols_count={len(symbols)}\n")
+                    f.flush()
+            except:
+                pass
 
             # Log configuration
             logger.info("MD_LOOP_CFG", extra={"symbols_count": len(symbols), "first5": symbols[:5], "poll_ms": poll_ms})
@@ -2231,6 +2390,13 @@ class MarketDataProvider:
                 except Exception as e:
                     logger.warning(f"Warm-start failed: {e}", exc_info=True)
 
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  Entering while loop (_running={self._running})\n")
+                    f.flush()
+            except:
+                pass
 
             # Batch polling logic
             batch_polling = getattr(config, 'MD_BATCH_POLLING', False)
@@ -2271,6 +2437,13 @@ class MarketDataProvider:
                             extra={'event_type': 'MD_LOOP_ITERATION', 'iteration': loop_counter, 'running': self._running}
                         )
 
+                    # ULTRA DEBUG (extended to ALL loops, with file rotation)
+                    try:
+                        with open("/tmp/market_data_loop.txt", "a") as f:
+                            f.write(f"  Loop iteration #{loop_counter} - Processing {len(symbol_batches)} batches...\n")
+                            f.flush()
+                    except:
+                        pass
 
                     # Process each batch with interval
                     all_results = {}
@@ -2308,6 +2481,13 @@ class MarketDataProvider:
                     failed_count = sum(1 for v in all_results.values() if not v)
                     cycle_duration = time.time() - cycle_start
 
+                    # ULTRA DEBUG (extended to ALL loops)
+                    try:
+                        with open("/tmp/market_data_loop.txt", "a") as f:
+                            f.write(f"  Loop iteration #{loop_counter} - All batches processed (success={success_count}/{len(symbols)}, duration={cycle_duration:.2f}s)\n")
+                            f.flush()
+                    except:
+                        pass
 
                     # Per-cycle summary (if per-coin debugging enabled)
                     if getattr(config, 'MD_DEBUG_PER_COIN', False):
@@ -2454,9 +2634,25 @@ class MarketDataProvider:
             logger.error(f"Exception message: {str(e)}")
             logger.error(f"Traceback:\n{traceback.format_exc()}")
             self._running = False
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    f.write(f"  FATAL ERROR: {type(e).__name__}: {e}\n")
+                    f.write(f"  Traceback:\n{traceback.format_exc()}\n")
+                    f.flush()
+            except:
+                pass
             return
         finally:
             logger.info(f"Market data loop ended (finally block, loop_counter={loop_counter if 'loop_counter' in locals() else 'unknown'})")
+            # ULTRA DEBUG
+            try:
+                with open("/tmp/market_data_loop.txt", "a") as f:
+                    import datetime
+                    f.write(f"{datetime.datetime.now()} - _loop() EXIT (finally block)\n")
+                    f.flush()
+            except:
+                pass
 
 
 # Utility functions for backwards compatibility
