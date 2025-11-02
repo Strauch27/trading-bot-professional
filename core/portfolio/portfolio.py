@@ -1714,3 +1714,58 @@ class PortfolioManager:
             ev: Event dict to append to events list
         """
         self.events.append(ev)
+
+    def get_positions_with_ghosts(self, engine=None) -> List[Dict]:
+        """
+        Get all positions including ghost positions (rejected buy intents).
+
+        Ghost positions are buy intents that failed compliance validation.
+        They're included for UI transparency but don't affect PnL or budget.
+
+        Args:
+            engine: Optional FSM engine with ghost_store
+
+        Returns:
+            List of position dicts with held assets + ghost positions
+        """
+        positions = []
+
+        # Add real held positions
+        with self._lock:
+            for symbol, asset in (self.held_assets or {}).items():
+                try:
+                    amount = float(asset.get('amount', 0))
+                    if amount > 0:
+                        entry_price = asset.get('entry_price', 0) or asset.get('buy_price', 0)
+                        positions.append({
+                            'symbol': symbol,
+                            'amount': amount,
+                            'entry_price': entry_price,
+                            'state': 'OPEN',
+                            'is_ghost': False
+                        })
+                except Exception as e:
+                    logger.debug(f"Failed to parse position {symbol}: {e}")
+
+        # Add ghost positions if engine available
+        if engine and hasattr(engine, 'ghost_store'):
+            try:
+                ghosts = engine.ghost_store.list_active()
+                for ghost in ghosts:
+                    positions.append({
+                        'symbol': ghost['symbol'],
+                        'amount': 0,  # Ghost has no actual size
+                        'entry_price': ghost['q_price'],
+                        'state': 'GHOST',
+                        'is_ghost': True,
+                        'ghost_id': ghost['id'],
+                        'abort_reason': ghost['abort_reason'],
+                        'violations': ghost.get('violations', []),
+                        'raw_price': ghost.get('raw_price'),
+                        'raw_amount': ghost.get('raw_amount'),
+                        'market_precision': ghost.get('market_precision', {})
+                    })
+            except Exception as e:
+                logger.debug(f"Failed to fetch ghost positions: {e}")
+
+        return positions

@@ -248,46 +248,106 @@ def get_config_data(config_module, start_time: float) -> Dict[str, Any]:
 
 
 def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
-    """Collect and calculate portfolio data."""
+    """Collect and calculate portfolio data including ghost positions."""
     positions_data = []
+    ghost_count = 0
     total_value = portfolio.my_budget
 
-    # Get all held assets - create a copy to avoid race conditions
-    held_assets = getattr(portfolio, 'held_assets', {}) or {}
-    held_assets_copy = dict(held_assets)
-
-    for symbol, asset in held_assets_copy.items():
+    # Try to use get_positions_with_ghosts if available (new method)
+    if hasattr(portfolio, 'get_positions_with_ghosts'):
         try:
-            # Get current price
-            current_price = engine.get_current_price(symbol)
-            if not current_price:
-                snap, snap_ts = engine.get_snapshot_entry(symbol) if hasattr(engine, 'get_snapshot_entry') else (None, None)
-                if snap:
-                    current_price = snap.get('price', {}).get('last')
-            if not current_price:
-                current_price = asset.get('entry_price', 0) or getattr(portfolio, 'last_prices', {}).get(symbol)
+            all_positions = portfolio.get_positions_with_ghosts(engine)
 
-            entry_price = asset.get('entry_price', 0) or asset.get('buy_price', 0)
-            amount = asset.get('amount', 0)
+            for pos in all_positions:
+                symbol = pos.get('symbol')
+                is_ghost = pos.get('is_ghost', False)
 
-            if amount > 0:
-                position_value = current_price * amount
-                total_value += position_value
+                try:
+                    if is_ghost:
+                        # Ghost position - no actual value, just display info
+                        ghost_count += 1
+                        positions_data.append({
+                            'symbol': symbol,
+                            'amount': 0,
+                            'entry': pos.get('entry_price', 0),
+                            'current': pos.get('entry_price', 0),
+                            'is_ghost': True,
+                            'abort_reason': pos.get('abort_reason', 'unknown'),
+                            'violations': pos.get('violations', []),
+                            'raw_price': pos.get('raw_price'),
+                            'raw_amount': pos.get('raw_amount'),
+                            'market_precision': pos.get('market_precision', {})
+                        })
+                    else:
+                        # Real position
+                        current_price = engine.get_current_price(symbol)
+                        if not current_price:
+                            snap, snap_ts = engine.get_snapshot_entry(symbol) if hasattr(engine, 'get_snapshot_entry') else (None, None)
+                            if snap:
+                                current_price = snap.get('price', {}).get('last')
+                        if not current_price:
+                            current_price = pos.get('entry_price', 0)
 
-                positions_data.append({
-                    'symbol': symbol,
-                    'amount': amount,
-                    'entry': entry_price,
-                    'current': current_price,
-                })
+                        amount = pos.get('amount', 0)
+                        if amount > 0:
+                            position_value = current_price * amount
+                            total_value += position_value
+
+                            positions_data.append({
+                                'symbol': symbol,
+                                'amount': amount,
+                                'entry': pos.get('entry_price', 0),
+                                'current': current_price,
+                                'is_ghost': False
+                            })
+                except Exception as e:
+                    logger.debug(f"Error processing position {symbol}: {e}")
+                    continue
         except Exception as e:
-            logger.debug(f"Error processing position {symbol}: {e}")
-            continue
+            logger.warning(f"Failed to get positions with ghosts, falling back to legacy: {e}")
+            # Fallback to old method below
+            all_positions = []
+    else:
+        all_positions = []
+
+    # Fallback: Use old method if new method not available or failed
+    if not all_positions:
+        held_assets = getattr(portfolio, 'held_assets', {}) or {}
+        held_assets_copy = dict(held_assets)
+
+        for symbol, asset in held_assets_copy.items():
+            try:
+                current_price = engine.get_current_price(symbol)
+                if not current_price:
+                    snap, snap_ts = engine.get_snapshot_entry(symbol) if hasattr(engine, 'get_snapshot_entry') else (None, None)
+                    if snap:
+                        current_price = snap.get('price', {}).get('last')
+                if not current_price:
+                    current_price = asset.get('entry_price', 0) or getattr(portfolio, 'last_prices', {}).get(symbol)
+
+                entry_price = asset.get('entry_price', 0) or asset.get('buy_price', 0)
+                amount = asset.get('amount', 0)
+
+                if amount > 0:
+                    position_value = current_price * amount
+                    total_value += position_value
+
+                    positions_data.append({
+                        'symbol': symbol,
+                        'amount': amount,
+                        'entry': entry_price,
+                        'current': current_price,
+                        'is_ghost': False
+                    })
+            except Exception as e:
+                logger.debug(f"Error processing position {symbol}: {e}")
+                continue
 
     return {
         "total_value": total_value,
         "budget": portfolio.my_budget,
         "positions": positions_data,
+        "ghost_count": ghost_count
     }
 
 
@@ -508,8 +568,8 @@ def get_health_data(engine, config_module) -> Dict[str, Any]:
     }
 
 
-def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, Any]) -> Panel:
-    """Create the header panel with status, config, and system resources."""
+def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, Any], portfolio_data: Dict[str, Any] = None) -> Panel:
+    """Create the header panel with status, config, system resources, and ghost stats."""
     grid = Table.grid(expand=True)
     grid.add_column(justify="left", ratio=1)
     grid.add_column(justify="right", ratio=1)
@@ -517,8 +577,11 @@ def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, A
     mode_style = "bold green" if config_data.get("GLOBAL_TRADING") else "bold yellow"
     mode_text = 'LIVE' if config_data.get('GLOBAL_TRADING') else 'OBSERVE'
 
-    # Line 1: Mode, Session, Uptime, Heartbeat
-    line1 = Text.assemble(
+    # Get ghost count from portfolio data
+    ghost_count = portfolio_data.get('ghost_count', 0) if portfolio_data else 0
+
+    # Line 1: Mode, Session, Uptime, Heartbeat, Ghosts
+    line1_parts = [
         ("MODE: ", "white"),
         (f"[{mode_text}]", mode_style),
         ("  |  SESSION: ", "white"),
@@ -528,7 +591,17 @@ def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, A
         ("  |  [HEARTBEAT]: ", "white"),
         ("OK", "green"),
         (f" @ {datetime.now(timezone.utc).strftime('%H:%M:%S')}", "dim white"),
-    )
+    ]
+
+    # Add ghost count if any
+    if ghost_count > 0:
+        line1_parts.extend([
+            ("  |  ", "dim white"),
+            ("👻 GHOSTS: ", "yellow"),
+            (f"{ghost_count}", "red"),
+        ])
+
+    line1 = Text.assemble(*line1_parts)
 
     # Line 2: Config
     line2 = Text.assemble(
@@ -587,7 +660,7 @@ def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, A
 
 
 def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
-    """Create the portfolio panel."""
+    """Create the portfolio panel with ghost positions."""
     try:
         table = Table(expand=True, border_style="magenta", show_header=True)
         table.add_column("Symbol", style="cyan", no_wrap=True)
@@ -595,28 +668,55 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
         table.add_column("Entry", style="yellow", justify="right")
         table.add_column("Current", style="yellow", justify="right")
         table.add_column("PnL ($/%)", justify="right")
+        table.add_column("Status", justify="center", no_wrap=True)
 
         positions = portfolio_data.get("positions", []) if portfolio_data else []
+        ghost_count = portfolio_data.get("ghost_count", 0)
     except Exception as e:
         return Panel(Text(f"Portfolio Panel Error: {e}", style="red"), title="PORTFOLIO ERROR", border_style="red")
 
     if not positions:
-        table.add_row("—", "—", "—", "—", "—")
+        table.add_row("—", "—", "—", "—", "—", "—")
     else:
         for pos in positions:
-            pnl = (pos['current'] - pos['entry']) * pos['amount']
-            pnl_pct = ((pos['current'] / pos['entry']) - 1) * 100 if pos['entry'] > 0 else 0
-            style = "green" if pnl >= 0 else "red"
+            is_ghost = pos.get('is_ghost', False)
 
-            table.add_row(
-                pos['symbol'],
-                f"{pos['amount']:.4f}",
-                f"${pos['entry']:.4f}",
-                f"${pos['current']:.4f}",
-                Text(f"{pnl:+.2f} ({pnl_pct:+.2f}%)", style=style)
-            )
+            if is_ghost:
+                # Ghost position - rejected buy intent
+                abort_reason = pos.get('abort_reason', 'unknown')
+                violations = pos.get('violations', [])
 
-    title = f"[PORTFOLIO] Wert: ${portfolio_data.get('total_value', 0):.2f} / Budget: ${portfolio_data.get('budget', 0):.2f}"
+                # Format violations for tooltip-like display
+                violation_str = ", ".join(violations[:2])  # Show first 2 violations
+                if len(violations) > 2:
+                    violation_str += "..."
+
+                table.add_row(
+                    Text(pos['symbol'], style="dim cyan"),
+                    Text("GHOST", style="dim white"),
+                    Text(f"${pos['entry']:.4f}", style="dim yellow"),
+                    Text("—", style="dim white"),
+                    Text(abort_reason[:12], style="dim red"),
+                    Text("👻", style="dim white")
+                )
+            else:
+                # Real position
+                pnl = (pos['current'] - pos['entry']) * pos['amount']
+                pnl_pct = ((pos['current'] / pos['entry']) - 1) * 100 if pos['entry'] > 0 else 0
+                style = "green" if pnl >= 0 else "red"
+
+                table.add_row(
+                    pos['symbol'],
+                    f"{pos['amount']:.4f}",
+                    f"${pos['entry']:.4f}",
+                    f"${pos['current']:.4f}",
+                    Text(f"{pnl:+.2f} ({pnl_pct:+.2f}%)", style=style),
+                    Text("✓", style="green")
+                )
+
+    # Add ghost count to title if any
+    ghost_suffix = f" | Ghosts: {ghost_count}" if ghost_count > 0 else ""
+    title = f"[PORTFOLIO] Wert: ${portfolio_data.get('total_value', 0):.2f} / Budget: ${portfolio_data.get('budget', 0):.2f}{ghost_suffix}"
     return Panel(table, title=title, border_style="magenta", expand=True)
 
 
@@ -868,7 +968,7 @@ def run_dashboard(engine, portfolio, config_module):
                     last_event = _event_bus.get_last_event()
 
                     # Update UI components
-                    layout["header"].update(make_header_panel(config_data, system_resources))
+                    layout["header"].update(make_header_panel(config_data, system_resources, portfolio_data))
                     layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
                     layout["footer"].update(make_footer_panel(last_event, health_data))
