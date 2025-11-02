@@ -33,6 +33,10 @@ from core.fsm.exchange_wrapper import FSMExchangeWrapper
 from core.fsm.position_management import DynamicTPSLManager
 from core.logging.logger import new_client_order_id, new_decision_id, JsonlLogger
 
+# Exchange Compliance & Ghost Store
+from core.exchange_compliance import quantize_and_validate, ComplianceResult
+from core.ghost_store import GhostStore
+
 # Logging & Metrics
 from core.logging.phase_events import PhaseEventLogger
 from core.logging.adaptive_logger import get_adaptive_logger, track_error, track_failed_trade, track_guard_block, notify_trade_completed
@@ -112,6 +116,9 @@ class FSMTradingEngine:
 
         # P1-3: FSMExchangeWrapper for duplicate prevention
         self.exchange_wrapper = FSMExchangeWrapper(self.exchange)
+
+        # Ghost Store for tracking rejected buy intents (24h TTL)
+        self.ghost_store = GhostStore(ttl_sec=86400)
 
         # Table-Driven FSM Components
         self.fsm = FSMachine()
@@ -633,57 +640,95 @@ class FSMTradingEngine:
                 self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
                 return
 
-            # CRITICAL FIX (DIFF 4): Use robust sizing helpers instead of naive division
-            # Get market filters for proper tick/step/notional sizing
-            from core.utils.helpers_filters import create_filters_from_market, size_buy_from_quote, validate_order_params
-            try:
-                market_info = self.exchange.market(st.symbol)
-                filters = create_filters_from_market(market_info)
-
-                # Use robust sizing with tick/step/notional compliance
-                price, amount, notional, sizing_audit = size_buy_from_quote(
-                    quote_budget=quote_budget,
-                    best_ask=ctx.price,
-                    tickSize=filters.tickSize,
-                    stepSize=filters.stepSize,
-                    minNotional=filters.minNotional
-                )
-
-                logger.info(f"[SIZING] {st.symbol}: price={price:.8f}, qty={amount:.6f}, notional={notional:.2f}, audit={sizing_audit}")
-
-                # CRITICAL FIX (DIFF 6): Pre-flight validation before order submission
-                # Validates tick size, step size, min qty, min notional
-                is_valid, reason, validation_details = validate_order_params(
-                    symbol=st.symbol,
-                    side="buy",
-                    price=price,
-                    qty=amount,
-                    f=filters
-                )
-
-                if not is_valid:
-                    logger.error(f"[PRE_FLIGHT] {st.symbol} Order validation FAILED: {reason}, details={validation_details}")
-                    # P2-2: Track failed trade (pre-flight validation failed)
-                    try:
-                        track_failed_trade(st.symbol, f"pre_flight_validation_failed_{reason}")
-                    except Exception:
-                        pass
-                    self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
-                    return
-                else:
-                    logger.info(f"[PRE_FLIGHT] {st.symbol} Order validation PASSED (notional={validation_details.get('notional', 0):.2f})")
-
-            except Exception as sizing_error:
-                # Fallback to simple sizing if market filters unavailable
-                logger.warning(f"[SIZING] Failed to get market filters for {st.symbol}, using fallback: {sizing_error}")
-                price = ctx.price
-                amount = quote_budget / ctx.price
-
-            # P1-1: Use OrderRouter for idempotent order placement
-            # CRITICAL FIX: Deterministic format for perfect idempotency
-            # Format: buy:SYMBOL:DECISION_ID:buy (colon-separated for parsing)
+            # CRITICAL FIX: Use exchange compliance module for auto-quantization
+            # Generate intent_id first (for logging and tracking)
             intent_id = f"buy:{st.symbol}:{st.decision_id}:buy"
 
+            # Get market info for compliance validation
+            try:
+                market_info = self.exchange.market(st.symbol)
+            except Exception as e:
+                logger.error(f"[BUY_INTENT_ABORTED] {st.symbol} intent={intent_id[:8]} reason=market_info_unavailable error={e}")
+                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                return
+
+            # Calculate raw price and amount
+            raw_price = ctx.price
+            raw_amount = quote_budget / ctx.price
+
+            # Log BUY_INTENT
+            logger.info(
+                f"[BUY_INTENT] {st.symbol} intent={intent_id[:8]} "
+                f"raw_price={raw_price:.8f} raw_amount={raw_amount:.6f} "
+                f"budget={quote_budget:.2f}"
+            )
+
+            # Quantize and validate with auto-fix
+            comp = quantize_and_validate(raw_price, raw_amount, market_info)
+
+            # Log quantization result
+            logger.info(
+                f"[BUY_INTENT_QUANTIZED] {st.symbol} intent={intent_id[:8]} "
+                f"q_price={comp.price:.8f} q_amount={comp.amount:.6f} "
+                f"violations={comp.violations} auto_fixed={comp.auto_fixed}"
+            )
+
+            # Check if order is valid after quantization
+            if not comp.is_valid():
+                # Determine abort reason
+                abort_reason = (
+                    "precision_non_compliant"
+                    if "invalid_amount_after_quantize" in comp.violations
+                    else "min_cost_violation"
+                )
+
+                # Log abort
+                logger.warning(
+                    f"[BUY_INTENT_ABORTED] {st.symbol} intent={intent_id[:8]} "
+                    f"reason={abort_reason} violations={comp.violations}"
+                )
+
+                # Create ghost position for UI tracking
+                try:
+                    self.ghost_store.create(
+                        intent_id=intent_id,
+                        symbol=st.symbol,
+                        q_price=comp.price,
+                        q_amount=comp.amount,
+                        violations=comp.violations,
+                        abort_reason=abort_reason,
+                        raw_price=raw_price,
+                        raw_amount=raw_amount,
+                        market_precision={
+                            "tick": market_info.get("precision", {}).get("price"),
+                            "step": market_info.get("precision", {}).get("amount"),
+                            "min_cost": market_info.get("limits", {}).get("cost", {}).get("min")
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to create ghost position: {e}")
+
+                # Track failed trade
+                try:
+                    track_failed_trade(st.symbol, f"compliance_{abort_reason}")
+                except Exception:
+                    pass
+
+                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                return
+
+            # Use quantized values for order placement
+            price = comp.price
+            amount = comp.amount
+
+            logger.info(
+                f"[PRE_FLIGHT] {st.symbol} PASSED "
+                f"(q_price={price:.8f}, q_amount={amount:.6f}, "
+                f"notional={price * amount:.2f})"
+            )
+
+            # P1-1: Use OrderRouter for idempotent order placement
+            # intent_id already generated above for ghost tracking
             result = self.order_router.submit(
                 intent_id=intent_id,
                 symbol=st.symbol,
@@ -745,6 +790,14 @@ class FSMTradingEngine:
                     )
                 except Exception as e:
                     logger.debug(f"Failed to log order_sent: {e}")
+
+                # Remove ghost position if exists (edge case: retry after abort)
+                try:
+                    removed = self.ghost_store.remove_by_intent(intent_id)
+                    if removed:
+                        logger.debug(f"[GHOST_REMOVED] {st.symbol} intent={intent_id[:8]} (order placed successfully)")
+                except Exception as e:
+                    logger.debug(f"Failed to remove ghost: {e}")
 
                 self._emit_event(st, FSMEvent.BUY_ORDER_PLACED, ctx)
                 self.stats["total_buys"] += 1
@@ -928,7 +981,7 @@ class FSMTradingEngine:
                             pass
 
             elif order.get("status") == "canceled":
-                self._emit_event(st, FSMEvent.BUY_ORDER_CANCELED, ctx)
+                self._emit_event(st, FSMEvent.BUY_ORDER_CANCELLED, ctx)
 
         except Exception as e:
             logger.error(f"Wait fill error {st.symbol}: {e}")
