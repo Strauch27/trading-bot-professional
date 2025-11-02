@@ -555,6 +555,49 @@ class FSMTradingEngine:
             except Exception as e:
                 logger.debug(f"Failed to log buy_flow step: {e}")
 
+        # FSM PARITY FIX (LÜCKE 1): Check budget affordability before signal evaluation
+        # This prevents evaluating signals when we can't afford min_notional/min_qty
+        try:
+            from services.market_guards import can_afford
+
+            # Calculate available budget
+            available_budget = self.portfolio.get_free_usdt()
+            max_trades = getattr(config, 'MAX_TRADES', 10)
+            per_trade = available_budget / max(1, max_trades)
+            quote_budget = min(per_trade, getattr(config, 'POSITION_SIZE_USDT', 10.0))
+
+            if not can_afford(self.exchange, st.symbol, ctx.price, quote_budget):
+                logger.warning(f"[BUDGET_GUARD] {st.symbol} @ {ctx.price:.8f}: Insufficient budget ({quote_budget:.2f} USDT) for min_notional/min_qty")
+
+                # P2-3: Log budget check step (BLOCKED)
+                try:
+                    self.buy_flow.step(1.5, "Budget Check", "BLOCKED", f"Insufficient budget: {quote_budget:.2f} USDT")
+                except Exception as e:
+                    logger.debug(f"Failed to log buy_flow step: {e}")
+
+                # P2-1: Log decision end (budget blocked)
+                try:
+                    self.jsonl.decision_end(
+                        symbol=st.symbol,
+                        decision_id=st.decision_id,
+                        outcome="budget_blocked",
+                        budget=quote_budget
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to log decision_end: {e}")
+
+                # P2-3: End buy flow logging (BLOCKED)
+                try:
+                    duration_ms = (time.time() - self.buy_flow.start_time) * 1000 if self.buy_flow.start_time else 0
+                    self.buy_flow.end_evaluation("BLOCKED", duration_ms, "Budget: Insufficient for min_notional")
+                except Exception as e:
+                    logger.debug(f"Failed to end buy_flow logging: {e}")
+
+                self._emit_event(st, FSMEvent.RISK_LIMITS_BLOCKED, ctx)
+                return
+        except Exception as e:
+            logger.debug(f"Budget check failed for {st.symbol}: {e}")
+
         # Check signal
         # DEBUGGING FIX (P3): Add snapshot store diagnostics
         snapshot_entry = self.drop_snapshot_store.get(st.symbol)
@@ -637,7 +680,8 @@ class FSMTradingEngine:
 
             if quote_budget < min_slot:
                 logger.error(f"[BUDGET_CHECK] INSUFFICIENT BUDGET for {st.symbol}! Quote budget {quote_budget:.2f} < Min slot {min_slot:.2f}")
-                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for budget failures
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
             # CRITICAL FIX: Use exchange compliance module for auto-quantization
@@ -649,7 +693,8 @@ class FSMTradingEngine:
                 market_info = self.exchange.market(st.symbol)
             except Exception as e:
                 logger.error(f"[BUY_INTENT_ABORTED] {st.symbol} intent={intent_id[:8]} reason=market_info_unavailable error={e}")
-                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
             # Calculate raw price and amount
@@ -714,7 +759,8 @@ class FSMTradingEngine:
                 except Exception:
                     pass
 
-                self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
             # Use quantized values for order placement
@@ -864,9 +910,9 @@ class FSMTradingEngine:
                         time.sleep(0.25)  # Brief pause before next tick
                         return
                     else:
-                        # All retries exhausted
+                        # All retries exhausted - ABORT with BUY_ABORTED event
                         logger.error(f"[WAIT_FILL_ERROR] {st.symbol} order_id is None after rehydration+lookup+retries!")
-                        self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
+                        self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                         return
                 else:
                     # Reset retry counter on success
@@ -874,15 +920,63 @@ class FSMTradingEngine:
 
             order = self.exchange.fetch_order(st.order_id, st.symbol)
 
+            # FSM PARITY FIX (LÜCKE 2): Implement wait_for_fill() timeout policy
+            # - Total timeout: 30s since order placement
+            # - Partial fill timeout: 10s stuck at same partial level
+            WAIT_FILL_TIMEOUT_S = 30
+            PARTIAL_MAX_AGE_S = 10
+
+            # Check total timeout
+            if st.order_placed_ts > 0:
+                elapsed = time.time() - st.order_placed_ts
+                if elapsed > WAIT_FILL_TIMEOUT_S:
+                    logger.warning(f"[WAIT_FILL] {st.symbol} TIMEOUT after {elapsed:.1f}s - canceling order {st.order_id}")
+                    try:
+                        self.exchange.cancel_order(st.order_id, st.symbol)
+                        logger.info(f"[WAIT_FILL] {st.symbol} order canceled successfully")
+                    except Exception as e:
+                        logger.warning(f"[WAIT_FILL] {st.symbol} cancel failed: {e}")
+                    self._emit_event(st, FSMEvent.BUY_ORDER_TIMEOUT, ctx)
+                    return
+
             # Handle open/partial status (order still active)
             status = order.get("status")
             if status in ("open", "partial"):
-                # Order still pending - optionally track partial fills
+                filled = order.get("filled", 0)
+                amount = order.get("amount", 0)
+
+                # Check partial fill timeout
+                if status == "partial" and 0 < filled < amount:
+                    # Track when partial fill started
+                    if not hasattr(st, 'partial_fill_started_at'):
+                        st.partial_fill_started_at = time.time()
+                        st.partial_fill_qty = filled
+                        logger.info(f"[WAIT_FILL] {st.symbol} PARTIAL: {filled:.6f}/{amount:.6f}")
+                    else:
+                        # Check if partial fill is stuck
+                        partial_age = time.time() - st.partial_fill_started_at
+                        if partial_age > PARTIAL_MAX_AGE_S:
+                            logger.warning(f"[WAIT_FILL] {st.symbol} PARTIAL STUCK for {partial_age:.1f}s - canceling order {st.order_id}")
+                            try:
+                                self.exchange.cancel_order(st.order_id, st.symbol)
+                                logger.info(f"[WAIT_FILL] {st.symbol} partial fill order canceled")
+                            except Exception as e:
+                                logger.warning(f"[WAIT_FILL] {st.symbol} cancel failed: {e}")
+                            # Clear partial tracking
+                            if hasattr(st, 'partial_fill_started_at'):
+                                delattr(st, 'partial_fill_started_at')
+                            if hasattr(st, 'partial_fill_qty'):
+                                delattr(st, 'partial_fill_qty')
+                            self._emit_event(st, FSMEvent.BUY_ORDER_TIMEOUT, ctx)
+                            return
+
+                # Track partial fills
                 if status == "partial" and hasattr(self, 'partial_fill_handler'):
                     try:
                         self.partial_fill_handler.on_update(st.symbol, order)
                     except Exception as e:
                         logger.debug(f"Partial fill tracking failed: {e}")
+
                 return  # Continue waiting
 
             if status == "closed":
