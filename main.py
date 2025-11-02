@@ -156,6 +156,14 @@ def setup_exchange():
             'defaultMarket': 'spot',    # Zusaetzliche Sicherheit fuer MEXC
         },
     })
+    if getattr(config_module, "ENABLE_EXCHANGE_RECORDING", False):
+        try:
+            from telemetry.exchange_recorder import activate_exchange_recording
+            exchange = activate_exchange_recording(exchange)
+            logger.debug("Exchange recording proxy activated")
+        except Exception as recorder_error:
+            logger.warning(f"Exchange recording activation failed: {recorder_error}")
+
     try:
         exchange.set_sandbox_mode(False)
     except Exception:
@@ -412,6 +420,29 @@ def main():
     # Extract session ID from session directory
     SESSION_ID = Path(config_module.SESSION_DIR).name  # e.g. 'session_20250907_190217'
     os.environ["BOT_SESSION_ID"] = SESSION_ID  # For logger/notifier as fallback
+
+    if getattr(config_module, "ENABLE_EXCHANGE_RECORDING", False):
+        try:
+            from telemetry.exchange_recorder import get_exchange_recorder
+
+            recorder = get_exchange_recorder()
+            if recorder.enabled:
+                recording_filename = getattr(config_module, "EXCHANGE_RECORDING_FILENAME", "mexc_api_calls.jsonl")
+                recording_path = os.path.join(config_module.SESSION_DIR, "logs", recording_filename)
+                recorder.set_output_path(recording_path)
+                recorder.set_metadata(
+                    session_id=SESSION_ID,
+                    run_timestamp=getattr(config_module, "run_timestamp", None),
+                    run_id=getattr(config_module, "run_id", None),
+                )
+                shutdown_coordinator.add_cleanup_callback(recorder.flush_to_disk)
+                logger.info(
+                    "Exchange recording enabled - CCXT calls will be dumped to %s",
+                    recording_path,
+                    extra={'event_type': 'EXCHANGE_RECORDING_ENABLED', 'path': recording_path}
+                )
+        except Exception as recorder_setup_error:
+            logger.warning(f"Failed to finalize exchange recording setup: {recorder_setup_error}")
 
     # Display Rich Banner with Session Info
     START_ISO = dt_datetime.now().strftime("%Y-%m-%d %H:%M:%S")

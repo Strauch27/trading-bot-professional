@@ -139,6 +139,18 @@ def clear_config_overrides() -> None:
     with _config_lock:
         _config_overrides.clear()
 
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """
+    Convenience helper to parse boolean environment flags.
+
+    Accepted truthy values: 1, true, yes, on (case-insensitive).
+    """
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
 CONFIG_VERSION = 1
 MIGRATIONS = {}
 
@@ -566,6 +578,10 @@ SELL_SLIPPAGE_PCT = 0.001
 UNIVERSE_TOP_N_BY_VOL = 72
 MIN_NOTIONAL_USDT = 5.0
 EXCLUDE_SYMBOL_PREFIXES = ["BULL/", "BEAR/", "3L/", "3S/", "UP/", "DOWN/"]
+
+# Exchange Recording (API Trace)
+ENABLE_EXCHANGE_RECORDING = _env_flag("ENABLE_EXCHANGE_RECORDING", False)
+EXCHANGE_RECORDING_FILENAME = os.getenv("EXCHANGE_RECORDING_FILENAME", "mexc_api_calls.jsonl")
 
 # LIQUIDITY FIX: Blacklist for known illiquid coins (manual maintenance)
 LIQUIDITY_BLACKLIST = [
