@@ -214,7 +214,7 @@ MODE = DROP_TRIGGER_MODE  # DEPRECATED: Use DROP_TRIGGER_MODE instead (maintaine
 CONFIRM_TICKS = 0  # Sofort scharf
 HYSTERESIS_BPS = 5  # Hysteresis-Puffer (5 BPS)
 DEBOUNCE_S = 3  # Minimale Entprellung
-USE_IOC_FOR_MODE2 = True
+USE_IOC_FOR_MODE2 = False  # MEXC doesn't support IOC on spot trading
 USE_ROBUST_MARKET_FETCH = True
 
 # V9_3 Anchor System (Mode 4 Clamps & Guards)
@@ -320,7 +320,7 @@ MIN_DEPTH_USD = 200  # Minimum order book depth in USD (disabled if guards off)
 # Order Router - FSM Execution (NEW - Decision/Execution Separation)
 ROUTER_MAX_RETRIES = 3  # Maximum retry attempts for failed orders
 ROUTER_BACKOFF_MS = 400  # Initial backoff in milliseconds (exponential)
-ROUTER_TIF = "IOC"  # Time in force: "IOC" (Immediate or Cancel) or "GTC" (Good Till Cancel)
+ROUTER_TIF = "GTC"  # Time in force: "GTC" (Good Till Cancel) - MEXC rejects IOC on spot
 ROUTER_SLIPPAGE_BPS = 20  # Maximum allowed slippage in basis points
 ROUTER_MIN_NOTIONAL = 5.0  # Minimum order notional in quote currency
 ROUTER_FETCH_ORDER_ON_FILL = False  # P2: Fetch full order details on fill (slower, more complete data)
@@ -474,12 +474,12 @@ BUY_GTC_MIN_PARTIAL = 0.25
 BUY_GTC_WAIT_DYNAMIC = True
 USE_BUY_ESCALATION = True
 BUY_ESCALATION_STEPS = [
-    {"tif": "IOC", "premium_bps": 20, "max_attempts": 1},  # Single IOC attempt at 20bps (more aggressive pricing)
-    {"tif": "GTC", "premium_bps": 50, "max_attempts": 1},  # Fallback to GTC at 50bps if IOC fails
+    {"tif": "GTC", "premium_bps": 20, "max_attempts": 1},  # GTC with 20bps premium (MEXC doesn't support IOC on spot)
+    {"tif": "GTC", "premium_bps": 50, "max_attempts": 1},  # Fallback to GTC at 50bps
 ]
 IOC_ORDER_TTL_MS = 2000  # Increased from 600ms to 2s for better fill rates
 ENTRY_LIMIT_OFFSET_BPS = 0  # 0 = deaktiviert
-ENTRY_ORDER_TIF = "IOC"
+ENTRY_ORDER_TIF = "GTC"  # Changed from IOC - MEXC rejects IOC on spot with "Insufficient position" error
 
 # Sell Execution
 NEVER_MARKET_SELLS = False  # False = Erlaube Market-Orders
@@ -894,13 +894,13 @@ for _k, _v in TERMINAL_PRESETS.get(TERMINAL_PRESET, {}).items():
 STATUS_LINE_TICK_S = 30
 
 # Live Monitors (Rich Console Live Displays)
-ENABLE_LIVE_MONITORS = True  # Enable Rich Live Monitors (Heartbeat, Drop, Portfolio)
-ENABLE_LIVE_HEARTBEAT = True  # Show live system + API + fill metrics panel
-ENABLE_LIVE_DASHBOARD = True  # Combined dashboard with all monitors
+ENABLE_LIVE_MONITORS = False  # Enable Rich Live Monitors (disabled for clean terminal output)
+ENABLE_LIVE_HEARTBEAT = False  # Show live system + API + fill metrics panel (disabled)
+ENABLE_LIVE_DASHBOARD = False  # Combined dashboard with all monitors (disabled for clean terminal output)
 LIVE_MONITOR_REFRESH_S = 2.0  # Update interval in seconds (2.0 = 0.5 Hz)
 
 # Live Drop Monitor (Terminal UI)
-ENABLE_LIVE_DROP_MONITOR = True  # Live-updating Terminal-Table mit Top Drops
+ENABLE_LIVE_DROP_MONITOR = False  # Live-updating Terminal-Table (disabled for clean terminal output)
 LIVE_DROP_MONITOR_REFRESH_S = 5  # Update-Intervall in Sekunden
 LIVE_DROP_MONITOR_TOP_N = 10  # Anzahl der Top Drops (max 20)
 

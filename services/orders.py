@@ -132,12 +132,15 @@ class OrderService:
                 if qty <= 0 or px <= 0:
                     raise ValueError(f"quantized qty/price invalid: qty={qty}, px={px}")
 
+                # FIX: Use ROUTER_TIF from config instead of hardcoded IOC (MEXC rejects IOC on spot)
+                import config
+                tif = getattr(config, 'ROUTER_TIF', 'GTC')
                 order = self.exchange.create_limit_order(
                     symbol=symbol,
                     side=side,
                     amount=qty,
                     price=px,
-                    time_in_force="IOC",
+                    time_in_force=tif,
                     client_order_id=client_order_id,
                     post_only=False
                 )
@@ -156,16 +159,17 @@ class OrderService:
                     self.cache.store_order(order)
 
                 logger.info(
-                    f"Limit IOC order placed: {side} {amount} {symbol} @ {price}",
+                    f"Limit {tif} order placed: {side} {amount} {symbol} @ {price}",
                     extra={
                         'event_type': 'ORDER_PLACED',
-                        'order_type': 'limit_ioc',
+                        'order_type': f'limit_{tif.lower()}',
                         'symbol': symbol,
                         'side': side,
                         'amount': amount,
                         'price': price,
                         'order_id': order.get('id'),
-                        'client_order_id': client_order_id
+                        'client_order_id': client_order_id,
+                        'time_in_force': tif
                     }
                 )
 
@@ -174,11 +178,12 @@ class OrderService:
             except Exception as e:
                 self._stats['errors_total'] += 1
                 logger.error(
-                    f"Failed to place limit IOC order: {e}",
+                    f"Failed to place limit {tif} order: {e}",
                     extra={
                         'event_type': 'ORDER_ERROR',
-                        'order_type': 'limit_ioc',
+                        'order_type': f'limit_{tif.lower()}',
                         'symbol': symbol,
+                        'time_in_force': tif,
                         'side': side,
                         'amount': amount,
                         'price': price,
@@ -215,11 +220,14 @@ class OrderService:
                 if qty <= 0:
                     raise ValueError(f"quantized qty invalid: qty={qty}")
 
+                # FIX: Use ROUTER_TIF from config instead of hardcoded IOC (MEXC rejects IOC on spot)
+                import config
+                tif = getattr(config, 'ROUTER_TIF', 'GTC')
                 order = self.exchange.create_market_order(
                     symbol=symbol,
                     side=side,
                     amount=qty,
-                    time_in_force="IOC",
+                    time_in_force=tif,
                     client_order_id=client_order_id
                 )
 
@@ -237,13 +245,14 @@ class OrderService:
                     self.cache.store_order(order)
 
                 logger.info(
-                    f"Market IOC order placed: {side} {amount} {symbol}",
+                    f"Market {tif} order placed: {side} {amount} {symbol}",
                     extra={
                         'event_type': 'ORDER_PLACED',
-                        'order_type': 'market_ioc',
+                        'order_type': f'market_{tif.lower()}',
                         'symbol': symbol,
                         'side': side,
                         'amount': amount,
+                        'time_in_force': tif,
                         'order_id': order.get('id'),
                         'client_order_id': client_order_id
                     }
@@ -254,11 +263,12 @@ class OrderService:
             except Exception as e:
                 self._stats['errors_total'] += 1
                 logger.error(
-                    f"Failed to place market IOC order: {e}",
+                    f"Failed to place market {tif} order: {e}",
                     extra={
                         'event_type': 'ORDER_ERROR',
-                        'order_type': 'market_ioc',
+                        'order_type': f'market_{tif.lower()}',
                         'symbol': symbol,
+                        'time_in_force': tif,
                         'side': side,
                         'amount': amount,
                         'error': str(e)

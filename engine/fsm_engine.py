@@ -738,9 +738,24 @@ class FSMTradingEngine:
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
-            # Calculate raw price and amount
-            raw_price = ctx.price
-            raw_amount = quote_budget / ctx.price
+            # FIX: Calculate raw price from ASK + PREMIUM (not mid price!)
+            # Get ask price from context (set in _build_context via ticker)
+            ask_price = ctx.data.get("ask", ctx.price)
+
+            # Fallback if ask not available
+            if not ask_price or ask_price <= 0:
+                ask_price = ctx.price
+
+            # Apply premium (BUY_ESCALATION_STEPS premium_bps)
+            premium_bps = 20  # Default from BUY_ESCALATION_STEPS
+            if hasattr(config, 'BUY_ESCALATION_STEPS') and config.BUY_ESCALATION_STEPS:
+                premium_bps = config.BUY_ESCALATION_STEPS[0].get('premium_bps', 20)
+
+            # Calculate aggressive buy price (ask + premium)
+            raw_price = ask_price * (1.0 + premium_bps / 10000.0)
+            raw_amount = quote_budget / raw_price
+
+            logger.info(f"[PRICE_CALC] {st.symbol} ask={ask_price:.8f} premium={premium_bps}bps final={raw_price:.8f}")
 
             # Log BUY_INTENT
             logger.info(
@@ -1078,7 +1093,9 @@ class FSMTradingEngine:
             if status == "closed":
                 filled = order.get("filled", 0)
                 avg_price = order.get("average", 0)
-                fee_quote = order.get('fee', {}).get('cost', 0) or 0
+                # FIX: Handle None fee dict safely
+                fee_dict = order.get('fee') or {}
+                fee_quote = fee_dict.get('cost', 0) or 0
 
                 if filled > 0 and avg_price > 0:
                     # Use PartialFillHandler
@@ -1424,7 +1441,9 @@ class FSMTradingEngine:
             order = self.exchange.fetch_order(st.order_id, st.symbol)
             filled = order.get("filled", 0)
             avg_exit_price = order.get("average", 0)
-            exit_fee = order.get('fee', {}).get('cost', 0) or 0
+            # FIX: Handle None fee dict safely
+            fee_dict = order.get('fee') or {}
+            exit_fee = fee_dict.get('cost', 0) or 0
 
             # Record PnL
             realized_pnl = self.pnl_service.record_fill(
