@@ -204,13 +204,13 @@ def save_state_safe(data, file_path):
             json.dump(data, f, indent=4)
         os.replace(temp_file_path, file_path)
 
-        # Erfolg loggen
-        file_name = os.path.basename(file_path)
-        data_count = len(data) if hasattr(data, '__len__') else 0
-        logger.debug(f"State saved: {file_name} ({data_count} entries)",
-                    extra={'event_type': 'STATE_SAVED',
-                          'file': file_name,
-                          'entries': data_count})
+        # Erfolg loggen (disabled - too verbose)
+        # file_name = os.path.basename(file_path)
+        # data_count = len(data) if hasattr(data, '__len__') else 0
+        # logger.debug(f"State saved: {file_name} ({data_count} entries)",
+        #             extra={'event_type': 'STATE_SAVED',
+        #                   'file': file_name,
+        #                   'entries': data_count})
     except Exception as e:
         # Detailliertes Logging für State-Save-Fehler
         error_context = {

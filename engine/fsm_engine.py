@@ -6,6 +6,7 @@ All 12 phase handlers fully implemented.
 """
 
 import logging
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -13,6 +14,13 @@ from typing import Any, Dict, Optional
 
 # Config
 import config
+
+# Debug helper - only writes if ENGINE_DEBUG_TRACE is enabled
+def _debug_write(msg: str) -> None:
+    """Write debug message to stdout only if ENGINE_DEBUG_TRACE is enabled."""
+    if getattr(config, 'ENGINE_DEBUG_TRACE', False):
+        _debug_write(msg)
+        sys.stdout.flush()
 from adapters.exchange import ExchangeAdapter as ExchangeAdapterClass
 from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.fsm_machine import FSMachine
@@ -266,11 +274,11 @@ class FSMTradingEngine:
 
         price = md.get("price", 0.0)
         if symbol == list(self.watchlist.keys())[0]:  # Debug first symbol
-            sys.stdout.write(f"[DEBUG] {symbol}: price={price}, phase={st.phase.name}\n")
+            _debug_write(f"[DEBUG] {symbol}: price={price}, phase={st.phase.name}\n")
             sys.stdout.flush()
         if price <= 0:
             if symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[DEBUG] {symbol}: SKIPPING - invalid price\n")
+                _debug_write(f"[DEBUG] {symbol}: SKIPPING - invalid price\n")
                 sys.stdout.flush()
             return  # Skip invalid price data
 
@@ -293,7 +301,7 @@ class FSMTradingEngine:
 
         # Phase-specific event dispatch
         if symbol == list(self.watchlist.keys())[0]:
-            sys.stdout.write(f"[DEBUG] About to dispatch phase {st.phase.name}\n")
+            _debug_write(f"[DEBUG] About to dispatch phase {st.phase.name}\n")
             sys.stdout.flush()
         if st.phase == Phase.WARMUP:
             self._process_warmup(st, ctx)
@@ -389,11 +397,11 @@ class FSMTradingEngine:
         """
         # DEBUGGING: Log that callback was called
         import sys
-        sys.stdout.write(f"[EVENT_BUS] _on_market_snapshots() called with {len(snapshots) if snapshots else 0} snapshots\n")
+        _debug_write(f"[EVENT_BUS] _on_market_snapshots() called with {len(snapshots) if snapshots else 0} snapshots\n")
         sys.stdout.flush()
 
         if not snapshots:
-            sys.stdout.write(f"[EVENT_BUS] WARNING: Snapshots list is empty!\n")
+            _debug_write(f"[EVENT_BUS] WARNING: Snapshots list is empty!\n")
             sys.stdout.flush()
             return
 
@@ -410,7 +418,7 @@ class FSMTradingEngine:
                 }
                 symbols_stored += 1
 
-        sys.stdout.write(f"[EVENT_BUS] Stored {symbols_stored} snapshots. Total store size: {len(self.drop_snapshot_store)}\n")
+        _debug_write(f"[EVENT_BUS] Stored {symbols_stored} snapshots. Total store size: {len(self.drop_snapshot_store)}\n")
         sys.stdout.flush()
 
     # ========== PHASE-SPECIFIC PROCESSORS ==========
@@ -419,7 +427,7 @@ class FSMTradingEngine:
         """WARMUP: Initialize symbol and transition to IDLE."""
         import sys
         if st.symbol == list(self.watchlist.keys())[0]:
-            sys.stdout.write(f"[DEBUG] _process_warmup called for {st.symbol}\n")
+            _debug_write(f"[DEBUG] _process_warmup called for {st.symbol}\n")
             sys.stdout.flush()
         try:
             # Backfill history if configured
@@ -438,11 +446,11 @@ class FSMTradingEngine:
 
             # Emit WARMUP_COMPLETED event
             if st.symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[DEBUG] Emitting WARMUP_COMPLETED for {st.symbol}\n")
+                _debug_write(f"[DEBUG] Emitting WARMUP_COMPLETED for {st.symbol}\n")
                 sys.stdout.flush()
             result = self._emit_event(st, FSMEvent.WARMUP_COMPLETED, ctx)
             if st.symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[DEBUG] _emit_event returned: {result}, new phase: {st.phase.name}\n")
+                _debug_write(f"[DEBUG] _emit_event returned: {result}, new phase: {st.phase.name}\n")
                 sys.stdout.flush()
 
         except Exception as e:
@@ -1667,40 +1675,40 @@ class FSMTradingEngine:
     def start(self):
         """Start FSM Trading Engine."""
         import sys
-        sys.stdout.write(f"\n[FSM_ENGINE.START] ENTRY - running={self.running}\n")
+        _debug_write(f"\n[FSM_ENGINE.START] ENTRY - running={self.running}\n")
         sys.stdout.flush()
 
         if self.running:
             logger.warning("Engine already running")
-            sys.stdout.write("[FSM_ENGINE.START] Already running, returning\n")
+            _debug_write("[FSM_ENGINE.START] Already running, returning\n")
             sys.stdout.flush()
             return
 
-        sys.stdout.write("[FSM_ENGINE.START] Starting FSM Trading Engine...\n")
+        _debug_write("[FSM_ENGINE.START] Starting FSM Trading Engine...\n")
         sys.stdout.flush()
         logger.info("Starting FSM Trading Engine...")
         self.running = True
 
         # Start market data loop for snapshot generation
-        sys.stdout.write("[FSM_ENGINE.START] Starting market data...\n")
+        _debug_write("[FSM_ENGINE.START] Starting market data...\n")
         sys.stdout.flush()
         self.market_data.start()
 
         # CRITICAL FIX: Wait for market data to populate cache before starting FSM loop
         # This prevents race condition where FSM tries to process symbols before prices are available
         # DEBUGGING FIX (P2): Increased from 3s to 10s to ensure cache is fully populated
-        sys.stdout.write("[FSM_ENGINE.START] Waiting for market data warmup (10s)...\n")
+        _debug_write("[FSM_ENGINE.START] Waiting for market data warmup (10s)...\n")
         sys.stdout.flush()
         time.sleep(10.0)
-        sys.stdout.write("[FSM_ENGINE.START] Market data warmup complete\n")
+        _debug_write("[FSM_ENGINE.START] Market data warmup complete\n")
         sys.stdout.flush()
 
-        sys.stdout.write("[FSM_ENGINE.START] Starting main thread...\n")
+        _debug_write("[FSM_ENGINE.START] Starting main thread...\n")
         sys.stdout.flush()
         self.main_thread = threading.Thread(target=self._main_loop, daemon=False, name="FSM-Engine-Main")
         self.main_thread.start()
 
-        sys.stdout.write("[FSM_ENGINE.START] FSM Trading Engine started\n")
+        _debug_write("[FSM_ENGINE.START] FSM Trading Engine started\n")
         sys.stdout.flush()
         logger.info("FSM Trading Engine started")
 
@@ -1718,37 +1726,37 @@ class FSMTradingEngine:
     def _main_loop(self):
         """Main engine loop."""
         import sys
-        sys.stdout.write(f"\n[FSM_ENGINE._main_loop] ENTRY - running={self.running}\n")
+        _debug_write(f"\n[FSM_ENGINE._main_loop] ENTRY - running={self.running}\n")
         sys.stdout.flush()
         logger.info("FSM main loop started")
 
         try:
-            sys.stdout.write(f"[FSM_ENGINE._main_loop] Starting main loop (running={self.running})\n")
+            _debug_write(f"[FSM_ENGINE._main_loop] Starting main loop (running={self.running})\n")
             sys.stdout.flush()
             while self.running:
-                sys.stdout.write(f"[FSM_ENGINE._main_loop] Cycle #{self.cycle_count + 1} starting...\n")
+                _debug_write(f"[FSM_ENGINE._main_loop] Cycle #{self.cycle_count + 1} starting...\n")
                 sys.stdout.flush()
                 cycle_start = time.time()
                 self.cycle_count += 1
 
                 # Tick timeouts first (cooldowns, order timeouts)
-                sys.stdout.write(f"[FSM_ENGINE._main_loop] Ticking timeouts...\n")
+                _debug_write(f"[FSM_ENGINE._main_loop] Ticking timeouts...\n")
                 sys.stdout.flush()
                 self._tick_timeouts()
 
                 # CRITICAL FIX: Active drop scanner (mirrors Legacy engine behavior)
                 # Runs every 6 cycles (~3 seconds) to actively scan for buy signals
                 # This is what Legacy engine does - FSM was missing this active scan!
-                sys.stdout.write(f"[DEBUG] Cycle {self.cycle_count} mod 6 = {self.cycle_count % 6}\n")
+                _debug_write(f"[DEBUG] Cycle {self.cycle_count} mod 6 = {self.cycle_count % 6}\n")
                 sys.stdout.flush()
                 if self.cycle_count % 6 == 0:
-                    sys.stdout.write(f"[FSM_ENGINE._main_loop] ⚡ ACTIVE SCANNER TRIGGERED (Cycle #{self.cycle_count})\n")
+                    _debug_write(f"[FSM_ENGINE._main_loop] ⚡ ACTIVE SCANNER TRIGGERED (Cycle #{self.cycle_count})\n")
                     sys.stdout.flush()
                     try:
                         self._scan_for_drops()
                     except Exception as e:
                         logger.error(f"[ACTIVE_SCAN] Scanner failed: {e}", exc_info=True)
-                        sys.stdout.write(f"[ERROR] Scanner failed: {e}\n")
+                        _debug_write(f"[ERROR] Scanner failed: {e}\n")
                         sys.stdout.flush()
 
                 # P1-2: Reconciler sync every 60 cycles (~2 minutes)
@@ -1767,22 +1775,22 @@ class FSMTradingEngine:
                     logger.info(f"💓 FSM Cycle #{self.cycle_count} - {len(self.states)} symbols | Active: {active} | Positions: {positions}")
 
                 # Process all symbols with event-based FSM
-                sys.stdout.write(f"[FSM_ENGINE._main_loop] Processing {len(self.watchlist)} symbols...\n")
+                _debug_write(f"[FSM_ENGINE._main_loop] Processing {len(self.watchlist)} symbols...\n")
                 sys.stdout.flush()
                 for i, symbol in enumerate(self.watchlist.keys()):
                     try:
                         if i == 0:  # Only log first symbol to reduce noise
-                            sys.stdout.write(f"[FSM_ENGINE._main_loop] Building context for {symbol}...\n")
+                            _debug_write(f"[FSM_ENGINE._main_loop] Building context for {symbol}...\n")
                             sys.stdout.flush()
                         md = self._build_context(symbol)
                         if i == 0:
-                            sys.stdout.write(f"[FSM_ENGINE._main_loop] Context built with price={md.get('price', 'MISSING')}, processing {symbol}...\n")
+                            _debug_write(f"[FSM_ENGINE._main_loop] Context built with price={md.get('price', 'MISSING')}, processing {symbol}...\n")
                             sys.stdout.flush()
                         self._process_symbol(symbol, md)
                     except Exception as e:
                         logger.error(f"Error processing {symbol}: {e}")
                         self.stats["total_errors"] += 1
-                        sys.stdout.write(f"[FSM_ENGINE._main_loop] ERROR processing {symbol}: {e}\n")
+                        _debug_write(f"[FSM_ENGINE._main_loop] ERROR processing {symbol}: {e}\n")
                         sys.stdout.flush()
 
                 # Update stuck metrics every 5 cycles
@@ -1811,29 +1819,29 @@ class FSMTradingEngine:
         try:
             # Get current price from market data service
             if symbol == list(self.watchlist.keys())[0]:  # Only log first symbol
-                sys.stdout.write(f"[FSM_ENGINE._build_context] Getting price for {symbol}...\n")
+                _debug_write(f"[FSM_ENGINE._build_context] Getting price for {symbol}...\n")
                 sys.stdout.flush()
             price = self.market_data.get_price(symbol)
             if symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[FSM_ENGINE._build_context] get_price() returned: {price} (type: {type(price)})\n")
+                _debug_write(f"[FSM_ENGINE._build_context] get_price() returned: {price} (type: {type(price)})\n")
                 sys.stdout.flush()
 
             # CRITICAL FIX: Fallback to direct exchange fetch if cache returns 0.0
             # This handles race conditions where MD loop hasn't populated cache yet
             if not price or price <= 0:
                 if symbol == list(self.watchlist.keys())[0]:
-                    sys.stdout.write(f"[FSM_ENGINE._build_context] Price is 0, fetching directly from exchange...\n")
+                    _debug_write(f"[FSM_ENGINE._build_context] Price is 0, fetching directly from exchange...\n")
                     sys.stdout.flush()
                 try:
                     ticker_direct = self.exchange_adapter.fetch_ticker(symbol)
                     if ticker_direct:
                         price = float(ticker_direct.get('last', 0) or 0)
                         if symbol == list(self.watchlist.keys())[0]:
-                            sys.stdout.write(f"[FSM_ENGINE._build_context] Direct fetch got price: {price}\n")
+                            _debug_write(f"[FSM_ENGINE._build_context] Direct fetch got price: {price}\n")
                             sys.stdout.flush()
                 except Exception as ex:
                     if symbol == list(self.watchlist.keys())[0]:
-                        sys.stdout.write(f"[FSM_ENGINE._build_context] Direct fetch failed: {ex}\n")
+                        _debug_write(f"[FSM_ENGINE._build_context] Direct fetch failed: {ex}\n")
                         sys.stdout.flush()
                     pass
 
@@ -1841,7 +1849,7 @@ class FSMTradingEngine:
 
             # Get orderbook data
             if symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[FSM_ENGINE._build_context] Getting ticker for {symbol}...\n")
+                _debug_write(f"[FSM_ENGINE._build_context] Getting ticker for {symbol}...\n")
                 sys.stdout.flush()
             ticker = self.market_data.get_ticker(symbol)  # Returns TickerData directly, not tuple
 
@@ -1862,7 +1870,7 @@ class FSMTradingEngine:
 
         except Exception as e:
             if symbol == list(self.watchlist.keys())[0]:
-                sys.stdout.write(f"[FSM_ENGINE._build_context] EXCEPTION: {e}\n")
+                _debug_write(f"[FSM_ENGINE._build_context] EXCEPTION: {e}\n")
                 sys.stdout.flush()
             logger.debug(f"Context build error for {symbol}: {e}")
             # CRITICAL BUG FIX: Don't overwrite valid price on ticker fetch errors!
@@ -1871,7 +1879,7 @@ class FSMTradingEngine:
                 ctx["price"] = 0.0
 
         if symbol == list(self.watchlist.keys())[0]:
-            sys.stdout.write(f"[FSM_ENGINE._build_context] Returning ctx with price={ctx.get('price', 'MISSING')}\n")
+            _debug_write(f"[FSM_ENGINE._build_context] Returning ctx with price={ctx.get('price', 'MISSING')}\n")
             sys.stdout.flush()
         return ctx
 
@@ -1889,34 +1897,34 @@ class FSMTradingEngine:
         Called every 6 cycles (3 seconds) in main loop.
         """
         import sys
-        sys.stdout.write(f"[ACTIVE_SCAN] _scan_for_drops() ENTRY\n")
+        _debug_write(f"[ACTIVE_SCAN] _scan_for_drops() ENTRY\n")
         sys.stdout.flush()
 
         # Check if we have slots available
         max_trades = getattr(config, 'MAX_TRADES', 10)
         active_positions = sum(1 for s in self.states.values() if s.phase == Phase.POSITION)
 
-        sys.stdout.write(f"[ACTIVE_SCAN] Slot check: active_positions={active_positions}, max_trades={max_trades}\n")
+        _debug_write(f"[ACTIVE_SCAN] Slot check: active_positions={active_positions}, max_trades={max_trades}\n")
         sys.stdout.flush()
 
         if active_positions >= max_trades:
-            sys.stdout.write(f"[ACTIVE_SCAN] EARLY RETURN - max positions reached\n")
+            _debug_write(f"[ACTIVE_SCAN] EARLY RETURN - max positions reached\n")
             sys.stdout.flush()
             logger.debug(f"[ACTIVE_SCAN] Skipping scan - max positions reached ({active_positions}/{max_trades})")
             return
 
         # Diagnostic: Log snapshot store status
         snapshot_count = len(self.drop_snapshot_store)
-        sys.stdout.write(f"[ACTIVE_SCAN] Snapshot store size: {snapshot_count}\n")
+        _debug_write(f"[ACTIVE_SCAN] Snapshot store size: {snapshot_count}\n")
         sys.stdout.flush()
 
         if snapshot_count == 0:
-            sys.stdout.write(f"[ACTIVE_SCAN] EARLY RETURN - snapshot store EMPTY\n")
+            _debug_write(f"[ACTIVE_SCAN] EARLY RETURN - snapshot store EMPTY\n")
             sys.stdout.flush()
             logger.warning(f"[ACTIVE_SCAN] Snapshot store is EMPTY - no market data available!")
             return
 
-        sys.stdout.write(f"[ACTIVE_SCAN] Starting scan of {len(self.watchlist)} symbols\n")
+        _debug_write(f"[ACTIVE_SCAN] Starting scan of {len(self.watchlist)} symbols\n")
         sys.stdout.flush()
         logger.debug(f"[ACTIVE_SCAN] Scanning {len(self.watchlist)} symbols (snapshots: {snapshot_count}, positions: {active_positions}/{max_trades})")
 

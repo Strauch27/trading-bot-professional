@@ -23,6 +23,14 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 
+# Debug helper - only writes if ENGINE_DEBUG_TRACE is enabled
+def _debug_write(msg: str) -> None:
+    """Write debug message to stdout only if ENGINE_DEBUG_TRACE is enabled."""
+    import config
+    if getattr(config, 'ENGINE_DEBUG_TRACE', False):
+        _debug_write(msg)
+        sys.stdout.flush()
+
 # Import new pipeline components
 from core.price_cache import PriceCache
 from core.rolling_windows import RollingWindowManager
@@ -1902,25 +1910,25 @@ class MarketDataProvider:
         # Publish all snapshots via EventBus
         # DEBUGGING: Check why snapshots aren't published
         import sys
-        sys.stdout.write(f"[MARKET_DATA] Snapshot publish check: snapshots={len(snapshots) if snapshots else 0}, event_bus={'SET' if self.event_bus else 'NONE'}\n")
+        _debug_write(f"[MARKET_DATA] Snapshot publish check: snapshots={len(snapshots) if snapshots else 0}, event_bus={'SET' if self.event_bus else 'NONE'}\n")
         sys.stdout.flush()
 
         if snapshots and self.event_bus:
             try:
-                sys.stdout.write(f"[MARKET_DATA] PUBLISHING {len(snapshots)} snapshots to EventBus\n")
+                _debug_write(f"[MARKET_DATA] PUBLISHING {len(snapshots)} snapshots to EventBus\n")
                 sys.stdout.flush()
                 logger.debug("PUBLISHING_SNAPSHOTS", extra={"n": len(snapshots)})
                 self.event_bus.publish("market.snapshots", snapshots)
                 self._statistics['drop_snapshots_emitted'] += 1
-                sys.stdout.write(f"[MARKET_DATA] Successfully published snapshots\n")
+                _debug_write(f"[MARKET_DATA] Successfully published snapshots\n")
                 sys.stdout.flush()
 
             except Exception as e:
-                sys.stdout.write(f"[MARKET_DATA] FAILED to publish: {e}\n")
+                _debug_write(f"[MARKET_DATA] FAILED to publish: {e}\n")
                 sys.stdout.flush()
                 logger.debug(f"Failed to publish snapshots: {e}")
         else:
-            sys.stdout.write(f"[MARKET_DATA] NOT publishing - snapshots={bool(snapshots)}, event_bus={bool(self.event_bus)}\n")
+            _debug_write(f"[MARKET_DATA] NOT publishing - snapshots={bool(snapshots)}, event_bus={bool(self.event_bus)}\n")
             sys.stdout.flush()
 
         # V9_3 Phase 4: Persist snapshots to JSONL
@@ -2030,12 +2038,12 @@ class MarketDataProvider:
     def start(self):
         """Start market data polling loop in background thread"""
         import sys
-        sys.stdout.write("[MARKET_DATA] start() called\n")
+        _debug_write("[MARKET_DATA] start() called\n")
         sys.stdout.flush()
 
         if hasattr(self, '_running') and self._running:
             logger.warning("Market data loop already running")
-            sys.stdout.write("[MARKET_DATA] Loop already running, skipping\n")
+            _debug_write("[MARKET_DATA] Loop already running, skipping\n")
             sys.stdout.flush()
             return
 
@@ -2048,14 +2056,14 @@ class MarketDataProvider:
         self._last_success_rate = None
 
         import threading
-        sys.stdout.write("[MARKET_DATA] Creating thread...\n")
+        _debug_write("[MARKET_DATA] Creating thread...\n")
         sys.stdout.flush()
         # FIX ACTION 1.3: Wrap _loop with auto-restart capability
         self._thread = threading.Thread(target=self._loop_with_auto_restart, name="MarketDataLoop", daemon=True)
-        sys.stdout.write("[MARKET_DATA] Starting thread...\n")
+        _debug_write("[MARKET_DATA] Starting thread...\n")
         sys.stdout.flush()
         self._thread.start()
-        sys.stdout.write("[MARKET_DATA] Thread started successfully\n")
+        _debug_write("[MARKET_DATA] Thread started successfully\n")
         sys.stdout.flush()
 
 
@@ -2144,7 +2152,7 @@ class MarketDataProvider:
 
     def _loop_with_auto_restart(self):
         import sys
-        sys.stdout.write("[MARKET_DATA] _loop_with_auto_restart() ENTRY\n")
+        _debug_write("[MARKET_DATA] _loop_with_auto_restart() ENTRY\n")
         sys.stdout.flush()
         """
         Wrapper for _loop() with auto-restart capability.
@@ -2218,7 +2226,7 @@ class MarketDataProvider:
     def _loop(self):
         """Market data polling loop - fetches and publishes snapshots"""
         import sys
-        sys.stdout.write("[MARKET_DATA] _loop() ENTRY\n")
+        _debug_write("[MARKET_DATA] _loop() ENTRY\n")
         sys.stdout.flush()
 
         import traceback
