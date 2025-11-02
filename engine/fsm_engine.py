@@ -483,9 +483,35 @@ class FSMTradingEngine:
         # Check guards
         passes_guards, failed_guards = self.market_guards.passes_all_guards(st.symbol, ctx.price)
         if not passes_guards:
+            # CRITICAL FIX (DIFF 7): Enhanced guard logging with details
+            # Log each failed guard with specific reason and values
+            guard_details = []
+            for guard_name in failed_guards:
+                try:
+                    # Get guard-specific details
+                    if guard_name == "btc_filter":
+                        guard_details.append(f"{guard_name} (BTC volatility too high)")
+                    elif guard_name == "falling_coins":
+                        guard_details.append(f"{guard_name} (too many coins falling)")
+                    elif guard_name == "sma_guard":
+                        guard_details.append(f"{guard_name} (price below SMA)")
+                    elif guard_name == "volume_guard":
+                        guard_details.append(f"{guard_name} (volume too low)")
+                    elif guard_name == "spread_guard":
+                        guard_details.append(f"{guard_name} (spread too wide)")
+                    elif guard_name == "vol_sigma_guard":
+                        guard_details.append(f"{guard_name} (volatility too low)")
+                    else:
+                        guard_details.append(guard_name)
+                except Exception:
+                    guard_details.append(guard_name)
+
+            guard_summary = ", ".join(guard_details)
+            logger.warning(f"[GUARD_BLOCK] {st.symbol} @ {ctx.price:.8f}: {guard_summary}")
+
             # P2-3: Log guard check step (BLOCKED)
             try:
-                self.buy_flow.step(1, "Market Guards", "BLOCKED", f"Failed: {', '.join(failed_guards)}")
+                self.buy_flow.step(1, "Market Guards", "BLOCKED", f"Failed: {guard_summary}")
             except Exception as e:
                 logger.debug(f"Failed to log buy_flow step: {e}")
 
@@ -607,19 +633,63 @@ class FSMTradingEngine:
                 self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
                 return
 
-            amount = quote_budget / ctx.price
+            # CRITICAL FIX (DIFF 4): Use robust sizing helpers instead of naive division
+            # Get market filters for proper tick/step/notional sizing
+            from core.utils.helpers_filters import create_filters_from_market, size_buy_from_quote, validate_order_params
+            try:
+                market_info = self.exchange.market(st.symbol)
+                filters = create_filters_from_market(market_info)
+
+                # Use robust sizing with tick/step/notional compliance
+                price, amount, notional, sizing_audit = size_buy_from_quote(
+                    quote_budget=quote_budget,
+                    best_ask=ctx.price,
+                    tickSize=filters.tickSize,
+                    stepSize=filters.stepSize,
+                    minNotional=filters.minNotional
+                )
+
+                logger.info(f"[SIZING] {st.symbol}: price={price:.8f}, qty={amount:.6f}, notional={notional:.2f}, audit={sizing_audit}")
+
+                # CRITICAL FIX (DIFF 6): Pre-flight validation before order submission
+                # Validates tick size, step size, min qty, min notional
+                is_valid, reason, validation_details = validate_order_params(
+                    symbol=st.symbol,
+                    side="buy",
+                    price=price,
+                    qty=amount,
+                    f=filters
+                )
+
+                if not is_valid:
+                    logger.error(f"[PRE_FLIGHT] {st.symbol} Order validation FAILED: {reason}, details={validation_details}")
+                    # P2-2: Track failed trade (pre-flight validation failed)
+                    try:
+                        track_failed_trade(st.symbol, f"pre_flight_validation_failed_{reason}")
+                    except Exception:
+                        pass
+                    self._emit_event(st, FSMEvent.ORDER_PLACEMENT_FAILED, ctx)
+                    return
+                else:
+                    logger.info(f"[PRE_FLIGHT] {st.symbol} Order validation PASSED (notional={validation_details.get('notional', 0):.2f})")
+
+            except Exception as sizing_error:
+                # Fallback to simple sizing if market filters unavailable
+                logger.warning(f"[SIZING] Failed to get market filters for {st.symbol}, using fallback: {sizing_error}")
+                price = ctx.price
+                amount = quote_budget / ctx.price
 
             # P1-1: Use OrderRouter for idempotent order placement
-            # CRITICAL FIX: Remove timestamp to enable proper idempotency
-            # decision_id is already unique per buy attempt - timestamp breaks deduplication
-            intent_id = f"buy_{st.symbol}_{st.decision_id}"
+            # CRITICAL FIX: Deterministic format for perfect idempotency
+            # Format: buy:SYMBOL:DECISION_ID:buy (colon-separated for parsing)
+            intent_id = f"buy:{st.symbol}:{st.decision_id}:buy"
 
             result = self.order_router.submit(
                 intent_id=intent_id,
                 symbol=st.symbol,
                 side="buy",
                 amount=amount,
-                price=ctx.price,
+                price=price,  # Use sized price from helpers, not raw ctx.price
                 order_type="limit"  # OrderRouter will handle IOC via order_service
             )
 
@@ -638,7 +708,7 @@ class FSMTradingEngine:
                     self.portfolio.save_open_buy_order(st.symbol, {
                         "order_id": st.order_id,
                         "client_order_id": intent_id,
-                        "price": ctx.price,
+                        "price": price,  # Use sized price
                         "amount": amount,
                         "timestamp": st.order_placed_ts,
                         "phase": "WAIT_FILL"
@@ -669,7 +739,7 @@ class FSMTradingEngine:
                         order_id=result.order_id,
                         client_order_id=intent_id,
                         amount=amount,
-                        price=ctx.price,
+                        price=price,  # Use sized price
                         order_type="limit",
                         decision_id=st.decision_id
                     )
@@ -720,9 +790,10 @@ class FSMTradingEngine:
                     logger.debug(f"Persistence rehydration failed for {st.symbol}: {e}")
 
                 # Stage 2: Lookup via clientOrderId if still missing
+                # CRITICAL FIX (DIFF 5): Use exchange_wrapper with robust fallback
                 if not st.order_id and st.client_order_id:
                     try:
-                        order = self.exchange.fetch_order_by_client_id(st.client_order_id, st.symbol)
+                        order = self.exchange_wrapper.fetch_order_by_client_id(st.symbol, st.client_order_id)
                         if order and order.get("id"):
                             st.order_id = order["id"]
                             logger.info(f"[WAIT_FILL] {st.symbol} order_id rehydrated via clientOrderId: {st.order_id}")
@@ -750,7 +821,18 @@ class FSMTradingEngine:
 
             order = self.exchange.fetch_order(st.order_id, st.symbol)
 
-            if order.get("status") == "closed":
+            # Handle open/partial status (order still active)
+            status = order.get("status")
+            if status in ("open", "partial"):
+                # Order still pending - optionally track partial fills
+                if status == "partial" and hasattr(self, 'partial_fill_handler'):
+                    try:
+                        self.partial_fill_handler.on_update(st.symbol, order)
+                    except Exception as e:
+                        logger.debug(f"Partial fill tracking failed: {e}")
+                return  # Continue waiting
+
+            if status == "closed":
                 filled = order.get("filled", 0)
                 avg_price = order.get("average", 0)
                 fee_quote = order.get('fee', {}).get('cost', 0) or 0

@@ -202,7 +202,9 @@ def action_handle_partial_buy(ctx: EventContext, coin_state: CoinState) -> None:
 def action_cancel_and_cleanup(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: WAIT_FILL → IDLE (timeout)"""
     coin_state.note = "order timeout - cleaned up"
+    # CRITICAL FIX: Clear order IDs on timeout (final state for this path)
     coin_state.order_id = None
+    coin_state.client_order_id = None
     coin_state.order_placed_ts = 0.0
 
     try:
@@ -220,7 +222,9 @@ def action_cancel_and_cleanup(ctx: EventContext, coin_state: CoinState) -> None:
 def action_cleanup_cancelled(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: WAIT_FILL → IDLE (cancelled)"""
     coin_state.note = "order cancelled"
+    # CRITICAL FIX: Clear order IDs on cancellation (final state for this path)
     coin_state.order_id = None
+    coin_state.client_order_id = None
     coin_state.order_placed_ts = 0.0
 
     try:
@@ -418,8 +422,11 @@ def action_check_cooldown(ctx: EventContext, coin_state: CoinState) -> None:
 
 def action_reset_to_idle(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: COOLDOWN → IDLE"""
-    # Reset state
+    # CRITICAL FIX: Only clear order IDs after COOLDOWN (final state)
+    # This preserves order_id/client_order_id through WAIT_SELL_FILL → POST_TRADE → COOLDOWN
+    # for proper logging and reconciliation
     coin_state.order_id = None
+    coin_state.client_order_id = None
     coin_state.order_placed_ts = 0.0
     coin_state.amount = 0.0
     coin_state.entry_price = 0.0

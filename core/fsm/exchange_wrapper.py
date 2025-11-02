@@ -283,6 +283,58 @@ class FSMExchangeWrapper:
             self.logger.debug(f"Could not fetch order by clientOrderId: {e}")
             return None
 
+    def fetch_order_by_client_id(self, symbol: str, client_order_id: str) -> Optional[Dict]:
+        """
+        Public API: Fetch order by clientOrderId with fallback logic.
+
+        This method provides a robust way to find orders by clientOrderId,
+        working even on exchanges that don't natively support this feature.
+
+        Fallback strategy:
+        1. Try native exchange.fetch_order_by_client_id() if available
+        2. Fall back to scanning recent orders (fetch_orders)
+        3. Try open orders (fetch_open_orders) as last resort
+
+        Args:
+            symbol: Trading symbol
+            client_order_id: Client order ID to search for
+
+        Returns:
+            Order dict if found, None otherwise
+        """
+        # Strategy 1: Try native fetch_order_by_client_id (if exchange supports it)
+        if hasattr(self.exchange, 'fetch_order_by_client_id'):
+            try:
+                order = self.exchange.fetch_order_by_client_id(client_order_id, symbol)
+                if order and order.get("id"):
+                    self.logger.info(f"Found order via native fetch_order_by_client_id: {order['id']}")
+                    return order
+            except Exception as e:
+                self.logger.debug(f"Native fetch_order_by_client_id failed: {e}")
+
+        # Strategy 2: Scan recent orders (closed + open)
+        try:
+            orders = self.exchange.fetch_orders(symbol, limit=100)
+            for order in orders:
+                if order.get("clientOrderId") == client_order_id:
+                    self.logger.info(f"Found order via fetch_orders scan: {order['id']}")
+                    return order
+        except Exception as e:
+            self.logger.debug(f"fetch_orders scan failed: {e}")
+
+        # Strategy 3: Scan open orders (some exchanges only support this)
+        try:
+            open_orders = self.exchange.fetch_open_orders(symbol, limit=100)
+            for order in open_orders:
+                if order.get("clientOrderId") == client_order_id:
+                    self.logger.info(f"Found order via fetch_open_orders scan: {order['id']}")
+                    return order
+        except Exception as e:
+            self.logger.debug(f"fetch_open_orders scan failed: {e}")
+
+        self.logger.warning(f"Could not find order with clientOrderId: {client_order_id}")
+        return None
+
 
 # Global instance for convenience
 _global_wrapper: Optional[FSMExchangeWrapper] = None
