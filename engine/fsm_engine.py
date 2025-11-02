@@ -725,6 +725,45 @@ class FSMTradingEngine:
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
+            # CRITICAL FIX: Duplicate purchase protection
+            # Prevent buying the same coin twice (race condition prevention)
+            if st.symbol in self.portfolio.held_assets:
+                logger.warning(f"[DUPLICATE_BLOCKED] {st.symbol} already has an active position! Aborting duplicate buy.")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            # Check if there's already a pending buy order for this symbol
+            if st.symbol in self.portfolio.open_buy_orders:
+                logger.warning(f"[DUPLICATE_BLOCKED] {st.symbol} already has a pending buy order! Aborting duplicate buy.")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            # CRITICAL FIX: Reserve budget ATOMICALLY before order placement
+            # This prevents race conditions where multiple coins compete for the same budget
+            # Budget must be reserved HERE (not later in OrderRouter) to prevent concurrent access
+            budget_reserved = False  # Track reservation state for cleanup
+            try:
+                self.portfolio.reserve_budget(
+                    quote_amount=quote_budget,
+                    symbol=st.symbol,
+                    order_info={
+                        "intent": "buy",
+                        "decision_id": st.decision_id,
+                        "price": ctx.price,
+                        "timestamp": time.time()
+                    }
+                )
+                budget_reserved = True  # Mark as successfully reserved
+                logger.info(f"[BUDGET_RESERVED] {st.symbol}: {quote_budget:.2f} USDT reserved (available: {self.portfolio.get_free_usdt():.2f})")
+            except ValueError as e:
+                logger.error(f"[BUDGET_RESERVE_FAILED] {st.symbol}: {e}")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+            except Exception as e:
+                logger.error(f"[BUDGET_RESERVE_ERROR] {st.symbol}: Unexpected error during budget reservation: {e}")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
             # CRITICAL FIX: Use exchange compliance module for auto-quantization
             # Generate intent_id first (for logging and tracking)
             intent_id = f"buy:{st.symbol}:{st.decision_id}:buy"
@@ -734,6 +773,17 @@ class FSMTradingEngine:
                 market_info = self.exchange.market(st.symbol)
             except Exception as e:
                 logger.error(f"[BUY_INTENT_ABORTED] {st.symbol} intent={intent_id[:8]} reason=market_info_unavailable error={e}")
+                # CRITICAL FIX: Release reserved budget on abort
+                if budget_reserved:
+                    try:
+                        self.portfolio.release_budget(
+                            quote_amount=quote_budget,
+                            symbol=st.symbol,
+                            reason="market_info_unavailable"
+                        )
+                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: market_info_unavailable)")
+                    except Exception as release_error:
+                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
                 # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
@@ -814,6 +864,18 @@ class FSMTradingEngine:
                     track_failed_trade(st.symbol, f"compliance_{abort_reason}")
                 except Exception:
                     pass
+
+                # CRITICAL FIX: Release reserved budget on abort
+                if budget_reserved:
+                    try:
+                        self.portfolio.release_budget(
+                            quote_amount=quote_budget,
+                            symbol=st.symbol,
+                            reason=f"quantization_{abort_reason}"
+                        )
+                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: {abort_reason})")
+                    except Exception as release_error:
+                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
 
                 # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
@@ -928,6 +990,18 @@ class FSMTradingEngine:
                 # CRITICAL FIX: Log detailed failure reason
                 logger.error(f"[PLACE_BUY_FAILED] {st.symbol} Order placement failed: success={result.success}, order_id={result.order_id!r}, error={result.error}")
 
+                # CRITICAL FIX: Release reserved budget on order placement failure
+                if budget_reserved:
+                    try:
+                        self.portfolio.release_budget(
+                            quote_amount=quote_budget,
+                            symbol=st.symbol,
+                            reason="order_placement_failed"
+                        )
+                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: order_placement_failed)")
+                    except Exception as release_error:
+                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
+
                 # P2-2: Track failed trade (order placement failed)
                 try:
                     track_failed_trade(st.symbol, "buy_order_placement_failed")
@@ -938,6 +1012,18 @@ class FSMTradingEngine:
 
         except Exception as e:
             logger.error(f"Place buy error {st.symbol}: {e}")
+
+            # CRITICAL FIX: Release reserved budget on exception
+            if budget_reserved:
+                try:
+                    self.portfolio.release_budget(
+                        quote_amount=quote_budget,
+                        symbol=st.symbol,
+                        reason="buy_order_exception"
+                    )
+                    logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: exception)")
+                except Exception as release_error:
+                    logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
 
             # P2-2: Track error for adaptive logging
             try:
@@ -1155,6 +1241,20 @@ class FSMTradingEngine:
                             "buy_fee_quote_per_unit": st.entry_fee_per_unit,
                             "buy_price": final_price
                         })
+
+                        # CRITICAL FIX: Commit reserved budget after successful fill
+                        # Budget was reserved in _process_place_buy, now commit it
+                        actual_cost = final_qty * final_price
+                        try:
+                            self.portfolio.commit_budget(
+                                quote_amount=actual_cost,
+                                symbol=st.symbol,
+                                order_id=st.order_id,
+                                intent_id=st.client_order_id
+                            )
+                            logger.info(f"[BUDGET_COMMITTED] {st.symbol}: {actual_cost:.2f} USDT committed (fill: {final_qty:.6f}@{final_price:.8f})")
+                        except Exception as commit_error:
+                            logger.error(f"[BUDGET_COMMIT_ERROR] {st.symbol}: Failed to commit budget: {commit_error}")
 
                         self.pnl_service.record_fill(
                             symbol=st.symbol,
