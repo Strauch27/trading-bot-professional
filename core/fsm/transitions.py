@@ -68,20 +68,26 @@ class TransitionTable:
         )
 
         # ===== WARMUP Phase =====
-        self._add(Phase.WARMUP, FSMEvent.TICK_RECEIVED, Phase.IDLE, action_warmup_complete)
+        self._add(Phase.WARMUP, FSMEvent.WARMUP_COMPLETED, Phase.IDLE, action_warmup_complete)
+        self._add(Phase.WARMUP, FSMEvent.TICK_RECEIVED, Phase.WARMUP, action_idle_tick)  # Stay in warmup on tick
 
         # ===== IDLE Phase =====
+        self._add(Phase.IDLE, FSMEvent.SLOT_AVAILABLE, Phase.ENTRY_EVAL, action_evaluate_entry)
         self._add(Phase.IDLE, FSMEvent.SIGNAL_DETECTED, Phase.ENTRY_EVAL, action_evaluate_entry)
+        self._add(Phase.IDLE, FSMEvent.NO_SIGNAL, Phase.IDLE, action_idle_tick)
         self._add(Phase.IDLE, FSMEvent.TICK_RECEIVED, Phase.IDLE, action_idle_tick)
 
         # ===== ENTRY_EVAL Phase =====
+        self._add(Phase.ENTRY_EVAL, FSMEvent.SIGNAL_DETECTED, Phase.PLACE_BUY, action_prepare_buy)
         self._add(Phase.ENTRY_EVAL, FSMEvent.GUARDS_PASSED, Phase.PLACE_BUY, action_prepare_buy)
         self._add(Phase.ENTRY_EVAL, FSMEvent.GUARDS_BLOCKED, Phase.IDLE, action_log_blocked)
         self._add(Phase.ENTRY_EVAL, FSMEvent.RISK_LIMITS_BLOCKED, Phase.IDLE, action_log_blocked)
+        self._add(Phase.ENTRY_EVAL, FSMEvent.NO_SIGNAL, Phase.IDLE, action_log_blocked)  # No signal = back to IDLE with cooldown
 
         # ===== PLACE_BUY Phase =====
         self._add(Phase.PLACE_BUY, FSMEvent.BUY_ORDER_PLACED, Phase.WAIT_FILL, action_wait_for_fill)
         self._add(Phase.PLACE_BUY, FSMEvent.BUY_ORDER_REJECTED, Phase.IDLE, action_handle_reject)
+        self._add(Phase.PLACE_BUY, FSMEvent.ORDER_PLACEMENT_FAILED, Phase.IDLE, action_handle_reject)
         self._add(Phase.PLACE_BUY, FSMEvent.ERROR_OCCURRED, Phase.ERROR, action_log_error)
 
         # ===== WAIT_FILL Phase =====
@@ -89,6 +95,7 @@ class TransitionTable:
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_PARTIAL, Phase.WAIT_FILL, action_handle_partial_buy)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_TIMEOUT, Phase.IDLE, action_cancel_and_cleanup)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_CANCELLED, Phase.IDLE, action_cleanup_cancelled)
+        self._add(Phase.WAIT_FILL, FSMEvent.ERROR_OCCURRED, Phase.IDLE, action_cleanup_cancelled)
 
         # ===== POSITION Phase =====
         self._add(Phase.POSITION, FSMEvent.TICK_RECEIVED, Phase.EXIT_EVAL, action_check_exit)
@@ -110,6 +117,7 @@ class TransitionTable:
         self._add(Phase.WAIT_SELL_FILL, FSMEvent.SELL_ORDER_FILLED, Phase.POST_TRADE, action_close_position)
         self._add(Phase.WAIT_SELL_FILL, FSMEvent.SELL_ORDER_PARTIAL, Phase.WAIT_SELL_FILL, action_handle_partial_sell)
         self._add(Phase.WAIT_SELL_FILL, FSMEvent.SELL_ORDER_TIMEOUT, Phase.POSITION, action_retry_sell)
+        self._add(Phase.WAIT_SELL_FILL, FSMEvent.ERROR_OCCURRED, Phase.POSITION, action_retry_sell)
 
         # ===== POST_TRADE Phase =====
         self._add(Phase.POST_TRADE, FSMEvent.TICK_RECEIVED, Phase.COOLDOWN, action_start_cooldown)

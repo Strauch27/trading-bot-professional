@@ -10,7 +10,9 @@ All actions must be:
 """
 
 import logging
+import math
 
+import config
 from core.fsm.fsm_events import EventContext
 from core.fsm.state import CoinState
 
@@ -79,7 +81,13 @@ def action_prepare_buy(ctx: EventContext, coin_state: CoinState) -> None:
 
 def action_log_blocked(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: ENTRY_EVAL → IDLE (blocked)"""
+    import time
+
     coin_state.note = f"blocked: {ctx.data.get('block_reason', 'unknown')}"
+
+    # CRITICAL FIX: Set cooldown to prevent IDLE->ENTRY_EVAL->IDLE loop
+    # When guards block, wait 30s before re-evaluating
+    coin_state.cooldown_until = time.time() + 30.0
 
     try:
         from core.logger_factory import DECISION_LOG, log_event
@@ -126,6 +134,29 @@ def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
     coin_state.entry_price = ctx.avg_price or 0.0
     coin_state.entry_ts = ctx.timestamp
     coin_state.note = f"position opened: {ctx.filled_qty:.6f} @ {ctx.avg_price:.4f}"
+
+    # P0-2: Initialize TP/SL prices after fill
+    entry_price = ctx.avg_price or 0.0
+    if entry_price > 0:
+        # Get TP/SL percentages from config
+        tp_pct = getattr(config, 'TP_PCT', 3.0)  # Default 3% TP
+        sl_pct = getattr(config, 'SL_PCT', 5.0)  # Default 5% SL
+
+        # Get price tick for rounding (default to 8 decimals for crypto)
+        price_tick = ctx.data.get("price_tick", 0.00000001)
+        decimals = int(abs(math.log10(price_tick)))
+
+        # Calculate and set TP/SL prices
+        coin_state.tp_px = round(entry_price * (1 + tp_pct / 100), decimals)
+        coin_state.sl_px = round(entry_price * (1 - sl_pct / 100), decimals)
+        coin_state.tp_active = True
+        coin_state.sl_active = True
+
+        # Initialize trailing stop
+        coin_state.peak_price = entry_price
+        coin_state.trailing_trigger = 0.0  # Will be set when price rises
+
+        logger.info(f"{ctx.symbol}: TP/SL initialized - TP: {coin_state.tp_px:.8f} (+{tp_pct}%), SL: {coin_state.sl_px:.8f} (-{sl_pct}%)")
 
     if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
         coin_state.fsm_data.position_opened_at = ctx.timestamp

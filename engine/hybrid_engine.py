@@ -156,8 +156,15 @@ class HybridEngine:
             except Exception:
                 logger.exception("MD_THREAD_STATUS_CHECK_FAIL")
 
+        # DEBUG FSM Engine check
+        sys.stdout.write(f"[HYBRID_ENGINE.START] FSM Check: mode={self.mode}, mode in [fsm,both]={self.mode in ['fsm', 'both']}, fsm_engine={self.fsm_engine}, is_none={self.fsm_engine is None}\n")
+        sys.stdout.flush()
+        logger.info(f"FSM CHECK: mode={self.mode}, fsm_engine={self.fsm_engine}, is_none={self.fsm_engine is None}")
+
         if self.mode in ["fsm", "both"] and self.fsm_engine:
             logger.info("Starting FSM Engine...")
+            sys.stdout.write("[HYBRID_ENGINE.START] Calling fsm_engine.start()\n")
+            sys.stdout.flush()
             self.fsm_engine.start()
 
         # Start validation thread if in "both" mode

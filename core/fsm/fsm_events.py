@@ -19,6 +19,9 @@ class FSMEvent(Enum):
     """
     # Market data events
     TICK_RECEIVED = auto()           # New price data arrived
+    WARMUP_COMPLETED = auto()        # Symbol warmup completed
+    SLOT_AVAILABLE = auto()          # Trading slot available
+    NO_SIGNAL = auto()               # No buy signal detected
 
     # Entry evaluation events
     SIGNAL_DETECTED = auto()         # Buy signal triggered
@@ -34,6 +37,7 @@ class FSMEvent(Enum):
     BUY_ORDER_TIMEOUT = auto()       # Buy order timed out
     BUY_ORDER_REJECTED = auto()      # Exchange rejected buy order
     BUY_ORDER_CANCELLED = auto()     # Buy order was cancelled
+    ORDER_PLACEMENT_FAILED = auto()  # Order placement failed (e.g. insufficient funds)
 
     # Position lifecycle events
     POSITION_OPENED = auto()         # Position successfully opened
@@ -72,6 +76,7 @@ class EventContext:
         timestamp: Optional[float] = None,
         data: Optional[Dict[str, Any]] = None,
         order_id: Optional[str] = None,
+        decision_id: Optional[str] = None,
         filled_qty: Optional[float] = None,
         avg_price: Optional[float] = None,
         error: Optional[Exception] = None
@@ -81,9 +86,15 @@ class EventContext:
         self.timestamp = timestamp if timestamp is not None else time.time()
         self.data = data or {}
         self.order_id = order_id
+        self.decision_id = decision_id
         self.filled_qty = filled_qty
         self.avg_price = avg_price
         self.error = error
+
+    @property
+    def price(self) -> float:
+        """Convenience property to access price from data dict."""
+        return self.data.get("price", 0.0)
 
     def __repr__(self):
         return f"EventContext({self.event.name}, {self.symbol}, order_id={self.order_id})"

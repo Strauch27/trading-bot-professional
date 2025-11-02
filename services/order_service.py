@@ -131,6 +131,81 @@ class OrderService:
         else:
             logger.info("OrderService initialized without COID manager")
 
+    def place_order(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        price: float,
+        order_type: str = "limit",
+        client_order_id: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Place order with specified type (dispatcher for FSM compatibility).
+
+        This method provides a unified interface for FSMOrderRouter to place orders.
+        It dispatches to submit_limit() or submit_market() based on order_type.
+
+        Args:
+            symbol: Trading pair (e.g., "BTC/USDT")
+            side: "buy" or "sell"
+            amount: Order quantity
+            price: Limit price (ignored for market orders)
+            order_type: "limit" or "market" (default: "limit")
+            client_order_id: Client order ID for idempotency
+            **kwargs: Additional parameters (e.g., time_in_force, decision_id)
+
+        Returns:
+            CCXT order dict with keys: id, status, filled, average, etc.
+
+        Raises:
+            ValueError: If order_type is not supported
+        """
+        time_in_force = kwargs.get("time_in_force", "IOC")
+        decision_id = kwargs.get("decision_id")
+
+        if order_type in ("limit", "ioc"):
+            # Use limit order
+            result = self.submit_limit(
+                symbol=symbol,
+                side=side,
+                qty=amount,
+                price=price,
+                coid=client_order_id,
+                time_in_force=time_in_force,
+                decision_id=decision_id
+            )
+        elif order_type == "market":
+            # Use market order
+            result = self.submit_market(
+                symbol=symbol,
+                side=side,
+                qty=amount,
+                coid=client_order_id,
+                time_in_force=time_in_force,
+                decision_id=decision_id
+            )
+        else:
+            raise ValueError(f"Unsupported order_type: {order_type}")
+
+        # Convert OrderResult to CCXT-like dict for FSMOrderRouter compatibility
+        if result.success and result.order_id:
+            return {
+                "id": result.order_id,
+                "status": "open" if result.filled_qty == 0 else ("closed" if result.filled_qty == amount else "partial"),
+                "filled": result.filled_qty,
+                "average": result.avg_price,
+                "symbol": symbol,
+                "side": side,
+                "type": order_type,
+                "timestamp": int(time.time() * 1000)
+            }
+        else:
+            # Failed - raise exception for FSMOrderRouter to handle
+            error_msg = result.error or "Unknown order placement error"
+            raise Exception(f"Order placement failed: {error_msg}")
+
     def submit_limit(
         self,
         symbol: str,

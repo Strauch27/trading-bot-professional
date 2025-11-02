@@ -40,6 +40,63 @@ class OrderService:
             'errors_total': 0
         }
 
+    def place_order(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        price: float,
+        order_type: str = "limit",
+        client_order_id: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Place order with specified type (dispatcher for FSM compatibility).
+
+        This method provides a unified interface for FSMOrderRouter to place orders.
+        It dispatches to place_limit_ioc() or place_market_ioc() based on order_type.
+
+        Args:
+            symbol: Trading pair (e.g., "BTC/USDT")
+            side: "buy" or "sell"
+            amount: Order quantity
+            price: Limit price (ignored for market orders)
+            order_type: "limit", "ioc", or "market" (default: "limit")
+            client_order_id: Client order ID for idempotency
+            **kwargs: Additional parameters
+
+        Returns:
+            CCXT order dict with keys: id, status, filled, average, etc.
+
+        Raises:
+            ValueError: If order_type is not supported
+            Exception: If order placement fails
+        """
+        if order_type in ("limit", "ioc"):
+            # Use limit IOC order
+            result = self.place_limit_ioc(
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                price=price,
+                client_order_id=client_order_id
+            )
+        elif order_type == "market":
+            # Use market IOC order
+            result = self.place_market_ioc(
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                client_order_id=client_order_id
+            )
+        else:
+            raise ValueError(f"Unsupported order_type: {order_type}")
+
+        if result is None:
+            raise Exception(f"Order placement failed: No result returned")
+
+        return result
+
     def place_limit_ioc(
         self,
         symbol: str,

@@ -70,7 +70,7 @@ class RecoveryManager:
                             f"Invalid state recovered for {symbol}: {validation_result['issues']} "
                             f"- resetting to IDLE"
                         )
-                        from core.fsm.fsm_enums import Phase
+                        from core.fsm.phases import Phase
                         coin_state.phase = Phase.IDLE
                         coin_state.amount = 0.0
                         coin_state.entry_price = 0.0
@@ -137,6 +137,30 @@ class RecoveryManager:
         # Check for amount without position phase
         if coin_state.amount > 0 and coin_state.phase.name not in ['POSITION', 'EXIT_EVAL', 'PLACE_SELL', 'WAIT_SELL_FILL']:
             issues.append('amount_in_wrong_phase')
+
+        # Check for stuck WAIT_FILL state without order_id
+        if coin_state.phase.name == 'WAIT_FILL':
+            if not coin_state.order_id:
+                issues.append('wait_fill_without_order_id')
+            else:
+                # Check if order is too old (> 5 minutes)
+                import time
+                if coin_state.order_placed_ts > 0:
+                    age_seconds = time.time() - coin_state.order_placed_ts
+                    if age_seconds > 300:  # 5 minutes
+                        issues.append(f'wait_fill_order_too_old_{age_seconds:.0f}s')
+
+        # Check for stuck WAIT_SELL_FILL state without order_id
+        if coin_state.phase.name == 'WAIT_SELL_FILL':
+            if not coin_state.order_id:
+                issues.append('wait_sell_fill_without_order_id')
+            else:
+                # Check if order is too old (> 5 minutes)
+                import time
+                if coin_state.order_placed_ts > 0:
+                    age_seconds = time.time() - coin_state.order_placed_ts
+                    if age_seconds > 300:  # 5 minutes
+                        issues.append(f'wait_sell_fill_order_too_old_{age_seconds:.0f}s')
 
         # Check for stale timestamps
         if coin_state.entry_ts > 0:

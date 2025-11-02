@@ -896,20 +896,22 @@ class MarketDataProvider:
 
         Supports soft-TTL: serves stale prices when fresh data unavailable.
         """
-        # 1) Cache bevorzugen (accept stale data)
+        # 1) Cache bevorzugen (only fresh data - reject stale)
         if prefer_cache:
             cache_result = self.ticker_cache.get_ticker(symbol)
             if cache_result:
                 cached_ticker, status = cache_result
-                # Accept both HIT and STALE for price retrieval
-                p = float(cached_ticker.last or 0.0)
-                if p > 0:
-                    return p
-                # Fallback auf ask/bid, falls last unbrauchbar ist
-                if float(cached_ticker.ask or 0.0) > 0:
-                    return float(cached_ticker.ask)
-                if float(cached_ticker.bid or 0.0) > 0:
-                    return float(cached_ticker.bid)
+                # CRITICAL FIX: Only accept HIT (fresh), not STALE
+                # If stale, fall through to fetch fresh data below
+                if status == "HIT":
+                    p = float(cached_ticker.last or 0.0)
+                    if p > 0:
+                        return p
+                    # Fallback auf ask/bid, falls last unbrauchbar ist
+                    if float(cached_ticker.ask or 0.0) > 0:
+                        return float(cached_ticker.ask)
+                    if float(cached_ticker.bid or 0.0) > 0:
+                        return float(cached_ticker.bid)
 
         # 2) Live holen
         ticker = self.get_ticker(symbol, use_cache=True)
@@ -1828,7 +1830,6 @@ class MarketDataProvider:
 
 
         # Update PriceCache with all current prices
-
         if self.price_cache:
             price_dict = {sym: t.last for sym, t in tickers.items()}
             self.price_cache.update(price_dict, now)
@@ -1899,15 +1900,28 @@ class MarketDataProvider:
 
 
         # Publish all snapshots via EventBus
+        # DEBUGGING: Check why snapshots aren't published
+        import sys
+        sys.stdout.write(f"[MARKET_DATA] Snapshot publish check: snapshots={len(snapshots) if snapshots else 0}, event_bus={'SET' if self.event_bus else 'NONE'}\n")
+        sys.stdout.flush()
 
         if snapshots and self.event_bus:
             try:
+                sys.stdout.write(f"[MARKET_DATA] PUBLISHING {len(snapshots)} snapshots to EventBus\n")
+                sys.stdout.flush()
                 logger.debug("PUBLISHING_SNAPSHOTS", extra={"n": len(snapshots)})
                 self.event_bus.publish("market.snapshots", snapshots)
                 self._statistics['drop_snapshots_emitted'] += 1
+                sys.stdout.write(f"[MARKET_DATA] Successfully published snapshots\n")
+                sys.stdout.flush()
 
             except Exception as e:
+                sys.stdout.write(f"[MARKET_DATA] FAILED to publish: {e}\n")
+                sys.stdout.flush()
                 logger.debug(f"Failed to publish snapshots: {e}")
+        else:
+            sys.stdout.write(f"[MARKET_DATA] NOT publishing - snapshots={bool(snapshots)}, event_bus={bool(self.event_bus)}\n")
+            sys.stdout.flush()
 
         # V9_3 Phase 4: Persist snapshots to JSONL
         if snapshots and self.snapshot_writer and getattr(config, 'FEATURE_PERSIST_STREAMS', True):
@@ -1974,7 +1988,6 @@ class MarketDataProvider:
 
         co.beat("md_update_end")
 
-
         logger.info(f"HEARTBEAT - Market data update completed: {len(symbols)} symbols, {sum(results.values())} successful, {len(snapshots)} snapshots",
                    extra={"event_type": "HEARTBEAT"})
         return results
@@ -2016,9 +2029,14 @@ class MarketDataProvider:
 
     def start(self):
         """Start market data polling loop in background thread"""
+        import sys
+        sys.stdout.write("[MARKET_DATA] start() called\n")
+        sys.stdout.flush()
 
         if hasattr(self, '_running') and self._running:
             logger.warning("Market data loop already running")
+            sys.stdout.write("[MARKET_DATA] Loop already running, skipping\n")
+            sys.stdout.flush()
             return
 
         self._running = True
@@ -2030,9 +2048,15 @@ class MarketDataProvider:
         self._last_success_rate = None
 
         import threading
+        sys.stdout.write("[MARKET_DATA] Creating thread...\n")
+        sys.stdout.flush()
         # FIX ACTION 1.3: Wrap _loop with auto-restart capability
         self._thread = threading.Thread(target=self._loop_with_auto_restart, name="MarketDataLoop", daemon=True)
+        sys.stdout.write("[MARKET_DATA] Starting thread...\n")
+        sys.stdout.flush()
         self._thread.start()
+        sys.stdout.write("[MARKET_DATA] Thread started successfully\n")
+        sys.stdout.flush()
 
 
         # Log thread start with explicit event
@@ -2119,6 +2143,9 @@ class MarketDataProvider:
         logger.info("Market data loop stopped")
 
     def _loop_with_auto_restart(self):
+        import sys
+        sys.stdout.write("[MARKET_DATA] _loop_with_auto_restart() ENTRY\n")
+        sys.stdout.flush()
         """
         Wrapper for _loop() with auto-restart capability.
 
@@ -2176,11 +2203,23 @@ class MarketDataProvider:
                     extra={'event_type': 'MD_THREAD_AUTO_RESTART', 'restart_count': restart_count, 'delay_s': restart_delay_s}
                 )
 
+                # CACHE CLEAR: Prevent stale data after crash/restart
+                logger.info("Clearing ticker cache before market data loop restart")
+                self.ticker_cache.clear()
+                if self.price_cache:
+                    logger.info("Clearing price cache before market data loop restart")
+                    # PriceCache doesn't have clear() method, so clear the internal dicts
+                    self.price_cache.buffers.clear()
+                    self.price_cache.last.clear()
+
                 time.sleep(restart_delay_s)
                 # Loop continues - thread restarts
 
     def _loop(self):
         """Market data polling loop - fetches and publishes snapshots"""
+        import sys
+        sys.stdout.write("[MARKET_DATA] _loop() ENTRY\n")
+        sys.stdout.flush()
 
         import traceback
         from pathlib import Path
