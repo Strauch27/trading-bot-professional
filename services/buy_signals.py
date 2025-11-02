@@ -140,7 +140,8 @@ class BuySignalService:
             try:
                 # V9_3: Read anchor from MarketSnapshot (required)
                 if not drop_snapshot_store:
-                    return False, {"error": "Snapshot store required for V9_3"}
+                    logger.warning(f"[BUY_SIGNAL] {symbol}: Snapshot store is None/empty!")
+                    return False, {"reason": "no_snapshot_store", "error": "Snapshot store required for V9_3"}
 
                 snapshot_entry = drop_snapshot_store.get(symbol)
                 snapshot_ts = None
@@ -153,15 +154,20 @@ class BuySignalService:
                         snapshot = snapshot_entry
 
                 if not snapshot:
-                    return False, {"error": f"No snapshot found for {symbol}"}
+                    logger.debug(f"[BUY_SIGNAL] {symbol}: No snapshot found in store (store has {len(drop_snapshot_store)} symbols)")
+                    return False, {"reason": "no_snapshot", "error": f"No snapshot found for {symbol}"}
 
                 stale_ttl = getattr(config, 'SNAPSHOT_STALE_TTL_S', 30.0)
                 if snapshot_ts is not None and (time.time() - snapshot_ts) > stale_ttl:
-                    return False, {"error": f"Snapshot for {symbol} is stale"}
+                    age_s = time.time() - snapshot_ts
+                    logger.debug(f"[BUY_SIGNAL] {symbol}: Snapshot is stale ({age_s:.1f}s > {stale_ttl}s)")
+                    return False, {"reason": "stale_snapshot", "error": f"Snapshot for {symbol} is stale ({age_s:.1f}s)"}
 
                 anchor = snapshot.get('windows', {}).get('anchor')
                 if not anchor or anchor <= 0:
-                    return False, {"error": "No valid anchor in snapshot"}
+                    windows_data = snapshot.get('windows', {})
+                    logger.debug(f"[BUY_SIGNAL] {symbol}: No valid anchor (windows={windows_data.keys() if windows_data else 'None'})")
+                    return False, {"reason": "no_anchor", "error": f"No valid anchor in snapshot (anchor={anchor})"}
 
                 # V9_3: Calculate trigger price
                 trigger_price = anchor * self.drop_trigger_value
@@ -213,8 +219,8 @@ class BuySignalService:
                 return buy_triggered, context
 
             except Exception as e:
-                logger.error(f"Error evaluating buy signal for {symbol}: {e}")
-                return False, {"error": str(e)}
+                logger.error(f"Error evaluating buy signal for {symbol}: {e}", exc_info=True)
+                return False, {"reason": "exception", "error": str(e)}
 
     def _log_trigger_audit(self, symbol: str, context: Dict[str, Any]) -> None:
         """Log detailed trigger audit information (V9_3)."""

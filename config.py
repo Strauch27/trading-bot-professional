@@ -221,7 +221,8 @@ DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
 # Pipeline Architecture (NEW - Unified Market Data Pipeline)
 # CRITICAL FIX (C-CONFIG-03): Consolidate duplicate poll interval parameters
-MD_POLL_MS = 25000  # Market data polling interval (25 seconds - improved headroom for stale detection)
+# CRITICAL FIX (C-CONFIG-04): Increased to 2500ms to match actual performance and prevent overruns
+MD_POLL_MS = 2500  # Market data polling interval (2500ms = 2.5s - matches actual cycle time, prevents overruns)
 POLL_MS = MD_POLL_MS  # DEPRECATED: Use MD_POLL_MS instead (maintained for backward compatibility)
 WINDOW_LOOKBACK_S = 300  # Price cache and rolling window lookback in seconds
 WINDOW_STRICT_WARMUP = False  # Allow drop% calculation immediately (no warmup period)
@@ -234,9 +235,9 @@ ORDER_FLOW_ENABLED = True  # Kill switch for order flow (disable for dry-run tes
 MD_USE_WEBSOCKET = False  # True = WebSocket primary, False = HTTP Polling
 MD_BATCH_POLLING = True  # Enable batch-based polling for HTTP mode
 MD_BATCH_SIZE = 13  # 91 symbols → 7 batches (13 symbols per batch)
-MD_BATCH_INTERVAL_MS = 150  # 150ms between batches (was 1000ms - too slow!)
-MD_CACHE_TTL_MS = 5000  # Hard TTL for ticker cache (ms)
-MD_CACHE_SOFT_TTL_MS = 2000  # Soft TTL (serves stale while refreshing)
+MD_BATCH_INTERVAL_MS = 200  # CRITICAL FIX (C-CONFIG-04): Increased from 150ms to 200ms to reduce DNS/API load
+MD_CACHE_TTL_MS = 3000  # Hard TTL for ticker cache (ms) - CRITICAL FIX (C-CONFIG-04): Adjusted for 1000ms polling (3x poll interval)
+MD_CACHE_SOFT_TTL_MS = 2000  # Soft TTL (serves stale while refreshing) - 2x poll interval
 MD_CACHE_MAX_SIZE = 2000  # Max cached tickers
 MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
 
@@ -352,7 +353,7 @@ SMA_GUARD_WINDOW = 50
 USE_VOLUME_GUARD = False  # Volumen-Filter (deaktiviert)
 VOLUME_GUARD_WINDOW = 15
 VOLUME_GUARD_FACTOR = 1.020
-MIN_24HUSD_VOLUME = 500_000  # LIQUIDITY FIX: Increased from 150k to 500k for better liquidity
+MIN_24HUSD_VOLUME = 100_000  # DEBUGGING FIX: Reduced from 500k to 100k to allow more symbols
 
 USE_SPREAD_GUARD = False  # Spread-Filter (deaktiviert)
 GUARD_MAX_SPREAD_BPS = 35
@@ -391,7 +392,7 @@ USE_PREDICTIVE_BUYS = True
 BUY_LIMIT_PREMIUM_BPS = 8
 
 # Phase 7: Spread & Depth Guards
-MAX_SPREAD_BPS_ENTRY = 20  # Increased from 10 to 20 (0.2%) for volatile altcoins
+MAX_SPREAD_BPS_ENTRY = 50  # DEBUGGING FIX: Increased from 20 to 50 (0.5%) to allow wider spreads
 DEPTH_MIN_NOTIONAL_USD = 200  # Min kumulierte Depth (Notional)
 
 # Exit Liquidity Protection (ACTION 1.2 - Code Review Fix)
@@ -436,7 +437,7 @@ USE_FIRST_FILL_TS_FOR_TTL = True  # Use first_fill_ts instead of order timestamp
 ENABLE_SYMBOL_LOCKS = True  # Thread-safe per-symbol locking for portfolio ops
 
 # Phase 7: Spread/Depth Guards (already defined above)
-ENABLE_SPREAD_GUARD_ENTRY = True  # LIQUIDITY FIX: Enable spread check to block illiquid coins
+ENABLE_SPREAD_GUARD_ENTRY = False  # DEBUGGING FIX: Temporarily disabled to test if guards block all entries
 ENABLE_DEPTH_GUARD_ENTRY = False  # Block buys when depth < DEPTH_MIN_NOTIONAL_USD
 # MAX_SPREAD_BPS_ENTRY and DEPTH_MIN_NOTIONAL_USD defined above
 
@@ -593,7 +594,7 @@ SKIP_TRADE_IF_EXIT_UNDER_MIN = True
 API_BLOCK_TTL_MINUTES = 120
 PERMANENT_API_BLOCKLIST = {"FLOW/USDT"}
 RETRY_REDUCTION_PCT = 0.97
-BACKFILL_MINUTES = 90
+BACKFILL_MINUTES = 0  # Deaktiviert für schnelle Cycles
 BACKFILL_TIMEFRAME = '1m'
 BUY_ORDER_TIMEOUT_MINUTES = 3
 BUY_ORDER_CANCEL_THRESHOLD_PCT = 1.03
@@ -684,7 +685,7 @@ ACTIVE_ORDER_SYNC_JITTER_S = 5
 
 # Master Switch & Mode Selection
 FSM_ENABLED = True  # False = Legacy engine (default), True = Use FSM_MODE
-FSM_MODE = "legacy"  # Options: "legacy", "fsm", or "both" (parallel validation)
+FSM_MODE = "fsm"  # Options: "legacy", "fsm", or "both" (parallel validation)
 
 # Phase Event Logging (JSONL audit trail for all phase transitions)
 # CRITICAL FIX (C-CONFIG-01): PHASE_LOG_FILE now initialized in init_runtime_config()

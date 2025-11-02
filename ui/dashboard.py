@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
+try:
     from rich.layout import Layout
     from rich.live import Live
     from rich.panel import Panel
@@ -185,6 +191,42 @@ def get_log_tail(n_lines: int = 20) -> List[str]:
     except Exception as e:
         import traceback
         return [f"Error reading logs: {e}", traceback.format_exc()]
+
+
+def get_system_resources() -> Dict[str, Any]:
+    """Collect system CPU and RAM usage (cross-platform)."""
+    if not PSUTIL_AVAILABLE:
+        return {
+            "cpu_percent": None,
+            "ram_percent": None,
+            "ram_used_gb": None,
+            "ram_total_gb": None,
+        }
+
+    try:
+        # CPU percentage (non-blocking, interval=None uses cached value)
+        cpu_percent = psutil.cpu_percent(interval=None)
+
+        # Memory info
+        mem = psutil.virtual_memory()
+        ram_percent = mem.percent
+        ram_used_gb = mem.used / (1024 ** 3)  # Convert to GB
+        ram_total_gb = mem.total / (1024 ** 3)  # Convert to GB
+
+        return {
+            "cpu_percent": cpu_percent,
+            "ram_percent": ram_percent,
+            "ram_used_gb": ram_used_gb,
+            "ram_total_gb": ram_total_gb,
+        }
+    except Exception as e:
+        logger.debug(f"Error getting system resources: {e}")
+        return {
+            "cpu_percent": None,
+            "ram_percent": None,
+            "ram_used_gb": None,
+            "ram_total_gb": None,
+        }
 
 
 def get_config_data(config_module, start_time: float) -> Dict[str, Any]:
@@ -466,8 +508,8 @@ def get_health_data(engine, config_module) -> Dict[str, Any]:
     }
 
 
-def make_header_panel(config_data: Dict[str, Any]) -> Panel:
-    """Create the header panel with status and config."""
+def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, Any]) -> Panel:
+    """Create the header panel with status, config, and system resources."""
     grid = Table.grid(expand=True)
     grid.add_column(justify="left", ratio=1)
     grid.add_column(justify="right", ratio=1)
@@ -500,6 +542,33 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
         (f"MAX POS: {config_data.get('MAX_POSITIONS', 0)}", "cyan"),
     )
 
+    # Line 3: System Resources (CPU & RAM)
+    cpu_percent = system_resources.get('cpu_percent')
+    ram_percent = system_resources.get('ram_percent')
+    ram_used_gb = system_resources.get('ram_used_gb')
+    ram_total_gb = system_resources.get('ram_total_gb')
+
+    if cpu_percent is not None and ram_percent is not None:
+        # Color coding for CPU
+        cpu_style = "green" if cpu_percent < 50 else "yellow" if cpu_percent < 80 else "red"
+        # Color coding for RAM
+        ram_style = "green" if ram_percent < 60 else "yellow" if ram_percent < 80 else "red"
+
+        line3 = Text.assemble(
+            ("SYSTEM: ", "white"),
+            ("CPU: ", "white"),
+            (f"{cpu_percent:.1f}%", cpu_style),
+            (" | ", "dim white"),
+            ("RAM: ", "white"),
+            (f"{ram_percent:.1f}%", ram_style),
+            (f" ({ram_used_gb:.1f}/{ram_total_gb:.1f} GB)", "dim cyan"),
+        )
+    else:
+        line3 = Text.assemble(
+            ("SYSTEM: ", "white"),
+            ("CPU/RAM monitoring unavailable", "dim white"),
+        )
+
     # Combine
     content = Text()
     content.append("[TRADING BOT DASHBOARD]", style="bold white")
@@ -507,6 +576,8 @@ def make_header_panel(config_data: Dict[str, Any]) -> Panel:
     content.append(line1)
     content.append("\n")
     content.append(line2)
+    content.append("\n")
+    content.append(line3)
 
     return Panel(
         content,
@@ -747,7 +818,7 @@ def run_dashboard(engine, portfolio, config_module):
     if debug_drops:
         # Layout with debug panel
         layout.split(
-            Layout(name="header", size=5),
+            Layout(name="header", size=6),  # Increased from 5 to 6 for system resources line
             Layout(ratio=1, name="main"),
             Layout(size=3, name="footer"),
             Layout(size=12, name="debug"),
@@ -755,7 +826,7 @@ def run_dashboard(engine, portfolio, config_module):
     else:
         # Standard layout without debug panel
         layout.split(
-            Layout(name="header", size=5),
+            Layout(name="header", size=6),  # Increased from 5 to 6 for system resources line
             Layout(ratio=1, name="main"),
             Layout(size=3, name="footer"),
         )
@@ -766,6 +837,13 @@ def run_dashboard(engine, portfolio, config_module):
     )
 
     start_time = time.time()
+
+    # Initialize CPU percentage tracking (first call to establish baseline)
+    if PSUTIL_AVAILABLE:
+        try:
+            psutil.cpu_percent(interval=0.1)
+        except Exception:
+            pass
 
     # Get shutdown coordinator for clean exit
     shutdown_coordinator = getattr(engine, 'shutdown_coordinator', None)
@@ -783,13 +861,14 @@ def run_dashboard(engine, portfolio, config_module):
                 try:
                     # Collect data
                     config_data = get_config_data(config_module, start_time)
+                    system_resources = get_system_resources()
                     portfolio_data = get_portfolio_data(portfolio, engine)
                     drop_data = get_drop_data(engine, portfolio, config_module)
                     health_data = get_health_data(engine, config_module)
                     last_event = _event_bus.get_last_event()
 
                     # Update UI components
-                    layout["header"].update(make_header_panel(config_data))
+                    layout["header"].update(make_header_panel(config_data, system_resources))
                     layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
                     layout["footer"].update(make_footer_panel(last_event, health_data))
