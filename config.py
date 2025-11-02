@@ -708,7 +708,7 @@ FSM_MODE = "fsm"  # Options: "legacy", "fsm", or "both" (parallel validation)
 PHASE_LOG_BUFFER_SIZE = 8192  # Write buffer size
 
 # Rich Terminal Status Table (live FSM visualization)
-ENABLE_RICH_TABLE = False  # Enable live-updating FSM status table
+ENABLE_RICH_TABLE = True  # Enable live-updating FSM status table
 RICH_TABLE_REFRESH_HZ = 2.0  # Refresh rate (updates per second)
 RICH_TABLE_SHOW_IDLE = False  # Show IDLE/WARMUP symbols in table
 
@@ -894,13 +894,13 @@ for _k, _v in TERMINAL_PRESETS.get(TERMINAL_PRESET, {}).items():
 STATUS_LINE_TICK_S = 30
 
 # Live Monitors (Rich Console Live Displays)
-ENABLE_LIVE_MONITORS = False  # Enable Rich Live Monitors (disabled for clean terminal output)
-ENABLE_LIVE_HEARTBEAT = False  # Show live system + API + fill metrics panel (disabled)
-ENABLE_LIVE_DASHBOARD = False  # Combined dashboard with all monitors (disabled for clean terminal output)
+ENABLE_LIVE_MONITORS = True  # Enable Rich Live Monitors
+ENABLE_LIVE_HEARTBEAT = True  # Show live system + API + fill metrics panel
+ENABLE_LIVE_DASHBOARD = True  # Combined dashboard with all monitors
 LIVE_MONITOR_REFRESH_S = 2.0  # Update interval in seconds (2.0 = 0.5 Hz)
 
 # Live Drop Monitor (Terminal UI)
-ENABLE_LIVE_DROP_MONITOR = False  # Live-updating Terminal-Table (disabled for clean terminal output)
+ENABLE_LIVE_DROP_MONITOR = True  # Live-updating Terminal-Table
 LIVE_DROP_MONITOR_REFRESH_S = 5  # Update-Intervall in Sekunden
 LIVE_DROP_MONITOR_TOP_N = 10  # Anzahl der Top Drops (max 20)
 
