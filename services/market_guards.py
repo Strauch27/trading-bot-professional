@@ -610,3 +610,63 @@ class MarketGuards:
                 },
                 "current_market_conditions": self._market_conditions.copy()
             }
+
+
+# ============================================================================
+# FSM Parity: Budget Guard with min_notional awareness
+# ============================================================================
+
+def can_afford(exchange, symbol: str, price: float, budget: float) -> bool:
+    """
+    FSM Parity: Check if budget can afford min_notional + min_qty.
+
+    This guard prevents chancenlose orders that would fail pre-flight.
+
+    Args:
+        exchange: CCXT exchange instance
+        symbol: Trading symbol
+        price: Order price
+        budget: Available budget (USDT)
+
+    Returns:
+        True if budget sufficient for min_notional, False otherwise
+
+    Example:
+        >>> can_afford(exchange, "BLESS/USDT", 0.038, 10.0)
+        True  # 10 USDT > min_notional (5.0)
+    """
+    from services.exchange_filters import get_filters
+    from services.quantize import q_amount
+
+    try:
+        f = get_filters(exchange, symbol)
+
+        # Calculate minimum amount needed
+        min_amt = f.get("min_qty") or f.get("step_size") or 0
+        min_notional = f.get("min_notional") or 0
+
+        # If min_notional exists, ensure amount meets it
+        if min_notional:
+            need_amt = max(min_amt, min_notional / max(price, 1e-18))
+        else:
+            need_amt = min_amt
+
+        # Quantize amount to step_size
+        amt_q = q_amount(need_amt, f["step_size"]) if f["step_size"] else need_amt
+
+        # Check if budget sufficient
+        required_budget = price * amt_q
+        can_buy = budget >= required_budget
+
+        if not can_buy:
+            logger.debug(
+                f"[CAN_AFFORD] {symbol} INSUFFICIENT: "
+                f"need {required_budget:.2f} USDT, have {budget:.2f} USDT"
+            )
+
+        return can_buy
+
+    except Exception as e:
+        logger.warning(f"[CAN_AFFORD] {symbol} Error: {e}")
+        # Conservative: assume can't afford if error
+        return False

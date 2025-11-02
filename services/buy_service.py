@@ -489,3 +489,84 @@ class BuyService:
             ctx={**ctx, "bid": float(bid or 0.0), "ask": float(ask or 0.0)},
         )
         return placed_any, ctx
+
+
+# ============================================================================
+# FSM Parity: Simple Submit+Retry with Quantization
+# ============================================================================
+
+def submit_buy(exchange, symbol: str, raw_price: float, raw_amount: float):
+    """
+    FSM Parity: Submit buy order with quantization and single retry.
+
+    This is a simplified, deterministic buy submission for FSM compatibility.
+    Uses new quantization and validation modules.
+
+    Args:
+        exchange: CCXT exchange instance
+        symbol: Trading symbol
+        raw_price: Raw price (before quantization)
+        raw_amount: Raw amount (before quantization)
+
+    Returns:
+        Order dict if successful, None if failed/aborted
+
+    Flow:
+        1. Load filters
+        2. Pre-flight validation (quantize + check min_notional)
+        3. Submit order
+        4. If fails: Hard re-quantization retry (once)
+        5. If still fails: Abort
+
+    Example:
+        >>> order = submit_buy(exchange, "BTC/USDT", 50000.123, 0.05678)
+        >>> order["id"]  # "1234567890"
+    """
+    from services.exchange_filters import get_filters
+    from services.order_validation import preflight
+    from services.quantize import q_price, q_amount
+    from core.logging.events import emit
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # 1. Load filters
+    f = get_filters(exchange, symbol)
+
+    # 2. Pre-flight validation
+    ok, data = preflight(symbol, raw_price, raw_amount, f)
+    if not ok:
+        emit("buy_aborted", symbol=symbol, detail=data)
+        logger.warning(f"[SUBMIT_BUY] {symbol} ABORTED: {data}")
+        return None
+
+    pr, am = data["price"], data["amount"]
+
+    # 3. Submit order (first attempt)
+    try:
+        o = exchange.create_limit_buy_order(symbol, am, pr)
+        emit("buy_submit", symbol=symbol, price=pr, amount=am, status="submitted")
+        logger.info(f"[SUBMIT_BUY] {symbol} SUCCESS: order_id={o.get('id')}")
+        return o
+    except Exception as e1:
+        logger.warning(f"[SUBMIT_BUY] {symbol} FAILED (attempt 1): {e1}")
+
+        # 4. Hard re-quantization retry (single attempt)
+        pr2 = q_price(pr, f["tick_size"])
+        am2 = q_amount(am, f["step_size"])
+
+        if pr2 != pr or am2 != am:
+            try:
+                o2 = exchange.create_limit_buy_order(symbol, am2, pr2)
+                emit("buy_submit", symbol=symbol, price=pr2, amount=am2, status="submitted_after_requant")
+                logger.info(f"[SUBMIT_BUY] {symbol} SUCCESS (requant): order_id={o2.get('id')}")
+                return o2
+            except Exception as e2:
+                emit("buy_aborted", symbol=symbol, error=str(e2))
+                logger.error(f"[SUBMIT_BUY] {symbol} ABORTED (attempt 2): {e2}")
+                return None
+
+        # If no re-quantization needed, abort
+        emit("buy_aborted", symbol=symbol, error=str(e1))
+        logger.error(f"[SUBMIT_BUY] {symbol} ABORTED: {e1}")
+        return None
