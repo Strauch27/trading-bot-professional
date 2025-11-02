@@ -486,6 +486,41 @@ class FSMTradingEngine:
         except Exception as e:
             logger.debug(f"Failed to log decision_start: {e}")
 
+        # FIX: Check symbol cooldown (failed order protection)
+        if self.cooldown_manager.is_active(st.symbol):
+            remaining_s = self.cooldown_manager.get_remaining(st.symbol)
+            logger.info(f"[COOLDOWN] {st.symbol} in cooldown: {remaining_s:.0f}s remaining after failed order")
+
+            # P2-3: Log cooldown check step (BLOCKED)
+            try:
+                self.buy_flow.step(0, "Symbol Cooldown Check", "BLOCKED",
+                                  f"{remaining_s:.0f}s remaining after failed order")
+            except Exception as e:
+                logger.debug(f"Failed to log buy_flow step: {e}")
+
+            # P2-1: Log decision end (cooldown blocked)
+            try:
+                self.jsonl.decision_end(
+                    symbol=st.symbol,
+                    decision_id=st.decision_id,
+                    outcome="cooldown_blocked",
+                    remaining_s=remaining_s
+                )
+            except Exception as e:
+                logger.debug(f"Failed to log decision_end: {e}")
+
+            # P2-3: End buy flow logging (BLOCKED)
+            try:
+                duration_ms = (time.time() - self.buy_flow.start_time) * 1000 if self.buy_flow.start_time else 0
+                self.buy_flow.end_evaluation("BLOCKED", duration_ms,
+                                            f"symbol_cooldown_{remaining_s:.0f}s")
+            except Exception as e:
+                logger.debug(f"Failed to end buy_flow logging: {e}")
+
+            # Emit NO_SIGNAL event to return to IDLE
+            self._emit_event(st, FSMEvent.NO_SIGNAL, ctx)
+            return
+
         # Update services
         self.buy_signal_service.update_price(st.symbol, ctx.price)
         self.market_guards.update_price_data(st.symbol, ctx.price, ctx.data.get("volume", 0.0))
