@@ -5,6 +5,7 @@ Vereinheitlicht Exchange-Zugriff und macht Tests ohne echte Exchange möglich.
 
 import logging
 import random
+import re
 import socket
 import threading
 import time
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 CCXT_TIMEOUT_MS = 7000  # hartes Request-Timeout
 NETWORK_ERRORS = (ccxt.NetworkError, ccxt.DDoSProtection, requests.RequestException, socket.timeout)
 
+# Market filtering constants
+QUOTE_ALLOW = {"USDT", "USDC"}
+BASE_RE = re.compile(r"^[A-Z]{2,}$")  # Min 2 chars, only A-Z
+
 # Import for heartbeat coordination
 # Import robust sizing logic
 from core.utils.helpers_filters import (
@@ -35,6 +40,58 @@ from core.utils.helpers_filters import (
     size_sell_from_base,
 )
 from services.shutdown_coordinator import get_shutdown_coordinator
+
+
+def is_valid_market(m: dict) -> bool:
+    """
+    Validate market for trading.
+
+    Filters out invalid markets based on:
+    - Base currency (min 2 chars, A-Z only)
+    - Quote currency (USDT or USDC only)
+    - Market type (spot only)
+    - Status (active only)
+    - Minimum lot size and notional value
+
+    Args:
+        m: Market dict from exchange.markets
+
+    Returns:
+        True if market is valid for trading
+    """
+    sym = m.get("symbol", "")
+    if "/" not in sym:
+        return False
+
+    base, quote = sym.split("/", 1)
+
+    # Quote must be USDT or USDC
+    if quote not in QUOTE_ALLOW:
+        return False
+
+    # Base must be 2+ chars, A-Z only
+    if not BASE_RE.match(base):
+        logger.debug(f"Invalid base symbol: {sym} (base={base})")
+        return False
+
+    # Must be active
+    if not m.get("active", True):
+        return False
+
+    # Must be spot market
+    if not m.get("spot", True):
+        return False
+
+    # Validate minimum lot and notional
+    limits = m.get("limits", {})
+    min_amt = float(limits.get("amount", {}).get("min") or 0)
+    min_notional = float(limits.get("cost", {}).get("min") or 0)
+
+    # Min amount must exist and min notional >= 1.0 USDT
+    if min_amt <= 0 or min_notional < 1.0:
+        return False
+
+    return True
 
 
 def _emit_order_sent(log_instance, order_dict):

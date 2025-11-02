@@ -155,6 +155,30 @@ class FSMOrderRouter:
         # Generate stable clientOrderId from intent_id
         client_order_id = self._gen_client_order_id(intent_id)
 
+        # CRITICAL FIX: Check if order already exists via clientOrderId BEFORE placing
+        # This prevents duplicates when cache was cleared or after bot restart
+        try:
+            exchange = self.order_service.exchange
+            existing = exchange.fetch_order_by_client_id(client_order_id, symbol)
+            if existing and existing.get("id"):
+                logger.info(f"Found existing order via clientOrderId: {existing['id']} (intent={intent_id})")
+                # Return existing order as success
+                result = OrderResult(
+                    success=True,
+                    order_id=existing["id"],
+                    filled_qty=float(existing.get("filled", 0)),
+                    avg_price=float(existing.get("average", 0)),
+                    status=existing.get("status", "unknown"),
+                    timestamp=time.time()
+                )
+                # Cache this result for future lookups
+                with self._lock:
+                    self._intent_cache[intent_id] = result
+                return result
+        except Exception as e:
+            # Order not found or exchange doesn't support fetch_order_by_client_id
+            logger.debug(f"clientOrderId lookup failed (expected if order doesn't exist): {e}")
+
         last_error = None
         for attempt in range(self.max_retries):
             try:

@@ -705,23 +705,48 @@ class FSMTradingEngine:
         """WAIT_FILL: Poll order status and handle fills with PartialFillHandler."""
         # Note: Timeouts handled by _tick_timeouts
         try:
-            # CRITICAL FIX: Rehydrate order_id from persistence if missing
+            # CRITICAL FIX: Multi-stage rehydration with retry logic
             if not st.order_id:
-                logger.warning(f"[WAIT_FILL] {st.symbol} order_id is None - attempting rehydration from persistence")
+                logger.warning(f"[WAIT_FILL] {st.symbol} order_id is None - attempting rehydration")
+
+                # Stage 1: Read from persistence
                 try:
                     persisted = self.portfolio.get_open_buy_order(st.symbol)
                     if persisted and persisted.get("order_id"):
                         st.order_id = persisted["order_id"]
                         st.client_order_id = persisted.get("client_order_id")
-                        logger.info(f"[WAIT_FILL] {st.symbol} order_id rehydrated: {st.order_id}")
+                        logger.info(f"[WAIT_FILL] {st.symbol} order_id rehydrated from persistence: {st.order_id}")
                 except Exception as e:
-                    logger.warning(f"Failed to rehydrate order_id for {st.symbol}: {e}")
+                    logger.debug(f"Persistence rehydration failed for {st.symbol}: {e}")
 
-            # CRITICAL FIX: Validate order_id exists before fetching
-            if not st.order_id:
-                logger.error(f"[WAIT_FILL_ERROR] {st.symbol} order_id is None/empty! Cannot fetch order status. Transitioning to IDLE.")
-                self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
-                return
+                # Stage 2: Lookup via clientOrderId if still missing
+                if not st.order_id and st.client_order_id:
+                    try:
+                        order = self.exchange.fetch_order_by_client_id(st.client_order_id, st.symbol)
+                        if order and order.get("id"):
+                            st.order_id = order["id"]
+                            logger.info(f"[WAIT_FILL] {st.symbol} order_id rehydrated via clientOrderId: {st.order_id}")
+                    except Exception as e:
+                        logger.debug(f"clientOrderId lookup failed for {st.symbol}: {e}")
+
+                # Stage 3: Short retry before giving up
+                if not st.order_id:
+                    if not hasattr(st, 'wait_fill_retry_count'):
+                        st.wait_fill_retry_count = 0
+                    st.wait_fill_retry_count += 1
+
+                    if st.wait_fill_retry_count <= 3:
+                        logger.warning(f"[WAIT_FILL_RETRY] {st.symbol} retry {st.wait_fill_retry_count}/3")
+                        time.sleep(0.25)  # Brief pause before next tick
+                        return
+                    else:
+                        # All retries exhausted
+                        logger.error(f"[WAIT_FILL_ERROR] {st.symbol} order_id is None after rehydration+lookup+retries!")
+                        self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
+                        return
+                else:
+                    # Reset retry counter on success
+                    st.wait_fill_retry_count = 0
 
             order = self.exchange.fetch_order(st.order_id, st.symbol)
 

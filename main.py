@@ -224,14 +224,23 @@ def setup_topcoins(exchange):
 
     # Create managed deques instead of unlimited deques
     topcoins = {}
+    # Import market validation from exchange adapter
+    from adapters.exchange import is_valid_market
+
+    # Count invalid markets for logging
+    invalid_count = 0
+    valid_count = 0
+
     for k in config_module.topcoins_keys:
         symbol = normalized.get(k)
 
-        # CRITICAL FIX: Skip invalid 1-char base symbols (4/USDT, C/USDT, etc.)
-        if symbol and '/' in symbol:
-            base = symbol.split('/')[0]
-            if len(base) <= 1:
-                logger.warning(f"Skipping invalid symbol (1-char base): {symbol}", extra={'event_type': 'INVALID_SYMBOL_FILTERED'})
+        # CRITICAL FIX: Strict market validation (filters 999+ invalid markets)
+        if symbol and symbol in supported:
+            # Get market info from exchange
+            market_info = exchange.markets.get(symbol)
+            if not market_info or not is_valid_market(market_info):
+                invalid_count += 1
+                logger.warning(f"Filtered invalid market: {symbol}", extra={'event_type': 'INVALID_MARKET_FILTERED', 'symbol': symbol})
                 continue
 
         # Skip blacklisted coins
@@ -240,6 +249,7 @@ def setup_topcoins(exchange):
             continue
 
         if symbol in supported:
+            valid_count += 1
             # Create managed deque with reasonable limits and auto-cleanup
             managed_deque = create_managed_deque(
                 name=f"price_history_{symbol}",
@@ -248,7 +258,16 @@ def setup_topcoins(exchange):
             )
             topcoins[symbol] = managed_deque
 
-    logger.info(f"{len(topcoins)} handelbare Coins gefunden")
+    # Log market filtering statistics
+    logger.info(
+        f"Market filtering complete: {valid_count} valid markets selected, {invalid_count} invalid markets filtered",
+        extra={
+            'event_type': 'MARKET_FILTERING_STATS',
+            'valid_count': valid_count,
+            'invalid_count': invalid_count,
+            'total_topcoins': len(topcoins)
+        }
+    )
     return topcoins
 
 
