@@ -1,11 +1,11 @@
 #!/bin/bash
-# Clear Drop Anchors Script
-# Deletes all drop anchor data and resets the system for fresh start
+# Trading Bot Complete Cleanup Script
+# Deletes all bot data (logs, sessions, states, anchors, snapshots) for fresh start
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "  Drop Anchors Cleanup Script"
+echo "  Trading Bot Complete Cleanup Script"
 echo "=========================================="
 echo ""
 
@@ -43,15 +43,24 @@ count_files() {
 
 # Show current state
 echo "Current State:"
-echo "  drop_anchors.json: $(wc -c < drop_anchors.json 2>/dev/null || echo '0') bytes"
+echo "  Log files: $(count_files 'logs')"
+echo "  Session files: $(find sessions -type f 2>/dev/null | wc -l | tr -d ' ')"
+echo "  State DB files: $(find state -name "*.db*" 2>/dev/null | wc -l | tr -d ' ')"
+echo "  Drop window files: $(count_files 'state/drop_windows')"
 echo "  Anchor files: $(count_files 'state/drop_windows/anchors')"
-echo "  Tick files: $(count_files 'state/drop_windows/ticks')"
-echo "  Window files: $(count_files 'state/drop_windows/windows')"
-echo "  Snapshot files: $(count_files 'state/drop_windows/snapshots')"
+echo "  FSM snapshots: $(find sessions -name "*.json" -path "*/fsm_snapshots/*" 2>/dev/null | wc -l | tr -d ' ')"
+echo "  drop_anchors.json: $(wc -c < drop_anchors.json 2>/dev/null || echo '0') bytes"
 echo ""
 
 # Confirm deletion
-read -p "Are you sure you want to delete all anchor data? (yes/no): " -r
+echo -e "${YELLOW}⚠️  This will delete ALL bot data:${NC}"
+echo "   - All log files (*.log, *.jsonl)"
+echo "   - All session data and FSM snapshots"
+echo "   - All state databases (ledger.db, idempotency.db)"
+echo "   - All drop windows, anchors, and ticks"
+echo "   - Python cache (__pycache__)"
+echo ""
+read -p "Are you sure you want to delete ALL bot data? (yes/no): " -r
 echo
 if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
     echo "Aborted."
@@ -62,42 +71,67 @@ echo ""
 echo "Starting cleanup..."
 echo ""
 
-# Clear drop_anchors.json
+# 1. Clear all logs
+if [ -d "logs" ]; then
+    removed=$(count_files 'logs')
+    rm -rf logs/*
+    echo -e "${GREEN}✅ Removed $removed log files${NC}"
+else
+    echo -e "${YELLOW}⚠️  logs directory not found${NC}"
+fi
+
+# 2. Clear all sessions
+if [ -d "sessions" ]; then
+    # Remove all session_* directories
+    removed=$(find sessions -type d -name "session_*" 2>/dev/null | wc -l | tr -d ' ')
+    rm -rf sessions/session_* 2>/dev/null || true
+
+    # Clear current session
+    if [ -d "sessions/current" ]; then
+        rm -rf sessions/current/*
+    fi
+
+    # Remove .DS_Store
+    rm -f sessions/.DS_Store 2>/dev/null || true
+
+    echo -e "${GREEN}✅ Removed $removed session directories and cleared current session${NC}"
+else
+    echo -e "${YELLOW}⚠️  sessions directory not found${NC}"
+fi
+
+# 3. Clear state databases
+if [ -d "state" ]; then
+    removed=$(find state -name "*.db*" 2>/dev/null | wc -l | tr -d ' ')
+    rm -f state/*.db state/*.db-* 2>/dev/null || true
+    echo -e "${GREEN}✅ Removed $removed state database files${NC}"
+else
+    echo -e "${YELLOW}⚠️  state directory not found${NC}"
+fi
+
+# 4. Clear drop_anchors.json
 if [ -f "drop_anchors.json" ]; then
-    echo "{}" > drop_anchors.json
-    echo -e "${GREEN}✅ Cleared drop_anchors.json${NC}"
+    rm -f drop_anchors.json
+    echo -e "${GREEN}✅ Removed drop_anchors.json${NC}"
 else
     echo -e "${YELLOW}⚠️  drop_anchors.json not found, skipping${NC}"
 fi
 
-# Clear anchor directories
+# 5. Clear all drop_windows data (complete directory)
 if [ -d "state/drop_windows" ]; then
-    # Remove all JSON files from subdirectories
-    if [ -d "state/drop_windows/anchors" ]; then
-        removed=$(count_files 'state/drop_windows/anchors')
-        rm -rf state/drop_windows/anchors/*
-        echo -e "${GREEN}✅ Removed $removed anchor files${NC}"
-    fi
-
-    if [ -d "state/drop_windows/ticks" ]; then
-        removed=$(count_files 'state/drop_windows/ticks')
-        rm -rf state/drop_windows/ticks/*
-        echo -e "${GREEN}✅ Removed $removed tick files${NC}"
-    fi
-
-    if [ -d "state/drop_windows/windows" ]; then
-        removed=$(count_files 'state/drop_windows/windows')
-        rm -rf state/drop_windows/windows/*
-        echo -e "${GREEN}✅ Removed $removed window files${NC}"
-    fi
-
-    if [ -d "state/drop_windows/snapshots" ]; then
-        removed=$(count_files 'state/drop_windows/snapshots')
-        rm -rf state/drop_windows/snapshots/*
-        echo -e "${GREEN}✅ Removed $removed snapshot files${NC}"
-    fi
+    removed=$(count_files 'state/drop_windows')
+    rm -rf state/drop_windows
+    mkdir -p state/drop_windows
+    echo -e "${GREEN}✅ Removed $removed drop window files (complete reset)${NC}"
 else
     echo -e "${YELLOW}⚠️  state/drop_windows directory not found${NC}"
+fi
+
+# 6. Clear Python cache
+cache_removed=$(find . -type d -name "__pycache__" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$cache_removed" -gt 0 ]; then
+    find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    find . -type f -name "*.pyc" -delete 2>/dev/null || true
+    echo -e "${GREEN}✅ Removed $cache_removed Python cache directories${NC}"
 fi
 
 echo ""
@@ -107,18 +141,28 @@ echo "=========================================="
 echo ""
 
 # Verify cleanup
-total_remaining=$(count_files 'state/drop_windows')
 echo "Verification:"
-echo "  Total files remaining: $total_remaining"
-echo "  drop_anchors.json: $(cat drop_anchors.json 2>/dev/null || echo 'N/A')"
+echo "  Log files:        $(count_files 'logs')"
+echo "  Session files:    $(find sessions -type f 2>/dev/null | wc -l | tr -d ' ')"
+echo "  State DBs:        $(find state -name "*.db*" 2>/dev/null | wc -l | tr -d ' ')"
+echo "  Drop windows:     $(count_files 'state/drop_windows')"
+echo "  Anchors:          $(test -f "drop_anchors.json" && echo "exists" || echo "removed")"
+echo "  FSM snapshots:    $(find sessions -name "*.json" -path "*/fsm_snapshots/*" 2>/dev/null | wc -l | tr -d ' ')"
 echo ""
 
-if [ "$total_remaining" -eq 0 ]; then
-    echo -e "${GREEN}✅ All anchor data successfully deleted${NC}"
+total_logs=$(count_files 'logs')
+total_sessions=$(find sessions -type f 2>/dev/null | wc -l | tr -d ' ')
+total_state=$(find state -name "*.db*" 2>/dev/null | wc -l | tr -d ' ')
+total_drops=$(count_files 'state/drop_windows')
+
+if [ "$total_logs" -eq 0 ] && [ "$total_sessions" -eq 0 ] && [ "$total_state" -eq 0 ] && [ "$total_drops" -eq 0 ]; then
+    echo -e "${GREEN}✅ All bot data successfully deleted!${NC}"
     echo ""
-    echo "The bot will start with fresh anchors on next run."
+    echo "🚀 The bot is now in a completely clean state."
+    echo "   All logs, sessions, states, and anchors have been removed."
 else
-    echo -e "${YELLOW}⚠️  Warning: $total_remaining files still remain${NC}"
+    echo -e "${YELLOW}⚠️  Warning: Some files still remain${NC}"
+    echo "   Logs: $total_logs | Sessions: $total_sessions | State: $total_state | Drops: $total_drops"
 fi
 
 echo ""
