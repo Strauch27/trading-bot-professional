@@ -52,6 +52,7 @@ from services import (
     OrderService,
     PnLService,
 )
+from services.cooldown import get_cooldown_manager
 from telemetry.phase_metrics import PHASE_MAP, phase_changes, phase_code, start_metrics_server, update_stuck_metric
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,9 @@ class FSMTradingEngine:
 
         # P2-3: BuyFlowLogger for step-by-step evaluation logging
         self.buy_flow = get_buy_flow_logger()
+
+        # Symbol Cooldown Manager for failed order protection
+        self.cooldown_manager = get_cooldown_manager()
 
         # Metrics
         self.metrics = type('Metrics', (), {
@@ -284,6 +288,8 @@ class FSMTradingEngine:
                 "volume": md.get("volume", 0.0)
             }
         )
+        if getattr(self, "exchange", None):
+            ctx.data.setdefault("exchange", self.exchange)
 
         # Phase-specific event dispatch
         if symbol == list(self.watchlist.keys())[0]:
@@ -767,6 +773,11 @@ class FSMTradingEngine:
             price = comp.price
             amount = comp.amount
 
+            ctx.data["order_price"] = price
+            ctx.data["order_qty"] = amount
+            if getattr(self, "exchange", None):
+                ctx.data.setdefault("exchange", self.exchange)
+
             logger.info(
                 f"[PRE_FLIGHT] {st.symbol} PASSED "
                 f"(q_price={price:.8f}, q_amount={amount:.6f}, "
@@ -828,6 +839,9 @@ class FSMTradingEngine:
                         target_qty=amount,
                         status="pending"
                     )
+
+                ctx.order_id = st.order_id
+                ctx.data["client_order_id"] = intent_id
 
                 # P2-3: Log order placement step
                 try:
@@ -931,7 +945,41 @@ class FSMTradingEngine:
                     # Reset retry counter on success
                     st.wait_fill_retry_count = 0
 
-            order = self.exchange.fetch_order(st.order_id, st.symbol)
+            if not getattr(self, "exchange", None):
+                logger.error(f"[WAIT_FILL] {st.symbol} missing exchange handle - aborting order {st.order_id}")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            try:
+                order = self.exchange.fetch_order(st.order_id, st.symbol)
+            except Exception as fetch_error:
+                retry_attr = "_fetch_retry_count"
+                current_retry = getattr(st, retry_attr, 0) + 1
+                setattr(st, retry_attr, current_retry)
+                logger.warning(
+                    f"[WAIT_FILL] {st.symbol} fetch_order failed (attempt {current_retry}): {fetch_error}"
+                )
+                if current_retry >= 3:
+                    logger.error(f"[WAIT_FILL] {st.symbol} aborting after repeated fetch_order failures")
+                    self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                else:
+                    time.sleep(0.1)
+                return
+
+            if not isinstance(order, dict):
+                logger.error(
+                    f"[WAIT_FILL] {st.symbol} received invalid order payload ({type(order).__name__}) for {st.order_id}: {order!r}"
+                )
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            if not order:
+                logger.error(f"[WAIT_FILL] {st.symbol} fetch_order returned empty payload for {st.order_id}")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            if hasattr(st, "_fetch_retry_count"):
+                setattr(st, "_fetch_retry_count", 0)
 
             # FSM PARITY FIX (LÜCKE 2): Implement wait_for_fill() timeout policy
             # - Total timeout: 30s since order placement
@@ -1124,6 +1172,11 @@ class FSMTradingEngine:
                          decision_id=st.decision_id)
                 except Exception as e:
                     logger.debug(f"Failed to emit ORDER_CANCELED: {e}")
+
+                # FIX: Set cooldown after canceled order to prevent immediate re-entry loop
+                cooldown_duration = getattr(config, 'SYMBOL_COOLDOWN_AFTER_FAILED_ORDER_S', 60)
+                self.cooldown_manager.set(st.symbol, cooldown_duration)
+                logger.info(f"Symbol cooldown set for {st.symbol}: {cooldown_duration}s after order canceled")
 
                 self._emit_event(st, FSMEvent.ORDER_CANCELED, ctx)
 

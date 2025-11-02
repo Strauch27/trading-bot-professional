@@ -343,7 +343,7 @@ EXIT_TP_MARKET = True  # Take profit as market order
 # =============================================================================
 
 # CRITICAL FIX (C-CONFIG-03): Single source of truth for max concurrent positions
-MAX_CONCURRENT_POSITIONS = 10  # Maximum concurrent positions (primary parameter)
+MAX_CONCURRENT_POSITIONS = 3  # Maximum concurrent positions (adjusted for ~130 USDT budget with 25 USDT position size)
 MAX_TRADES = MAX_CONCURRENT_POSITIONS  # DEPRECATED: Use MAX_CONCURRENT_POSITIONS instead
 POSITION_SIZE_USDT = 25.0  # 25 USDT pro Kauf
 ALLOW_AUTO_SIZE_UP = True  # Menge leicht erhöhen bei MinNotional
@@ -352,6 +352,7 @@ MAX_AUTO_SIZE_UP_ABS_USDT = 5.0  # Absolut gedeckelt bei +5.0 USDT
 MAX_PER_SYMBOL_USD = 60.0  # Maximal 60 USDT pro Coin
 TRADE_TTL_MIN = 120  # Position nach 120 Min zwangsschließen
 COOLDOWN_MIN = 15  # 15 Min Pause nach Verkauf
+SYMBOL_COOLDOWN_AFTER_FAILED_ORDER_S = 60  # 60s cooldown after failed/canceled orders to prevent loops
 ALLOW_DUPLICATE_COINS = False  # Nur eine Position pro Symbol
 
 # =============================================================================
@@ -473,9 +474,8 @@ BUY_GTC_MIN_PARTIAL = 0.25
 BUY_GTC_WAIT_DYNAMIC = True
 USE_BUY_ESCALATION = True
 BUY_ESCALATION_STEPS = [
-    {"tif": "IOC", "premium_bps": 10, "max_attempts": 2},  # Try IOC twice at 10bps
-    {"tif": "IOC", "premium_bps": 30, "max_attempts": 2},  # Try IOC twice at 30bps
-    {"tif": "GTC", "premium_bps": 50, "max_attempts": 1},  # Fallback to GTC at 50bps
+    {"tif": "IOC", "premium_bps": 20, "max_attempts": 1},  # Single IOC attempt at 20bps (more aggressive pricing)
+    {"tif": "GTC", "premium_bps": 50, "max_attempts": 1},  # Fallback to GTC at 50bps if IOC fails
 ]
 IOC_ORDER_TTL_MS = 2000  # Increased from 600ms to 2s for better fill rates
 ENTRY_LIMIT_OFFSET_BPS = 0  # 0 = deaktiviert

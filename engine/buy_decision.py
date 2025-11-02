@@ -84,6 +84,34 @@ class BuyDecisionHandler:
         try:
             trace_step("decision_started", symbol=symbol, price=current_price, decision_id=decision_id)
 
+            # 0a. Check symbol cooldown (failed order protection)
+            if hasattr(self.engine, 'cooldown_manager') and self.engine.cooldown_manager.is_active(symbol):
+                remaining_s = self.engine.cooldown_manager.get_remaining(symbol)
+                logger.info(f"Symbol {symbol} in cooldown: {remaining_s:.0f}s remaining")
+
+                self.engine.buy_flow_logger.step(
+                    0, "Symbol Cooldown Check", "BLOCKED",
+                    f"{remaining_s:.0f}s remaining after failed order"
+                )
+
+                decision_time = time.time() - decision_start_time
+                self.engine.monitoring.performance_metrics['decision_times'].append(decision_time)
+
+                self.engine.jsonl_logger.decision_end(
+                    decision_id=decision_id,
+                    symbol=symbol,
+                    decision="blocked",
+                    reason=f"symbol_cooldown:{remaining_s:.0f}s",
+                    decision_time_ms=decision_time * 1000
+                )
+
+                self.engine.buy_flow_logger.end_evaluation(
+                    "BLOCKED",
+                    decision_time * 1000,
+                    reason=f"symbol_cooldown_{remaining_s:.0f}s"
+                )
+                return None
+
             # 0. NEW PIPELINE: Read drop data from MarketSnapshot store
             # RollingWindows are now updated centrally in MarketDataService
             snapshot, snapshot_ts = self.engine.get_snapshot_entry(symbol)
@@ -423,6 +451,7 @@ class BuyDecisionHandler:
     def execute_buy_order(self, symbol: str, coin_data: Dict, current_price: float, signal: str):
         """Execute buy order via Order Service"""
         decision_id = self.engine.current_decision_id or new_decision_id()
+        decision_start_time = time.time()
 
         # CRITICAL: Log buy candidate for debugging
         usdt_balance = self.engine.portfolio.get_balance("USDT")
@@ -457,6 +486,14 @@ class BuyDecisionHandler:
                     }
                 )
                 print(f"\n[DEBUG] BUY SKIP: quote_budget=None for {symbol}\n", flush=True)
+
+                # FIX: Log end_evaluation for buy_flow_logger
+                duration_ms = (time.time() - decision_start_time) * 1000
+                self.engine.buy_flow_logger.end_evaluation(
+                    "BLOCKED",
+                    duration_ms,
+                    reason="insufficient_budget_or_missing_data"
+                )
                 return
 
             # Phase 1: Risk Limits Check - BEFORE order placement
@@ -517,6 +554,17 @@ class BuyDecisionHandler:
                         print(f"\n[ERROR] Decision outcome logging failed for {symbol}: {outcome_log_error}\n", flush=True)
                         logger.warning(f"Decision outcome logging failed for {symbol}: {outcome_log_error}")
 
+                    # FIX: Log end_evaluation for buy_flow_logger
+                    try:
+                        duration_ms = (time.time() - decision_start_time) * 1000
+                        self.engine.buy_flow_logger.end_evaluation(
+                            "BLOCKED",
+                            duration_ms,
+                            reason=f"risk_limit:{blocking_limit}"
+                        )
+                    except Exception as end_eval_error:
+                        print(f"\n[ERROR] buy_flow_logger.end_evaluation failed for {symbol}: {end_eval_error}\n", flush=True)
+
                     print(f"\n[DEBUG] ORDER BLOCKED - RETURNING for {symbol}\n", flush=True)
                     return
 
@@ -529,6 +577,14 @@ class BuyDecisionHandler:
             current_price = self._apply_spread_slippage_caps(symbol, coin_data, current_price, decision_id)
             if not current_price:
                 print(f"\n[DEBUG] BUY SKIP: spread/slippage check failed for {symbol}\n", flush=True)
+
+                # FIX: Log end_evaluation for buy_flow_logger
+                duration_ms = (time.time() - decision_start_time) * 1000
+                self.engine.buy_flow_logger.end_evaluation(
+                    "BLOCKED",
+                    duration_ms,
+                    reason="spread_slippage_check_failed"
+                )
                 return
 
             amount = quote_budget / current_price
@@ -540,6 +596,14 @@ class BuyDecisionHandler:
             # Dry-Run Preview
             if not self._handle_dry_run_preview(symbol, current_price, amount, quote_budget, signal, decision_id):
                 print(f"\n[DEBUG] BUY SKIP: dry-run preview blocked for {symbol}\n", flush=True)
+
+                # FIX: Log end_evaluation for buy_flow_logger
+                duration_ms = (time.time() - decision_start_time) * 1000
+                self.engine.buy_flow_logger.end_evaluation(
+                    "BLOCKED",
+                    duration_ms,
+                    reason="dry_run_preview_blocked"
+                )
                 return
 
             # Assemble intent for OrderRouter execution
@@ -559,6 +623,14 @@ class BuyDecisionHandler:
             intent = assemble_intent(signal_payload, guards_payload, risk_payload)
             if not intent:
                 logger.warning(f"BUY intent assembly returned None for {symbol}")
+
+                # FIX: Log end_evaluation for buy_flow_logger
+                duration_ms = (time.time() - decision_start_time) * 1000
+                self.engine.buy_flow_logger.end_evaluation(
+                    "BLOCKED",
+                    duration_ms,
+                    reason="intent_assembly_failed"
+                )
                 return
 
             intent_metadata = {
