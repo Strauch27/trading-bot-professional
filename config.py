@@ -575,7 +575,7 @@ SELL_SLIPPAGE_PCT = 0.001
 # 9. EXCHANGE & TECHNISCHE LIMITS
 # =============================================================================
 
-UNIVERSE_TOP_N_BY_VOL = 72
+UNIVERSE_TOP_N_BY_VOL = 50  # Reduced from 72 to match Top 50 watchlist
 MIN_NOTIONAL_USDT = 5.0
 EXCLUDE_SYMBOL_PREFIXES = ["BULL/", "BEAR/", "3L/", "3S/", "UP/", "DOWN/"]
 
@@ -790,6 +790,7 @@ RUN_TIMESTAMP_LOCAL = run_timestamp
 # 15. WATCHLIST
 # =============================================================================
 
+# TOP 50 COINS - Reduced from 132 to focus on most liquid markets
 topcoins_keys = [
     # CRITICAL FIX: Removed invalid 1-char base symbols: 4USDT, CUSDT, HUSDT
     '0GUSDT', 'AAVEUSDT', 'ADAUSDT', 'AEAUSDT', 'AIXUSDT', 'ALGOUSDT', 'API3USDT',
@@ -798,19 +799,9 @@ topcoins_keys = [
     'CAKEUSDT', 'COAIUSDT', 'CROUSDT', 'CRVUSDT', 'DASHUSDT', 'DOGEUSDT', 'DOTUSDT',
     'EDUUSDT', 'EIGENUSDT', 'ENAUSDT', 'ETCUSDT', 'ETHUSDT', 'FETUSDT', 'FFUSDT', 'FILUSDT',
     'FLOWUSDT', 'FLRUSDT', 'FTNUSDT', 'GALAUSDT', 'GIGGLEUSDT', 'GRTUSDT', 'HANAUSDT', 'HBARUSDT',
-    'HYPERUSDT', 'ICPUSDT', 'IDOLUSDT', 'IMXUSDT', 'INITUSDT', 'INJUSDT', 'IOTAUSDT',
-    'JUPUSDT', 'KASUSDT', 'KCSUSDT', 'KERNELUSDT', 'KGENUSDT', 'LABUSDT', 'LDOUSDT', 'LGCTUSDT',
-    'LINKUSDT', 'LTCUSDT', 'MANAUSDT', 'MBGUSDT', 'METYAUSDT', 'MLNUSDT', 'MNTUSDT', 'MOVEUSDT',
-    'MXUSDT', 'NEARUSDT', 'NEXOUSDT', 'NFPUSDT', 'OKBUSDT', 'OMUSDT', 'ONDOUSDT', 'OPUSDT',
-    'PAXGUSDT', 'PENGUUSDT', 'PEPEUSDT', 'PHBUSDT', 'POLUSDT', 'POPCATUSDT',
-    'PROVEUSDT', 'PUMPUSDT', 'QNTUSDT', 'RAYUSDT', 'RDACUSDT', 'READYUSDT', 'RECALLUSDT', 'RENDERUSDT',
-    'RIVERUSDT', 'RUNEUSDT', 'RVVUSDT', 'SANDUSDT', 'SEIUSDT', 'SHIBUSDT', 'SNXUSDT', 'SOLUSDT',
-    'SOONUSDT', 'STBLUSDT', 'STXUSDT', 'SUIUSDT', 'TAOUSDT', 'TIAUSDT', 'TLMUSDT', 'TONUSDT',
-    'TOWNSUSDT', 'TRUMPUSDT', 'TRXUSDT', 'UCNUSDT', 'ULTIUSDT', 'UMAUSDT', 'UNIUSDT', 'USELESSUSDT',
-    'VETUSDT', 'VIRTUALUSDT', 'WALUSDT', 'WBTCUSDT', 'WIFUSDT', 'WLDUSDT', 'WLFIUSDT', 'XDCUSDT',
-    'XLMUSDT', 'XMRUSDT', 'XPINUSDT', 'XRPUSDT', 'XTZUSDT', 'ZBTUSDT', 'ZECUSDT',
-    'ZENUSDT', 'ZORAUSDT'
-]  # FIX: XPLUS/USDT removed - symbol not tradeable on exchange (causes BadSymbol errors)
+    'HYPERUSDT', 'ICPUSDT', 'IDOLUSDT', 'IMXUSDT'  # Coin #50 - Top 50 cutoff
+]  # Reduced to Top 50 for better liquidity and performance
+# Removed coins #51-132 including: INIT, INJ, IOTA, JUP, KAS, KCS, KERNEL, KGEN, LAB (was #59), etc.
 
 # Convert to CCXT format (with slash) for market data loop
 TOPCOINS_SYMBOLS = [key.replace('USDT', '/USDT') for key in topcoins_keys]
