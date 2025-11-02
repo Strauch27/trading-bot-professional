@@ -51,7 +51,11 @@ def is_valid_market(m: dict) -> bool:
     - Quote currency (USDT or USDC only)
     - Market type (spot only)
     - Status (active only)
-    - Minimum lot size and notional value
+    - Precision (price and amount must be defined)
+    - Minimum notional value (>= 1.0 USDT)
+
+    CRITICAL FIX: Allow min_amount == 0 (common on many exchanges)
+    Decision is based on min_notional and precision, not min_amount.
 
     Args:
         m: Market dict from exchange.markets
@@ -82,13 +86,20 @@ def is_valid_market(m: dict) -> bool:
     if not m.get("spot", True):
         return False
 
-    # Validate minimum lot and notional
+    # CRITICAL FIX: Validate precision and min notional (allow min_amount == 0)
     limits = m.get("limits", {})
-    min_amt = float(limits.get("amount", {}).get("min") or 0)
     min_notional = float(limits.get("cost", {}).get("min") or 0)
 
-    # Min amount must exist and min notional >= 1.0 USDT
-    if min_amt <= 0 or min_notional < 1.0:
+    prec = m.get("precision", {}) or {}
+    has_precision = (prec.get("price") is not None) and (prec.get("amount") is not None)
+
+    # Decision: Must have price/amount precision AND min notional >= 1.0 USDT
+    if not has_precision:
+        logger.debug(f"Invalid precision for {sym}: price={prec.get('price')}, amount={prec.get('amount')}")
+        return False
+
+    if min_notional < 1.0:
+        logger.debug(f"Invalid min notional for {sym}: {min_notional} < 1.0")
         return False
 
     return True

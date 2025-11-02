@@ -15,6 +15,7 @@ Thread-safe implementation with comprehensive logging.
 
 import logging
 import threading
+import time
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -227,45 +228,87 @@ class MarketGuards:
             Tuple of (passes_all, list_of_failed_guards)
         """
         failed_guards = []
+        guard_details = {}  # CRITICAL FIX: Track detailed guard values for logging
 
         # BTC Trend Filter
         if self.use_btc_filter:
-            if not self._passes_btc_guard(symbol):
+            passes = self._passes_btc_guard(symbol)
+            guard_details["btc_trend"] = {"passes": passes, "enabled": True}
+            if not passes:
                 failed_guards.append("btc_trend")
+        else:
+            guard_details["btc_trend"] = {"passes": True, "enabled": False}
 
         # Falling Coins Filter
         if self.use_falling_coins_filter:
-            if not self._passes_falling_coins_guard(symbol):
+            passes = self._passes_falling_coins_guard(symbol)
+            # Get current falling percentage for logging
+            pct_falling = self._market_conditions.get('percentage_falling', 0)
+            guard_details["falling_coins"] = {
+                "passes": passes,
+                "enabled": True,
+                "pct_falling": pct_falling,
+                "threshold": self.falling_coins_threshold
+            }
+            if not passes:
                 failed_guards.append("falling_coins")
+        else:
+            guard_details["falling_coins"] = {"passes": True, "enabled": False}
 
         # SMA Guard
         if self.use_sma_guard:
-            if not self._passes_sma_guard(symbol, price):
+            passes = self._passes_sma_guard(symbol, price)
+            guard_details["sma"] = {"passes": passes, "enabled": True, "price": price}
+            if not passes:
                 failed_guards.append("sma")
+        else:
+            guard_details["sma"] = {"passes": True, "enabled": False}
 
         # Volume Guard
         if self.use_volume_guard:
-            if not self._passes_volume_guard(symbol):
+            passes = self._passes_volume_guard(symbol)
+            guard_details["volume"] = {"passes": passes, "enabled": True}
+            if not passes:
                 failed_guards.append("volume")
+        else:
+            guard_details["volume"] = {"passes": True, "enabled": False}
 
         # Spread Guard
         if self.use_spread_guard:
-            if not self._passes_spread_guard(symbol):
+            passes = self._passes_spread_guard(symbol)
+            guard_details["spread"] = {"passes": passes, "enabled": True}
+            if not passes:
                 failed_guards.append("spread")
+        else:
+            guard_details["spread"] = {"passes": True, "enabled": False}
 
         # Volatility Sigma Guard
         if self.use_vol_sigma_guard:
-            if not self._passes_vol_sigma_guard(symbol):
+            passes = self._passes_vol_sigma_guard(symbol)
+            guard_details["vol_sigma"] = {"passes": passes, "enabled": True}
+            if not passes:
                 failed_guards.append("vol_sigma")
+        else:
+            guard_details["vol_sigma"] = {"passes": True, "enabled": False}
 
         passes_all = len(failed_guards) == 0
 
-        # Explizit Guard-Block loggen für bessere Transparenz
+        # CRITICAL FIX: Enhanced guard logging with detailed values
+        # Log every guard check (not just failures) to guards_*.jsonl
+        try:
+            from core.logger_factory import DECISION_LOG, log_event
+            log_event(DECISION_LOG(), "guard_check",
+                     symbol=symbol,
+                     price=price,
+                     passes_all=passes_all,
+                     failed_guards=failed_guards,
+                     guard_details=guard_details,
+                     timestamp=time.time())
+        except Exception as e:
+            logger.debug(f"Failed to log guard check: {e}")
+
         if not passes_all:
             logger.info(f"[GUARD_BLOCK] {symbol} failed: {','.join(failed_guards)} @ {price:.8f}")
-            # Simple JSON log event ohne komplexe Imports
-            logger.info(f"GUARD_BLOCK_EVENT: symbol={symbol}, price={price:.8f}, failed={failed_guards}",
-                       extra={'event_type': 'GUARD_BLOCK_EVENT', 'symbol': symbol, 'failed': failed_guards})
 
         # Detailstatus & sprechende Zusammenfassung
         details = self.get_detailed_guard_status(symbol, price)

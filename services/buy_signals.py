@@ -187,8 +187,11 @@ class BuySignalService:
                     threshold_used = trigger_price
 
                 # Calculate metrics
-                drop_ratio = (current_price / anchor) - 1.0  # Negative = drop
-                drop_pct = drop_ratio * 100.0
+                # CRITICAL FIX: Drop should be positive when price falls
+                # Old: (current_price / anchor) - 1.0 gave negative values
+                # New: (anchor - current_price) / anchor gives positive drops
+                drop_ratio = (anchor - current_price) / anchor  # Positive = drop
+                drop_pct = drop_ratio * 100.0  # Now positive when price drops
                 restweg_ratio = (current_price / anchor) - self.drop_trigger_value
                 restweg_bps = int(round(restweg_ratio * 10000))  # Basis points
 
@@ -294,8 +297,9 @@ class BuySignalService:
                     continue
 
                 # Calculate drop metrics
-                drop_ratio = (current_price / anchor) - 1.0
-                drop_pct = drop_ratio * 100.0
+                # CRITICAL FIX: Drop should be positive when price falls
+                drop_ratio = (anchor - current_price) / anchor  # Positive = drop
+                drop_pct = drop_ratio * 100.0  # Now positive when price drops
                 trigger_price = anchor * self.drop_trigger_value
                 restweg_ratio = (current_price / anchor) - self.drop_trigger_value
                 restweg_bps = int(round(restweg_ratio * 10000))
@@ -310,8 +314,8 @@ class BuySignalService:
                     "hit_trigger": current_price <= trigger_price
                 })
 
-            # Sort by drop percentage (most negative first)
-            drops.sort(key=lambda x: x["drop_pct"])
+            # Sort by drop percentage (highest drop first - now positive values)
+            drops.sort(key=lambda x: x["drop_pct"], reverse=True)
             return drops[:limit]
 
     def get_statistics(self) -> Dict[str, Any]:
