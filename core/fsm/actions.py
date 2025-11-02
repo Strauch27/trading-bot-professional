@@ -220,8 +220,8 @@ def action_cancel_and_cleanup(ctx: EventContext, coin_state: CoinState) -> None:
 
 
 def action_cleanup_cancelled(ctx: EventContext, coin_state: CoinState) -> None:
-    """Transition: WAIT_FILL → IDLE (cancelled)"""
-    coin_state.note = "order cancelled"
+    """Transition: WAIT_FILL → IDLE (canceled) - legacy name for compatibility."""
+    coin_state.note = "order canceled"
     # CRITICAL FIX: Clear order IDs on cancellation (final state for this path)
     coin_state.order_id = None
     coin_state.client_order_id = None
@@ -487,3 +487,7 @@ def action_safe_halt(ctx: EventContext, coin_state: CoinState) -> None:
                   reason="manual_halt")
     except Exception as e:
         logger.debug(f"Failed to log safe_halt: {e}")
+
+
+# Alias for American spelling (consistency with ORDER_CANCELED event)
+action_cleanup_canceled = action_cleanup_cancelled

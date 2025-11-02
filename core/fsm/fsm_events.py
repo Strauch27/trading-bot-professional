@@ -36,10 +36,9 @@ class FSMEvent(Enum):
     BUY_ORDER_PARTIAL = auto()       # Buy order partially filled
     BUY_ORDER_TIMEOUT = auto()       # Buy order timed out
     BUY_ORDER_REJECTED = auto()      # Exchange rejected buy order
-    BUY_ORDER_CANCELLED = auto()     # Buy order was cancelled
     BUY_ABORTED = auto()             # Buy aborted (pre-flight failure, etc.)
     ORDER_PLACEMENT_FAILED = auto()  # Order placement failed (e.g. insufficient funds)
-    ORDER_CANCELED = auto()          # Generic order cancelled event
+    ORDER_CANCELED = auto()          # Generic order canceled event (buy or sell)
 
     # Position lifecycle events
     POSITION_OPENED = auto()         # Position successfully opened
@@ -58,12 +57,16 @@ class FSMEvent(Enum):
     SELL_ORDER_PARTIAL = auto()      # Sell order partially filled
     SELL_ORDER_TIMEOUT = auto()      # Sell order timed out
     SELL_ORDER_REJECTED = auto()     # Exchange rejected sell order
-    SELL_ORDER_CANCELLED = auto()    # Sell order was cancelled
 
     # System events
     COOLDOWN_EXPIRED = auto()        # Cooldown period ended
     ERROR_OCCURRED = auto()          # Unhandled error
     MANUAL_HALT = auto()             # Manual intervention required
+
+    # Additional FSM events (used in engine)
+    NO_EXIT_SIGNAL = auto()          # No exit signal detected, continue holding
+    PARTIAL_FILL_RETRY = auto()      # Retry after partial fill
+    TRADE_COMPLETE = auto()          # Trade completed (for POST_TRADE phase)
 
 
 class EventContext:

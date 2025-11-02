@@ -380,8 +380,8 @@ def log_mexc_cancel(order_id: str, symbol: str, reason: str = None):
     """Log MEXC order cancellation"""
     logging.getLogger("mexc").info(json.dumps({
         "ts": _utc_iso(),
-        "event": "ORDER_CANCELLED",
-        "event_type": "MEXC_ORDER_CANCELLED",
+        "event": "ORDER_CANCELED",
+        "event_type": "MEXC_ORDER_CANCELED",
         "order_id": order_id,
         "symbol": symbol,
         "reason": reason

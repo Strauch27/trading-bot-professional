@@ -44,7 +44,8 @@ class TransitionTable:
             action_cancel_and_cleanup,
             action_check_cooldown,
             action_check_exit,
-            action_cleanup_cancelled,
+            action_cleanup_canceled,
+            action_cleanup_cancelled,  # Legacy alias
             action_close_position,
             action_continue_holding,
             action_evaluate_entry,
@@ -95,8 +96,7 @@ class TransitionTable:
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_FILLED, Phase.POSITION, action_open_position)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_PARTIAL, Phase.WAIT_FILL, action_handle_partial_buy)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_TIMEOUT, Phase.IDLE, action_cancel_and_cleanup)
-        self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_CANCELLED, Phase.IDLE, action_cleanup_cancelled)  # British spelling
-        self._add(Phase.WAIT_FILL, FSMEvent.ORDER_CANCELED, Phase.IDLE, action_cleanup_cancelled)  # FSM Parity: Generic cancel
+        self._add(Phase.WAIT_FILL, FSMEvent.ORDER_CANCELED, Phase.IDLE, action_cleanup_canceled)  # Generic cancel event (American spelling)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ABORTED, Phase.IDLE, action_cleanup_cancelled)  # FSM Parity: Abort without order_id
         self._add(Phase.WAIT_FILL, FSMEvent.ERROR_OCCURRED, Phase.IDLE, action_cleanup_cancelled)
 

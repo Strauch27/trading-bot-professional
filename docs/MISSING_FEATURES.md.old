@@ -1,0 +1,259 @@
+# Missing Features & Services - Legacy vs FSM
+
+**Analysis Date**: 2025-11-01
+**Scope**: Complete system review - ALL services, handlers, managers
+**Finding**: FSM is missing **21 critical services/components**
+
+---
+
+## 🔴 CRITICAL SERVICES MISSING IN FSM
+
+### 1. Order Management & Safety
+
+| Service | Legacy | FSM | Impact |
+|---------|--------|-----|--------|
+| **OrderRouter** | ✅ services/order_router.py | ❌ | 🔴 No idempotent orders → Duplicate fills possible |
+| **Reconciler** | ✅ services/reconciler.py | ❌ | 🔴 No state sync → Desyncs from exchange |
+| **ExchangeWrapper** | ✅ | ❌ | 🔴 No idempotency layer |
+| **OrderTelemetry** | ✅ telemetry/jsonl_writer.py | ❌ | ⚠️ No order event tracking |
+
+**Impact**: Without these, FSM can place duplicate orders and lose sync with exchange!
+
+---
+
+### 2. Position & Exit Management
+
+| Component | Legacy | FSM | Impact |
+|-----------|--------|-----|--------|
+| **PositionManager** | ✅ engine/position_manager.py (700 lines) | ❌ | 🔴 No dynamic TP/SL switching |
+| **ExitEngine** | ✅ engine/exit_engine.py (254 lines) | ❌ | 🔴 No exit rule priority |
+| **ExitHandler** | ✅ engine/exit_handler.py | ❌ | ⚠️ Exit orchestration inline |
+| **TrailingStopManager** | ✅ services/trailing.py | ❌ | ⚠️ Trailing logic inline |
+
+**Impact**: FSM has NO adaptive exit management and NO rule prioritization!
+
+---
+
+### 3. Entry & Signal Management
+
+| Component | Legacy | FSM | Impact |
+|-----------|--------|-----|--------|
+| **BuyDecisionHandler** | ✅ engine/buy_decision.py | ❌ | ⚠️ Buy orchestration inline |
+| **Stabilizer** | ✅ signals/confirm.py | ❌ | ⚠️ No signal confirmation |
+| **DropTrigger** | ✅ signals/drop_trigger.py | ❌ | ⚠️ Drop detection inline |
+| **RollingWindows** | ✅ Per-symbol windows | ❌ | ⚠️ No sliding windows |
+| **SizingService** | ✅ services/sizing_service.py | ❌ | ⚠️ Sizing inline |
+
+**Impact**: FSM has less sophisticated entry logic, no signal stabilization
+
+---
+
+### 4. Monitoring & Telemetry
+
+| Service | Legacy | FSM | Impact |
+|---------|--------|-----|--------|
+| **AdaptiveLogger** | ✅ core/logging/adaptive_logger.py | ❌ | ⚠️ No adaptive log levels |
+| **JsonlLogger** | ✅ core/logging/logger.py | ❌ | ⚠️ No JSONL event logs |
+| **BuyFlowLogger** | ✅ services/buy_flow_logger.py | ❌ | ⚠️ No buy flow tracking |
+| **EngineMonitoring** | ✅ engine/monitoring.py | ❌ | ⚠️ No performance metrics |
+| **ShutdownCoordinator** | ✅ services/shutdown_coordinator.py | ❌ | ⚠️ No graceful shutdown |
+
+**Impact**: FSM has minimal observability compared to Legacy
+
+---
+
+### 5. Data & Analysis
+
+| Service | Legacy | FSM | Impact |
+|---------|--------|-----|--------|
+| **RollingStats** | ✅ core/utils/telemetry.py | ❌ | ⚠️ No rolling statistics |
+| **PnLTracker** | ✅ core/utils/pnl.py | ❌ | ⚠️ Uses PnLService only |
+
+---
+
+## ✅ SHARED SERVICES (Both use these)
+
+| Service | Usage |
+|---------|-------|
+| BuySignalService | ✅ Both - Buy signal evaluation |
+| MarketGuards | ✅ Both - Entry condition checks |
+| MarketDataProvider | ✅ Both - Price data & caching |
+| OrderService | ✅ Both - Basic order placement |
+| OrderCache | ✅ Both - Order status caching |
+| PnLService | ✅ Both - PnL calculations |
+| ExchangeAdapter | ✅ Both - Exchange API wrapper |
+| ExitManager | ✅ Both - Exit signal queue |
+| SignalManager | ✅ Both - Signal coordination |
+| Telegram | ✅ Both - Notifications |
+
+---
+
+## 🟢 FSM-SPECIFIC COMPONENTS (Not in Legacy)
+
+| Component | Purpose |
+|-----------|---------|
+| FSM StateMachine | State transition management |
+| PartialFillHandler | FSM-based partial fill logic |
+| PhaseLogger | FSM transition logging |
+| PortfolioTx | FSM transaction manager |
+| SnapshotManager | FSM state snapshots |
+| TimeoutManager | FSM timeout management |
+| Metrics/Stats | FSM-specific telemetry |
+
+**Note**: These are FSM infrastructure, NOT trading features
+
+---
+
+## 📊 SERVICE DEPENDENCY MAP
+
+### Legacy Engine Flow:
+```
+1. Entry: BuyDecisionHandler → BuySignalService → MarketGuards
+2. Order: OrderRouter → Reconciler → ExchangeWrapper → Exchange
+3. Position: PositionManager → TrailingStopManager → ExitManager
+4. Exit: ExitEngine.choose() → ExitHandler → OrderRouter
+5. Monitoring: AdaptiveLogger, JsonlLogger, Monitoring, Telemetry
+```
+
+### FSM Engine Flow:
+```
+1. Entry: FSMEngine → BuySignalService → MarketGuards
+2. Order: FSMEngine → OrderService → Exchange (NO IDEMPOTENCY!)
+3. Position: FSMEngine inline logic (NO MANAGER!)
+4. Exit: FSMEngine inline logic (NO ENGINE!)
+5. Monitoring: PhaseLogger only
+```
+
+---
+
+## 🔴 CRITICAL ARCHITECTURAL DIFFERENCES
+
+### Legacy: Layered Architecture
+```
+┌─────────────────────────────────┐
+│   TradingEngine (Orchestration) │
+├─────────────────────────────────┤
+│ Handlers: Buy, Position, Exit  │
+├─────────────────────────────────┤
+│ Services: Router, Reconciler    │
+├─────────────────────────────────┤
+│ Safety: Idempotency, Sync       │
+└─────────────────────────────────┘
+```
+
+### FSM: Monolithic FSM
+```
+┌─────────────────────────────────┐
+│ FSMEngine (All logic inline)   │
+├─────────────────────────────────┤
+│ Services: Only basic ones       │
+├─────────────────────────────────┤
+│ Safety: Minimal                 │
+└─────────────────────────────────┘
+```
+
+---
+
+## 🚨 HIGH-RISK GAPS
+
+### 1. No Duplicate Order Protection
+**Legacy**: OrderRouter tracks intent_id, prevents duplicate placement
+**FSM**: Direct OrderService calls → Can place same order twice on retry!
+
+### 2. No Exchange State Reconciliation
+**Legacy**: Reconciler syncs Portfolio with actual exchange fills
+**FSM**: No reconciliation → State can drift from exchange!
+
+### 3. No Exit Rule Prioritization
+**Legacy**: HARD_SL > HARD_TP > TRAIL_SL > TIME_EXIT
+**FSM**: Random order based on inline checks!
+
+### 4. No Dynamic TP/SL Adaptation
+**Legacy**: Switches TP/SL based on PnL (adaptive risk management)
+**FSM**: Fixed values, never changes!
+
+### 5. Minimal Observability
+**Legacy**: JSONL logs, adaptive logging, metrics, telemetry
+**FSM**: Basic phase logging only
+
+---
+
+## 📋 COMPLETE MISSING SERVICES LIST
+
+### Trade-Critical (Cannot trade safely without):
+1. OrderRouter (Idempotency)
+2. Reconciler (State sync)
+3. ExitEngine (Prioritized rules)
+4. PositionManager (Dynamic TP/SL)
+5. ExchangeWrapper (Duplicate prevention)
+
+### Trade-Important (Reduces safety/performance):
+6. ExitHandler (Exit orchestration)
+7. BuyDecisionHandler (Entry orchestration)
+8. TrailingStopManager (Trailing stops service)
+9. SizingService (Position sizing)
+10. Stabilizer (Signal confirmation)
+
+### Monitoring/Observability:
+11. AdaptiveLogger
+12. JsonlLogger
+13. BuyFlowLogger
+14. EngineMonitoring
+15. ShutdownCoordinator
+16. OrderTelemetry
+
+### Analysis/Utilities:
+17. DropTrigger (Drop detection)
+18. RollingWindows (Per-symbol windows)
+19. RollingStats (Statistics)
+20. PnLTracker (Enhanced PnL)
+
+### Legacy (possibly deprecated):
+21. BuyService (old?)
+22. SellService (old?)
+
+---
+
+## 🎯 INTEGRATION POINTS
+
+### Decision Module (assembler.py)
+- **Legacy**: Used by BuyDecisionHandler to create intents
+- **FSM**: Should use but unclear if it does
+
+### Trading Module (orders.py, execution_controls.py)
+- **Legacy**: Used by OrderRouter for order placement
+- **FSM**: Uses OrderService directly (simpler, less safe)
+
+### Telegram Integration
+- **Legacy**: ✅ Full integration (102 subscribers on bot start)
+- **FSM**: ✅ Full integration (same)
+
+### Features (ATR calculation)
+- **Both**: Use features/engine.py for ATR
+
+---
+
+## 📝 RECOMMENDATION
+
+### Keep using Legacy until:
+1. ✅ OrderRouter ported to FSM
+2. ✅ Reconciler ported to FSM
+3. ✅ ExitEngine ported to FSM
+4. ✅ PositionManager ported to FSM
+5. ✅ Full end-to-end testing complete
+
+### Estimated porting effort:
+- OrderRouter + Reconciler: 3-4 hours
+- ExitEngine + PositionManager: 3-4 hours
+- Monitoring/Telemetry: 2-3 hours
+- Testing: 2-3 hours
+- **Total**: 10-14 hours
+
+### Alternative: Hybrid Mode
+Run Legacy for production, FSM for specific experimental coins
+
+---
+
+**Generated**: 2025-11-01
+**Scope**: Complete system analysis
+**Files Reviewed**: 30+ files, 10,000+ lines of code

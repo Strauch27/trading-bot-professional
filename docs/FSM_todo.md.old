@@ -1,0 +1,634 @@
+# FSM Implementation Analysis & Todo List
+
+**Date:** 2025-11-01
+**Analysis Type:** Complete Legacy vs FSM Feature Comparison
+**Status:** 🔴 FSM is NOT production-ready - Critical features missing
+
+---
+
+## Executive Summary
+
+### 🔴 **CRITICAL FINDING**: FSM Cannot Execute Trades
+
+The FSM engine is **fundamentally broken** for trading because:
+1. **TP/SL prices are NEVER set** → Positions will never be closed
+2. **Event name mismatch** → Exit transitions will never trigger
+3. **No dynamic exit management** → Missing core safety features from Legacy
+
+**Recommendation**: DO NOT use FSM in production until all CRITICAL items below are fixed.
+
+---
+
+## Table of Contents
+
+1. [Event System Mismatch (CRITICAL BUG)](#1-event-system-mismatch-critical-bug)
+2. [Entry Logic Comparison](#2-entry-logic-comparison)
+3. [Position Management Comparison](#3-position-management-comparison)
+4. [Exit Logic Comparison](#4-exit-logic-comparison)
+5. [Services & Infrastructure](#5-services--infrastructure)
+6. [Configuration Parameters](#6-configuration-parameters)
+7. [Complete Todo List](#7-complete-todo-list)
+8. [Migration Strategy](#8-migration-strategy)
+
+---
+
+## 1. Event System Mismatch (CRITICAL BUG)
+
+### 🔴 CRITICAL: Event Name Inconsistency
+
+**Problem**: FSM engine emits events that don't exist in transition table!
+
+#### In `fsm_engine.py` (lines 558-593):
+```python
+# Emitted events:
+self._emit_event(st, FSMEvent.TAKE_PROFIT_HIT, ctx)        # Line 563
+self._emit_event(st, FSMEvent.STOP_LOSS_HIT, ctx)         # Line 572
+self._emit_event(st, FSMEvent.TRAILING_STOP_HIT, ctx)     # Line 582
+self._emit_event(st, FSMEvent.POSITION_TIMEOUT, ctx)      # Line 593
+```
+
+#### In `transitions.py` (lines 102-105):
+```python
+# Defined transitions:
+self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TP, ...)       # Expected event!
+self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_SL, ...)       # Expected event!
+self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TIMEOUT, ...) # Expected event!
+self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TRAILING, ...)# Expected event!
+```
+
+#### In `fsm_events.py` (lines 46-49):
+```python
+# Events are defined but with DIFFERENT names:
+EXIT_SIGNAL_TP = auto()          # ≠ TAKE_PROFIT_HIT
+EXIT_SIGNAL_SL = auto()          # ≠ STOP_LOSS_HIT
+EXIT_SIGNAL_TIMEOUT = auto()     # ≠ POSITION_TIMEOUT
+EXIT_SIGNAL_TRAILING = auto()    # ≠ TRAILING_STOP_HIT
+```
+
+**Impact**:
+- ✅ Exit conditions ARE evaluated (TP/SL checks run)
+- ❌ Transitions NEVER trigger (event names don't match)
+- ❌ Positions NEVER close (stuck in EXIT_EVAL forever)
+- ❌ Invalid transition warnings in logs
+
+**Fix Required**: Change event emissions in `fsm_engine.py:558-593` to match transition table.
+
+---
+
+## 2. Entry Logic Comparison
+
+### ✅ Similarities (Both engines have):
+
+| Feature | Legacy (engine.py) | FSM (fsm_engine.py) | Status |
+|---------|-------------------|-------------------|--------|
+| Buy Signal Evaluation | ✅ BuySignalService | ✅ BuySignalService | ✅ Same service |
+| Market Guards | ✅ MarketGuards | ✅ MarketGuards | ✅ Same service |
+| Drop Trigger | ✅ Via BuySignalService | ✅ Via BuySignalService | ✅ Same |
+| Risk Limits Check | ✅ Budget, MAX_TRADES | ✅ Budget, MAX_TRADES | ✅ Same |
+| Position Sizing | ✅ SizingService | ✅ Inline calculation | ⚠️ Different impl |
+| Order Placement | ✅ OrderService IOC | ✅ OrderService IOC | ✅ Same |
+| Partial Fill Handling | ✅ PartialFillHandler | ✅ PartialFillHandler | ✅ Same |
+
+### ⚠️ Differences:
+
+| Feature | Legacy | FSM | Notes |
+|---------|--------|-----|-------|
+| Buy Intent Persistence | ✅ DebouncedStateWriter | ❌ No persistence | FSM: Loses intents on crash |
+| Order Router | ✅ OrderRouter + Reconciler | ❌ Direct order placement | FSM: No idempotency layer |
+| Entry Decision Logging | ✅ BuyDecisionHandler | ✅ Direct logging | Different structure |
+
+**Verdict**: Entry logic is **mostly equivalent**, but FSM lacks order routing safeguards.
+
+---
+
+## 3. Position Management Comparison
+
+### 🔴 CRITICAL Differences:
+
+| Feature | Legacy (position_manager.py) | FSM (fsm_engine.py) | Gap |
+|---------|------------------------------|-------------------|-----|
+| **TP/SL Initialization** | ✅ Lines 220-280 | ❌ **NOT SET** | 🔴 CRITICAL |
+| **Dynamic TP/SL Switching** | ✅ Lines 159-370 | ❌ Missing | 🔴 HIGH |
+| **Position Tracking Frequency** | ✅ Every cycle if position | ❌ Every 4 cycles | ⚠️ MEDIUM |
+| **Trailing Stop Updates** | ✅ TrailingStopManager | ✅ Inline (lines 537-540) | ✅ OK |
+| **Peak Price Tracking** | ✅ Automatic | ✅ Lines 538-539 | ✅ OK |
+| **PnL Updates** | ✅ Every cycle | ✅ Every cycle | ✅ OK |
+
+### 🔴 CRITICAL: TP/SL Never Initialized
+
+**Legacy Code** (`position_manager.py:220-280`):
+```python
+def manage_dynamic_tp_sl_switch(self, symbol, data, current_price):
+    """Dynamically switch between TP and SL based on PnL"""
+
+    # Calculate TP/SL prices
+    tp_threshold = getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)
+    sl_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', 0.990)
+
+    tp_price = entry_price * tp_threshold
+    sl_price = entry_price * sl_threshold
+
+    # Place initial protection (TP if positive, SL if negative)
+    if pnl_ratio > 1.0:
+        # Place TP order
+        data['tp_px'] = tp_price
+        data['active_protection_type'] = 'TP'
+    else:
+        # Place SL order
+        data['sl_px'] = sl_price
+        data['active_protection_type'] = 'SL'
+```
+
+**FSM Code** (`actions.py:118-151`):
+```python
+def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
+    """Transition: WAIT_FILL → POSITION"""
+
+    coin_state.amount = ctx.filled_qty or 0.0
+    coin_state.entry_price = ctx.avg_price or 0.0
+    coin_state.entry_ts = ctx.timestamp
+
+    # ❌ tp_px and sl_px are NEVER set!
+    # ❌ peak_price for trailing is NEVER initialized!
+```
+
+**Impact**:
+- `st.tp_px` remains `0.0` (default)
+- `st.sl_px` remains `0.0` (default)
+- Exit conditions in `_process_exit_eval()` ALWAYS fail:
+  ```python
+  if ctx.price >= st.tp_px:  # 0.0 → never triggers
+  if ctx.price <= st.sl_px:  # 0.0 → never triggers
+  ```
+- **Result**: Positions NEVER close (except timeout)
+
+---
+
+### ⚠️ Dynamic TP/SL Switching
+
+**Legacy**: Automatically switches between TP and SL based on PnL
+- If PnL goes negative → Cancel TP, Place SL
+- If PnL goes positive → Cancel SL, Place TP
+- Cooldown period between switches (20s default)
+
+**FSM**: No dynamic switching at all
+- Once TP/SL are set (IF they were set), they never change
+- No adaptation to market conditions
+
+---
+
+### ⚠️ Position Tracking Frequency
+
+**Legacy** (`position_manager.py:92-157`):
+```python
+def manage_positions(self):
+    """Called every main loop cycle"""
+    for symbol in all_positions:
+        # Update trailing stops
+        # Check dynamic TP/SL switch
+        # Restore missing protections
+        # Evaluate exit conditions
+        # Update PnL
+```
+
+**FSM** (`fsm_engine.py:532-553`):
+```python
+def _process_position(self, st: CoinState, ctx: EventContext):
+    """POSITION: Monitor position"""
+
+    # Update trailing EVERY cycle ✅
+    if ctx.price > st.peak_price:
+        st.peak_price = ctx.price
+        st.trailing_trigger = ...
+
+    # Update PnL EVERY cycle ✅
+    self.pnl_service.set_unrealized_position(...)
+
+    # Check exits ONLY every 4 cycles! ⚠️
+    if self.cycle_count % 4 == 0:
+        self._emit_event(st, FSMEvent.TICK_RECEIVED, ctx)
+```
+
+**Impact**:
+- Legacy: Exit checks every 0.5s (when position exists)
+- FSM: Exit checks every 2s (4 cycles * 0.5s)
+- **4x slower exit response time**
+
+---
+
+## 4. Exit Logic Comparison
+
+### Exit Condition Evaluation
+
+| Exit Type | Legacy (position_manager.py) | FSM (fsm_engine.py) | Status |
+|-----------|------------------------------|-------------------|--------|
+| **Take Profit (%)** | ✅ Lines 429-471 | ✅ Lines 558-564 | ✅ Same logic |
+| **Stop Loss (%)** | ✅ Lines 473-515 | ✅ Lines 567-573 | ✅ Same logic |
+| **Trailing Stop** | ✅ Lines 576-633 | ✅ Lines 576-583 | ✅ Same logic |
+| **Position Timeout** | ✅ Via ExitManager | ✅ Lines 586-594 | ✅ Same logic |
+| **ATR-based Stops** | ✅ Lines 525-574 | ❌ Missing | ⚠️ Optional feature |
+
+### 🔴 CRITICAL: TP/SL Values
+
+**Problem**: Even though exit logic EXISTS, it uses uninitialized values!
+
+```python
+# Legacy: TP/SL set after buy
+tp_price = entry_price * 1.005  # +0.5%
+sl_price = entry_price * 0.990  # -1.0%
+
+# FSM: TP/SL remain at default
+st.tp_px = 0.0  # ❌ Never set
+st.sl_px = 0.0  # ❌ Never set
+```
+
+### Exit Execution
+
+| Feature | Legacy | FSM | Notes |
+|---------|--------|-----|-------|
+| Exit Signal Queue | ✅ SignalManager | ❌ Direct execution | FSM: No queue |
+| Exit Protection Orders | ✅ ExitManager | ❌ No standing orders | FSM: IOC only |
+| Sell Order Placement | ✅ OrderRouter IOC | ✅ OrderService IOC | Similar |
+| Partial Sell Handling | ✅ Retry logic | ✅ Retry logic | ✅ Same |
+| Exit Reason Tracking | ✅ Detailed logging | ✅ Basic logging | Similar |
+
+---
+
+## 5. Services & Infrastructure
+
+### Shared Services (Both use same implementations)
+
+| Service | Usage |
+|---------|-------|
+| ✅ BuySignalService | Buy signal evaluation |
+| ✅ MarketGuards | Entry condition checks |
+| ✅ MarketDataProvider | Price data & caching |
+| ✅ OrderService | Order placement |
+| ✅ OrderCache | Order status caching |
+| ✅ PnLService | PnL calculations |
+| ✅ ExchangeAdapter | Exchange API wrapper |
+
+### Legacy-Only Services
+
+| Service | Purpose | FSM Equivalent? |
+|---------|---------|----------------|
+| OrderRouter | Idempotent order placement | ❌ No |
+| Reconciler | Order state reconciliation | ❌ No |
+| ExitManager | Exit protection + signal queue | ❌ Partial |
+| SignalManager | Exit signal coordination | ❌ No |
+| TrailingStopManager | Trailing stop calculations | ✅ Inline code |
+| SizingService | Position sizing | ✅ Inline code |
+| BuyDecisionHandler | Entry flow orchestration | ✅ Direct code |
+| PositionManager | Position lifecycle | ✅ Direct code |
+| ExitHandler | Exit flow orchestration | ✅ Direct code |
+| DebouncedStateWriter | Intent persistence | ❌ No |
+
+---
+
+## 6. Configuration Parameters
+
+### Config Parameters Used
+
+| Parameter | Legacy | FSM | Notes |
+|-----------|--------|-----|-------|
+| **Entry Parameters** |
+| DROP_TRIGGER_VALUE | ✅ | ✅ | Via BuySignalService |
+| DROP_TRIGGER_MODE | ✅ | ✅ | Via BuySignalService |
+| DROP_TRIGGER_LOOKBACK_MIN | ✅ | ✅ | Via BuySignalService |
+| MAX_TRADES | ✅ | ✅ | Position limit |
+| POSITION_SIZE_USDT | ✅ | ✅ | Per-trade budget |
+| MIN_SLOT_USDT | ✅ | ✅ | Minimum position |
+| **Exit Parameters** |
+| TAKE_PROFIT_THRESHOLD | ✅ | ❌ | **NOT USED** in FSM |
+| STOP_LOSS_THRESHOLD | ✅ | ❌ | **NOT USED** in FSM |
+| EXIT_TP_FACTOR | ❌ | ❌ | Neither uses this |
+| EXIT_SL_FACTOR | ❌ | ❌ | Neither uses this |
+| USE_TRAILING_STOP | ✅ | ✅ | Both support |
+| TRAILING_DISTANCE_PCT | ✅ | ✅ | Both support |
+| MAX_POSITION_HOLD_MINUTES | ✅ | ✅ | Both support |
+| **Dynamic TP/SL** |
+| SWITCH_TO_SL_THRESHOLD | ✅ | ❌ | FSM: Not implemented |
+| SWITCH_TO_TP_THRESHOLD | ✅ | ❌ | FSM: Not implemented |
+| SWITCH_COOLDOWN_S | ✅ | ❌ | FSM: Not implemented |
+| **Other** |
+| SYMBOL_COOLDOWN_MINUTES | ✅ | ✅ | Post-trade cooldown |
+| TICKER_CACHE_TTL | ✅ | ✅ | Market data cache |
+
+---
+
+## 7. Complete Todo List
+
+### 🔴 CRITICAL - Must Fix (FSM is broken without these)
+
+#### C-1: Fix Event Name Mismatch
+**File**: `engine/fsm_engine.py` lines 558-593
+**Problem**: Emitting events that don't exist in transition table
+**Fix**:
+```python
+# BEFORE (lines 558-593):
+self._emit_event(st, FSMEvent.TAKE_PROFIT_HIT, ctx)
+self._emit_event(st, FSMEvent.STOP_LOSS_HIT, ctx)
+self._emit_event(st, FSMEvent.TRAILING_STOP_HIT, ctx)
+self._emit_event(st, FSMEvent.POSITION_TIMEOUT, ctx)
+
+# AFTER:
+self._emit_event(st, FSMEvent.EXIT_SIGNAL_TP, ctx)
+self._emit_event(st, FSMEvent.EXIT_SIGNAL_SL, ctx)
+self._emit_event(st, FSMEvent.EXIT_SIGNAL_TRAILING, ctx)
+self._emit_event(st, FSMEvent.EXIT_SIGNAL_TIMEOUT, ctx)
+```
+
+**OR** update `core/fsm/transitions.py` to use the events defined in fsm_events.py.
+
+---
+
+#### C-2: Initialize TP/SL After Buy
+**File**: `core/fsm/actions.py` line 118
+**Problem**: `tp_px` and `sl_px` never set → positions never close
+**Fix**:
+```python
+def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
+    """Transition: WAIT_FILL → POSITION"""
+
+    # Existing code...
+    coin_state.amount = ctx.filled_qty or 0.0
+    coin_state.entry_price = ctx.avg_price or 0.0
+    coin_state.entry_ts = ctx.timestamp
+
+    # NEW: Initialize TP/SL prices
+    import config
+    tp_threshold = getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)
+    sl_threshold = getattr(config, 'STOP_LOSS_THRESHOLD', 0.990)
+
+    coin_state.tp_px = coin_state.entry_price * tp_threshold
+    coin_state.sl_px = coin_state.entry_price * sl_threshold
+
+    # NEW: Initialize trailing stop
+    if getattr(config, 'USE_TRAILING_STOP', False):
+        coin_state.peak_price = coin_state.entry_price
+        activation_pct = getattr(config, 'TRAILING_ACTIVATION_PCT', 1.005)
+        distance_pct = getattr(config, 'TRAILING_DISTANCE_PCT', 0.99)
+        coin_state.trailing_trigger = 0.0  # Not activated yet
+
+    # Existing logging...
+```
+
+**Lines to modify**: After line 127 in `actions.py`
+
+---
+
+#### C-3: Fix TickerData.get() AttributeError
+**File**: `engine/fsm_engine.py` line 891
+**Problem**: Trying to call `.get()` on TickerData object
+**Current code**:
+```python
+ticker = self.market_data.get_ticker(symbol)
+if ticker:
+    ctx["bid"] = ticker.get("bid", 0.0)  # ❌ ticker is TickerData object, not dict
+    ctx["ask"] = ticker.get("ask", 0.0)
+```
+
+**Fix**:
+```python
+ticker = self.market_data.get_ticker(symbol)
+if ticker:
+    ctx["bid"] = ticker.bid if hasattr(ticker, 'bid') else 0.0
+    ctx["ask"] = ticker.ask if hasattr(ticker, 'ask') else 0.0
+    ctx["volume"] = ticker.volume if hasattr(ticker, 'volume') else 0.0
+```
+
+---
+
+### 🟠 HIGH Priority - Important Features
+
+#### H-1: Dynamic TP/SL Switching
+**File**: New file `core/fsm/exit_protection.py` or add to `fsm_engine.py`
+**Feature**: Automatically switch between TP and SL based on PnL
+**Reference**: `engine/position_manager.py` lines 159-370
+**Complexity**: Medium (150 lines)
+**Impact**: Improved risk management
+
+---
+
+#### H-2: Tighter Exit Checking for Positions
+**File**: `engine/fsm_engine.py` line 552
+**Current**: Exit checks every 4 cycles (2 seconds)
+**Target**: Exit checks every cycle when position exists (0.5 seconds)
+
+**Fix**:
+```python
+def _process_position(self, st: CoinState, ctx: EventContext):
+    """POSITION: Monitor position"""
+    st.current_price = ctx.price
+
+    # Update trailing stop (every cycle)
+    if getattr(config, 'USE_TRAILING_STOP', False):
+        if ctx.price > st.peak_price:
+            st.peak_price = ctx.price
+            st.trailing_trigger = st.peak_price * getattr(config, 'TRAILING_DISTANCE_PCT', 0.99)
+
+    # Update PnL (every cycle)
+    self.pnl_service.set_unrealized_position(...)
+
+    # CHANGED: Check exits EVERY cycle (not every 4 cycles)
+    self._emit_event(st, FSMEvent.TICK_RECEIVED, ctx)
+```
+
+**Rationale**:
+- Entry evaluation happens every cycle
+- Exit evaluation should match (faster response to exit conditions)
+- 4x improvement in exit latency
+
+---
+
+#### H-3: Order Router & Idempotency Layer
+**File**: New integration in `fsm_engine.py`
+**Feature**: Use OrderRouter for idempotent order placement
+**Reference**: `engine/engine.py` lines 290-335
+**Complexity**: High (requires service integration)
+**Impact**: Prevents duplicate orders on retries
+
+---
+
+### 🟡 MEDIUM Priority - Nice to Have
+
+#### M-1: Exit Protection Standing Orders
+**Feature**: Place TP/SL orders on exchange (not just local checks)
+**Reference**: `engine/position_manager.py` lines 245-290
+**Benefit**: Orders execute even if bot crashes
+**Complexity**: Medium
+
+---
+
+#### M-2: ATR-based Dynamic Stops
+**Feature**: Volatility-adjusted stop losses
+**Reference**: `engine/position_manager.py` lines 525-574
+**Config**: `USE_ATR_BASED_EXITS = True`
+**Complexity**: Low (already implemented in guards)
+
+---
+
+#### M-3: Intent Persistence (Crash Recovery)
+**Feature**: Persist pending buy intents to disk
+**Reference**: `engine/engine.py` DebouncedStateWriter
+**Benefit**: Resume trades after crash
+**Complexity**: Low
+
+---
+
+### 🟢 LOW Priority - Optional
+
+#### L-1: Exit Signal Queue
+**Feature**: Queue multiple exit signals, prioritize
+**Reference**: SignalManager in Legacy
+**Benefit**: Better handling of conflicting signals
+**Complexity**: Low
+
+---
+
+#### L-2: Reconciliation System
+**Feature**: Reconcile local state with exchange
+**Reference**: Reconciler service in Legacy
+**Benefit**: Auto-recovery from state desync
+**Complexity**: Medium
+
+---
+
+## 8. Migration Strategy
+
+### Phase 1: Fix Critical Bugs (1-2 hours)
+1. ✅ Fix event name mismatch (C-1)
+2. ✅ Initialize TP/SL after buy (C-2)
+3. ✅ Fix TickerData.get() error (C-3)
+
+**Deliverable**: FSM can execute basic trades
+
+---
+
+### Phase 2: Feature Parity (2-3 hours)
+4. ✅ Dynamic TP/SL switching (H-1)
+5. ✅ Tighter exit checking (H-2)
+6. ✅ Standing exit orders (M-1)
+
+**Deliverable**: FSM matches Legacy core features
+
+---
+
+### Phase 3: Production Hardening (1-2 hours)
+7. ✅ Order Router integration (H-3)
+8. ✅ Intent persistence (M-3)
+9. ✅ End-to-end testing
+
+**Deliverable**: FSM is production-ready
+
+---
+
+### Phase 4: Legacy Removal (30 minutes)
+10. ✅ Remove Legacy engine files
+11. ✅ Simplify HybridEngine
+12. ✅ Update documentation
+
+**Deliverable**: Codebase uses FSM only
+
+---
+
+## 9. Testing Checklist
+
+Before removing Legacy, verify FSM handles:
+
+### Entry Tests
+- [ ] Buy signal triggers entry evaluation
+- [ ] Guards block invalid entries
+- [ ] Budget limits respected
+- [ ] MAX_TRADES limit enforced
+- [ ] Order placement succeeds
+- [ ] Partial fills accumulated correctly
+
+### Position Tests
+- [ ] TP/SL prices initialized after buy
+- [ ] Trailing stop activates and updates
+- [ ] PnL calculated correctly
+- [ ] Dynamic TP/SL switch works (if implemented)
+- [ ] Peak price tracked correctly
+
+### Exit Tests
+- [ ] Take profit triggers at correct price
+- [ ] Stop loss triggers at correct price
+- [ ] Trailing stop triggers correctly
+- [ ] Position timeout works
+- [ ] Exit events trigger transitions
+- [ ] Sell order placement succeeds
+- [ ] PnL recorded after exit
+
+### Edge Cases
+- [ ] Handles exchange errors gracefully
+- [ ] Recovers from crashes (if persistence implemented)
+- [ ] No duplicate orders on retries
+- [ ] Handles partial fills correctly
+- [ ] Cooldown period enforced
+
+---
+
+## 10. Config Validation
+
+After FSM implementation, verify these configs work:
+
+```python
+# Entry
+DROP_TRIGGER_VALUE = 0.985          # ✅ Works
+DROP_TRIGGER_MODE = 4               # ✅ Works
+MAX_TRADES = 10                     # ✅ Works
+POSITION_SIZE_USDT = 10.0           # ✅ Works
+
+# Exit (CRITICAL - currently broken)
+TAKE_PROFIT_THRESHOLD = 1.005       # ❌ NOT USED
+STOP_LOSS_THRESHOLD = 0.990         # ❌ NOT USED
+USE_TRAILING_STOP = True            # ✅ Works
+TRAILING_DISTANCE_PCT = 0.99        # ✅ Works
+MAX_POSITION_HOLD_MINUTES = 60      # ✅ Works
+
+# Dynamic Switching (not implemented)
+SWITCH_TO_SL_THRESHOLD = 0.995      # ❌ NOT IMPLEMENTED
+SWITCH_TO_TP_THRESHOLD = 1.002      # ❌ NOT IMPLEMENTED
+SWITCH_COOLDOWN_S = 20              # ❌ NOT IMPLEMENTED
+
+# Other
+SYMBOL_COOLDOWN_MINUTES = 15        # ✅ Works
+```
+
+---
+
+## Summary
+
+### Current State
+- **Legacy Engine**: ✅ Fully functional, production-tested
+- **FSM Engine**: 🔴 Broken - Cannot execute trades
+
+### Critical Gaps
+1. 🔴 Event mismatch → Transitions never trigger
+2. 🔴 TP/SL never set → Positions never close
+3. 🔴 TickerData error → Context building fails
+
+### Work Required
+- **Minimum**: 3 critical fixes (1-2 hours)
+- **Feature Parity**: +6 improvements (4-5 hours)
+- **Production Ready**: +3 hardening steps (2-3 hours)
+- **Total**: 7-10 hours for complete FSM migration
+
+### Recommendation
+1. Fix C-1, C-2, C-3 **immediately**
+2. Test basic trade cycle end-to-end
+3. Implement H-1, H-2 for production use
+4. Remove Legacy only after Phase 3 complete
+
+---
+
+**Generated**: 2025-11-01
+**Author**: Claude Code Analysis
+**Files Analyzed**:
+- `engine/fsm_engine.py` (968 lines)
+- `engine/engine.py` (1665 lines - Legacy)
+- `engine/position_manager.py` (700 lines - Legacy)
+- `core/fsm/actions.py` (452 lines)
+- `core/fsm/transitions.py` (178 lines)
+- `core/fsm/fsm_events.py` (108 lines)

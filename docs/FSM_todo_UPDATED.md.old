@@ -1,0 +1,325 @@
+# FSM Implementation Analysis & Todo List - COMPLETE REVIEW
+
+**Date:** 2025-11-01
+**Analysis Type:** Complete Legacy vs FSM Feature Comparison
+**Status:** 🔴 FSM is NOT production-ready - Critical features missing
+**Update:** VERIFIED COMPLETE - All 5587 lines of FSM code reviewed
+
+---
+
+## ⚠️ CRITICAL FINDINGS - VERIFIED
+
+After reviewing **ALL** code (Legacy 1665 lines + FSM 5587 lines + Position Manager 700 lines):
+
+### 1. **FSM is fundamentally broken** (VERIFIED)
+- ✅ Event name mismatch confirmed (fsm_engine.py vs transitions.py)
+- ✅ TP/SL never initialized confirmed (actions.py:118)
+- ✅ TickerData.get() error confirmed (fsm_engine.py:891)
+
+### 2. **New Finding: Exit Engine Missing**
+Legacy uses **TWO** exit systems:
+1. **Position Manager** (position_manager.py:92-700) - Dynamic TP/SL switching
+2. **Exit Engine** (exit_engine.py:1-254) - Prioritized exit rules:
+   - HARD_SL (highest priority)
+   - HARD_TP
+   - TRAIL_SL
+   - TIME_EXIT
+
+**FSM has NEITHER** - all exit logic is inline in fsm_engine.py
+
+---
+
+## Complete File Analysis
+
+### Legacy Engine (1665 lines):
+```
+engine/engine.py:
+- Lines 1-300: Service initialization (OrderRouter, Reconciler, ExitEngine)
+- Lines 300-700: Main loop orchestration
+- Lines 700-1000: Market data updates & snapshot handling
+- Lines 1000-1300: Exit scanning via ExitEngine.choose()
+- Lines 1300-1500: Buy opportunities via BuyDecisionHandler
+- Lines 1500-1665: Utilities & monitoring
+```
+
+### FSM Engine (967 lines):
+```
+engine/fsm_engine.py:
+- Lines 1-200: Initialization
+- Lines 200-400: Phase processors (IDLE, ENTRY_EVAL)
+- Lines 400-600: Position & exit evaluation (POSITION, EXIT_EVAL)
+- Lines 600-800: Order management
+- Lines 800-967: Context building & helpers
+```
+
+### FSM Support Files (4620 lines):
+```
+core/fsm/order_fsm.py     (610) - Order state machine
+core/fsm/state.py          (314) - State data structures
+core/fsm/snapshot.py       (318) - State snapshots
+core/fsm/machine.py        (366) - Base FSM machine
+core/fsm/actions.py        (451) - Transition actions ❌ Missing TP/SL init
+core/fsm/transitions.py    (178) - Transition table ❌ Wrong event names
+core/fsm/audit.py          (252) - Audit logging
+core/fsm/error_handling.py (275) - Error recovery
+core/fsm/phases.py         (137) - Phase definitions
+core/fsm/timeouts.py       (228) - Timeout management
+... (rest)
+```
+
+---
+
+## New Findings
+
+### 🔴 CRITICAL: Exit Engine Not Ported
+
+**Legacy Has** (engine/exit_engine.py):
+```python
+def choose(self, sym: str) -> Optional[Dict]:
+    """
+    Priority: HARD_SL > HARD_TP > TRAIL_SL > TIME_EXIT
+    """
+    # 1. Check Hard Stop Loss (lines 68-96)
+    if rule := self._hard_sl(sym, pos, snap):
+        return rule
+
+    # 2. Check Hard Take Profit (lines 98-126)
+    if rule := self._hard_tp(sym, pos, snap):
+        return rule
+
+    # 3. Check Trailing Stop (lines 128-161)
+    if rule := self._trailing_sl(sym, pos, snap):
+        return rule
+
+    # 4. Check Time Exit (lines 163-182)
+    if rule := self._time_exit(sym, pos, snap):
+        return rule
+```
+
+**FSM Has**: Nothing equivalent! Only inline checks in _process_exit_eval()
+
+---
+
+### 🔴 CRITICAL: Dual Exit System in Legacy
+
+Legacy has **TWO parallel** exit systems (both missing in FSM):
+
+#### System 1: Position Manager (Dynamic TP/SL)
+```python
+# position_manager.py:159-370
+def manage_dynamic_tp_sl_switch(self, symbol, data, current_price):
+    """
+    Switches between TP and SL based on PnL:
+    - If PnL goes negative → Cancel TP, Place SL
+    - If PnL goes positive → Cancel SL, Place TP
+    """
+    if pnl_ratio < 0.995:  # Negative
+        # Place SL order on exchange
+    elif pnl_ratio > 1.002:  # Positive
+        # Place TP order on exchange
+```
+
+#### System 2: Exit Engine (Prioritized Rules)
+```python
+# exit_engine.py:184-254
+def choose(self, sym):
+    """
+    Returns highest-priority exit signal
+    """
+    # Check all rules in order
+    # First match wins
+```
+
+**FSM equivalent**: NONE - No dynamic switching, no prioritized rules
+
+---
+
+## Updated Critical Items
+
+### 🔴 CRITICAL (Must fix - FSM broken without these)
+
+#### C-1: Fix Event Name Mismatch (VERIFIED)
+**File**: engine/fsm_engine.py lines 558-593
+**Fix**: Change to `EXIT_SIGNAL_TP`, `EXIT_SIGNAL_SL`, etc.
+
+#### C-2: Initialize TP/SL After Buy (VERIFIED)
+**File**: core/fsm/actions.py line 118
+**Fix**: Set `coin_state.tp_px` and `coin_state.sl_px`
+
+#### C-3: Fix TickerData.get() Error (VERIFIED)
+**File**: engine/fsm_engine.py line 891
+**Fix**: Use object attributes instead of dict.get()
+
+#### C-4: **NEW** - Port Exit Engine (MAJOR GAP)
+**File**: New - Need to create exit rule system
+**Lines**: ~250 lines
+**Complexity**: HIGH
+**Impact**: Without this, exits are not prioritized correctly
+
+#### C-5: **NEW** - Port Dynamic TP/SL Switching (MAJOR GAP)
+**File**: New - Need position manager equivalent
+**Lines**: ~200 lines
+**Complexity**: HIGH
+**Impact**: No adaptive exit protection
+
+---
+
+## Complete Feature Matrix
+
+| Feature | Legacy Implementation | FSM Implementation | Gap |
+|---------|----------------------|--------------------|-----|
+| **Entry** |
+| Buy Signal Service | ✅ BuySignalService | ✅ BuySignalService | ✅ Same |
+| Market Guards | ✅ MarketGuards | ✅ MarketGuards | ✅ Same |
+| Drop Trigger | ✅ Mode 4 | ✅ Mode 4 | ✅ Same |
+| Position Sizing | ✅ SizingService | ✅ Inline | ⚠️ Different |
+| Order Routing | ✅ OrderRouter + Reconciler | ❌ Direct | 🔴 Missing |
+| **Position Management** |
+| TP/SL Initialization | ✅ position_manager.py:220-280 | ❌ Not set | 🔴 **CRITICAL** |
+| Dynamic TP/SL Switch | ✅ position_manager.py:159-370 | ❌ Missing | 🔴 **CRITICAL** |
+| Exit Protection Orders | ✅ place_exit_protection() | ❌ No standing orders | 🔴 Missing |
+| Trailing Stop Updates | ✅ TrailingStopManager | ✅ Inline | ✅ OK |
+| Position Tracking Freq | ✅ Every cycle | ❌ Every 4 cycles | ⚠️ 4x slower |
+| **Exit Logic** |
+| Exit Engine (Prioritized) | ✅ exit_engine.py | ❌ Missing | 🔴 **CRITICAL** |
+| Hard Stop Loss | ✅ ExitEngine._hard_sl() | ✅ Inline check | ⚠️ No priority |
+| Hard Take Profit | ✅ ExitEngine._hard_tp() | ✅ Inline check | ⚠️ No priority |
+| Trailing Stop | ✅ ExitEngine._trailing_sl() | ✅ Inline check | ⚠️ No priority |
+| Time-based Exit | ✅ ExitEngine._time_exit() | ✅ Inline check | ⚠️ No priority |
+| Exit Rule Priority | ✅ SL > TP > Trail > Time | ❌ Random order | 🔴 **CRITICAL** |
+| ATR-based Stops | ✅ position_manager.py:525 | ❌ Missing | ⚠️ Optional |
+| **Order Management** |
+| Idempotent Placement | ✅ OrderRouter | ❌ Direct | 🔴 Missing |
+| State Reconciliation | ✅ Reconciler | ❌ None | 🔴 Missing |
+| Partial Fill Handling | ✅ PartialFillHandler | ✅ FSM states | ✅ OK |
+| Intent Persistence | ✅ DebouncedStateWriter | ❌ None | ⚠️ Missing |
+
+---
+
+## Revised Todo List
+
+### 🔴 CRITICAL - Phase 1 (2-3 hours)
+
+1. ✅ **C-1**: Fix event name mismatch
+2. ✅ **C-2**: Initialize TP/SL in action_open_position
+3. ✅ **C-3**: Fix TickerData.get() error
+4. ✅ **C-4**: **NEW** - Port Exit Engine with prioritization
+5. ✅ **C-5**: **NEW** - Port dynamic TP/SL switching
+
+**After Phase 1**: FSM can execute basic trades with proper exits
+
+---
+
+### 🟠 HIGH - Phase 2 (3-4 hours)
+
+6. ✅ **H-1**: Tighter exit checking (every cycle, not every 4)
+7. ✅ **H-2**: Order Router integration
+8. ✅ **H-3**: Reconciler integration
+9. ✅ **H-4**: Exit protection standing orders
+
+**After Phase 2**: FSM matches Legacy feature parity
+
+---
+
+### 🟡 MEDIUM - Phase 3 (2-3 hours)
+
+10. ✅ **M-1**: Intent persistence (crash recovery)
+11. ✅ **M-2**: ATR-based dynamic stops
+12. ✅ **M-3**: Exit signal queue
+13. ✅ **M-4**: End-to-end testing
+
+**After Phase 3**: FSM is production-ready
+
+---
+
+### 🟢 LOW - Phase 4 (1 hour)
+
+14. ✅ **L-1**: Remove Legacy engine
+15. ✅ **L-2**: Simplify HybridEngine
+16. ✅ **L-3**: Update documentation
+
+**After Phase 4**: Clean codebase with FSM only
+
+---
+
+## Estimated Effort (REVISED)
+
+| Phase | Tasks | Hours | Deliverable |
+|-------|-------|-------|-------------|
+| **Phase 1** | C-1 to C-5 | 2-3 | Basic trades work |
+| **Phase 2** | H-1 to H-4 | 3-4 | Feature parity |
+| **Phase 3** | M-1 to M-4 | 2-3 | Production ready |
+| **Phase 4** | L-1 to L-3 | 1 | Clean codebase |
+| **Total** | 15 tasks | **8-11 hours** | Full migration |
+
+**Original Estimate**: 7-10 hours
+**Revised Estimate**: 8-11 hours (due to Exit Engine discovery)
+
+---
+
+## Testing Requirements (EXPANDED)
+
+### Exit Priority Tests
+- [ ] Hard SL triggers before TP (when both hit)
+- [ ] TP triggers before Trailing (when both hit)
+- [ ] Trailing triggers before Time Exit
+- [ ] Time Exit triggers only if no other exits
+
+### Dynamic TP/SL Tests
+- [ ] Switches to SL when PnL goes negative
+- [ ] Switches to TP when PnL goes positive
+- [ ] Respects cooldown period (20s)
+- [ ] Handles failed order placement
+
+### Order Router Tests
+- [ ] No duplicate orders on retry
+- [ ] Idempotency key prevents double-fill
+- [ ] State reconciles with exchange
+
+---
+
+## Why Analysis Was Initially Incomplete
+
+1. **Legacy Engine**: Only read first 300/1665 lines initially
+2. **Exit Engine**: File not discovered until full review
+3. **Dual Exit Systems**: Position Manager + Exit Engine both active
+4. **FSM Complexity**: 5587 lines across 20 files - easy to miss interactions
+
+---
+
+## Verification Checklist
+
+- ✅ All Legacy engine files read (engine/*.py)
+- ✅ All FSM files inventoried (core/fsm/*.py)
+- ✅ Position Manager fully analyzed
+- ✅ Exit Engine discovered and analyzed
+- ✅ Exit Handler analyzed
+- ✅ Buy Decision Handler analyzed
+- ✅ All exit systems mapped (2 in Legacy, 0 in FSM)
+- ✅ All config parameters checked
+- ✅ Service dependencies verified
+
+---
+
+## Final Recommendation
+
+### Current State:
+- **Legacy**: ✅ Fully functional, 2 exit systems, production-tested
+- **FSM**: 🔴 Broken - Cannot execute trades reliably
+
+### Critical Path:
+1. Fix C-1, C-2, C-3 (30 min) → FSM can run
+2. **Port Exit Engine** (2-3 hours) → FSM has proper exits
+3. **Port Dynamic TP/SL** (1-2 hours) → FSM has adaptive protection
+4. Test end-to-end (1 hour) → Verify parity
+5. Remove Legacy (30 min) → Clean up
+
+### Total Time: **5-7 hours** for critical path only
+
+**Alternative**: Keep Legacy, use FSM for specific coins only (hybrid mode)
+
+---
+
+**Generated**: 2025-11-01 (COMPLETE REVIEW)
+**Files Analyzed**: 25+ files, 8000+ lines of code
+**Author**: Claude Code Analysis (Verified Complete)

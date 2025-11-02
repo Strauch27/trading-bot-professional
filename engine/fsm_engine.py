@@ -793,6 +793,19 @@ class FSMTradingEngine:
                 st.client_order_id = intent_id  # Use intent_id as client order id
                 st.order_placed_ts = time.time()
 
+                # UI EVENT: ORDER_SUBMITTED (for dashboard)
+                try:
+                    from core.logging.events import emit
+                    emit("ORDER_SUBMITTED",
+                         symbol=st.symbol,
+                         side="buy",
+                         order_id=st.order_id,
+                         price=price,
+                         amount=amount,
+                         decision_id=st.decision_id)
+                except Exception as e:
+                    logger.debug(f"Failed to emit ORDER_SUBMITTED: {e}")
+
                 # CRITICAL FIX: Persist order state immediately after placement
                 # This prevents order_id loss on crashes or phase transitions
                 try:
@@ -1016,6 +1029,19 @@ class FSMTradingEngine:
                     except Exception as e:
                         logger.debug(f"Failed to log order_filled: {e}")
 
+                    # UI EVENT: ORDER_FILLED (for dashboard)
+                    try:
+                        from core.logging.events import emit
+                        emit("ORDER_FILLED",
+                             symbol=st.symbol,
+                             side="buy",
+                             order_id=st.order_id,
+                             filled=final_qty,
+                             avg_price=final_price,
+                             decision_id=st.decision_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to emit ORDER_FILLED: {e}")
+
                     # Atomic portfolio update
                     with self.portfolio_tx.begin(st.symbol, st):
                         st.amount = final_qty
@@ -1063,6 +1089,18 @@ class FSMTradingEngine:
                         except Exception as e:
                             logger.debug(f"Failed to log buy_flow completion: {e}")
 
+                        # UI EVENT: POSITION_OPENED (for dashboard)
+                        try:
+                            from core.logging.events import emit
+                            emit("POSITION_OPENED",
+                                 symbol=st.symbol,
+                                 qty=final_qty,
+                                 price=final_price,
+                                 notional=final_qty * final_price,
+                                 decision_id=st.decision_id)
+                        except Exception as e:
+                            logger.debug(f"Failed to emit POSITION_OPENED: {e}")
+
                         self._emit_event(st, FSMEvent.BUY_ORDER_FILLED, ctx)
 
                     # Telegram notification
@@ -1075,7 +1113,19 @@ class FSMTradingEngine:
                             pass
 
             elif order.get("status") == "canceled":
-                self._emit_event(st, FSMEvent.BUY_ORDER_CANCELLED, ctx)
+                # UI EVENT: ORDER_CANCELED (for dashboard)
+                try:
+                    from core.logging.events import emit
+                    emit("ORDER_CANCELED",
+                         symbol=st.symbol,
+                         side="buy",
+                         order_id=st.order_id,
+                         reason="exchange_canceled",
+                         decision_id=st.decision_id)
+                except Exception as e:
+                    logger.debug(f"Failed to emit ORDER_CANCELED: {e}")
+
+                self._emit_event(st, FSMEvent.ORDER_CANCELED, ctx)
 
         except Exception as e:
             logger.error(f"Wait fill error {st.symbol}: {e}")
@@ -1184,6 +1234,19 @@ class FSMTradingEngine:
                 st.client_order_id = client_order_id
                 st.order_placed_ts = time.time()
 
+                # UI EVENT: ORDER_SUBMITTED (for dashboard - sell side)
+                try:
+                    from core.logging.events import emit
+                    emit("ORDER_SUBMITTED",
+                         symbol=st.symbol,
+                         side="sell",
+                         order_id=st.order_id,
+                         price=ctx.price,
+                         amount=st.amount,
+                         decision_id=st.decision_id)
+                except Exception as e:
+                    logger.debug(f"Failed to emit ORDER_SUBMITTED (sell): {e}")
+
                 if st.fsm_data:
                     st.fsm_data.sell_order = OrderContext(
                         order_id=order["id"],
@@ -1238,6 +1301,20 @@ class FSMTradingEngine:
             if order.get("status") == "closed":
                 filled = order.get("filled", 0)
                 if filled >= st.amount * 0.95:
+                    # UI EVENT: ORDER_FILLED (for dashboard - sell side)
+                    try:
+                        from core.logging.events import emit
+                        avg_exit = order.get("average", 0)
+                        emit("ORDER_FILLED",
+                             symbol=st.symbol,
+                             side="sell",
+                             order_id=st.order_id,
+                             filled=filled,
+                             avg_price=avg_exit,
+                             decision_id=st.decision_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to emit ORDER_FILLED (sell): {e}")
+
                     self._emit_event(st, FSMEvent.SELL_ORDER_FILLED, ctx)
                 else:
                     # Partial fill - retry
@@ -1315,6 +1392,20 @@ class FSMTradingEngine:
 
             self.pnl_service.remove_unrealized_position(st.symbol)
             self.portfolio.remove_held_asset(st.symbol)
+
+            # UI EVENT: POSITION_CLOSED (for dashboard)
+            try:
+                from core.logging.events import emit
+                emit("POSITION_CLOSED",
+                     symbol=st.symbol,
+                     qty_closed=filled,
+                     exit_price=avg_exit_price,
+                     entry_price=st.entry_price,
+                     realized_pnl=realized_pnl if realized_pnl is not None else 0.0,
+                     exit_reason=st.exit_reason,
+                     decision_id=st.decision_id)
+            except Exception as e:
+                logger.debug(f"Failed to emit POSITION_CLOSED: {e}")
 
             # Telegram notification
             if self.telegram and realized_pnl is not None:
