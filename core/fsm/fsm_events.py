@@ -37,7 +37,9 @@ class FSMEvent(Enum):
     BUY_ORDER_TIMEOUT = auto()       # Buy order timed out
     BUY_ORDER_REJECTED = auto()      # Exchange rejected buy order
     BUY_ORDER_CANCELLED = auto()     # Buy order was cancelled
+    BUY_ABORTED = auto()             # Buy aborted (pre-flight failure, etc.)
     ORDER_PLACEMENT_FAILED = auto()  # Order placement failed (e.g. insufficient funds)
+    ORDER_CANCELED = auto()          # Generic order cancelled event
 
     # Position lifecycle events
     POSITION_OPENED = auto()         # Position successfully opened

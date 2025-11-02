@@ -88,13 +88,16 @@ class TransitionTable:
         self._add(Phase.PLACE_BUY, FSMEvent.BUY_ORDER_PLACED, Phase.WAIT_FILL, action_wait_for_fill)
         self._add(Phase.PLACE_BUY, FSMEvent.BUY_ORDER_REJECTED, Phase.IDLE, action_handle_reject)
         self._add(Phase.PLACE_BUY, FSMEvent.ORDER_PLACEMENT_FAILED, Phase.IDLE, action_handle_reject)
+        self._add(Phase.PLACE_BUY, FSMEvent.BUY_ABORTED, Phase.IDLE, action_handle_reject)  # FSM Parity: Pre-flight failure
         self._add(Phase.PLACE_BUY, FSMEvent.ERROR_OCCURRED, Phase.ERROR, action_log_error)
 
         # ===== WAIT_FILL Phase =====
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_FILLED, Phase.POSITION, action_open_position)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_PARTIAL, Phase.WAIT_FILL, action_handle_partial_buy)
         self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_TIMEOUT, Phase.IDLE, action_cancel_and_cleanup)
-        self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_CANCELLED, Phase.IDLE, action_cleanup_cancelled)
+        self._add(Phase.WAIT_FILL, FSMEvent.BUY_ORDER_CANCELLED, Phase.IDLE, action_cleanup_cancelled)  # British spelling
+        self._add(Phase.WAIT_FILL, FSMEvent.ORDER_CANCELED, Phase.IDLE, action_cleanup_cancelled)  # FSM Parity: Generic cancel
+        self._add(Phase.WAIT_FILL, FSMEvent.BUY_ABORTED, Phase.IDLE, action_cleanup_cancelled)  # FSM Parity: Abort without order_id
         self._add(Phase.WAIT_FILL, FSMEvent.ERROR_OCCURRED, Phase.IDLE, action_cleanup_cancelled)
 
         # ===== POSITION Phase =====
