@@ -87,13 +87,15 @@ class BuyService:
         )
 
         # Submit via OrderService (handles quantization, retry, error classification)
+        # CRITICAL FIX (P3 Issue #10): Propagate decision_id for complete tracing
         result = self.order_service.submit_limit(
             symbol=symbol,
             side="buy",
             qty=qty,
             price=price,
             coid=coid,
-            time_in_force="IOC"
+            time_in_force="IOC",
+            decision_id=decision_id  # Propagate decision_id for tracing ✅
         )
 
         # Log result
@@ -409,15 +411,71 @@ class BuyService:
                 ctx[f"sizing_step_{idx}"] = sizing_reason
                 continue
 
+            # CRITICAL FIX (P0 Issue #1): Preflight validation with min_notional auto-bump
+            # This ensures parity with FSM buy flow and prevents BLESS-type failures
+            try:
+                from services.exchange_filters import get_filters
+                from services.order_validation import preflight
+
+                filters = get_filters(self.exchange, symbol)
+                ok, preflight_result = preflight(symbol, px, qty, filters)
+
+                if not ok:
+                    reason = preflight_result.get('reason', 'preflight_failed')
+                    ctx[f"step_{idx}_preflight_fail"] = reason
+                    log_event(
+                        "BUY_PREFLIGHT_FAIL",
+                        level="WARNING",
+                        symbol=symbol,
+                        message=f"Preflight failed at step {idx}: {reason}",
+                        ctx={
+                            "step": idx,
+                            "reason": reason,
+                            "need": preflight_result.get('need'),
+                            "got": preflight_result.get('got'),
+                            "original_price": px,
+                            "original_qty": qty
+                        }
+                    )
+                    continue  # Skip this step
+
+                # Use validated/auto-bumped values
+                qty = preflight_result['amount']
+                px = preflight_result['price']
+
+                ctx[f"step_{idx}_preflight_ok"] = True
+                if preflight_result.get('auto_bumped'):
+                    ctx[f"step_{idx}_auto_bumped"] = {
+                        'original_qty': preflight_result.get('original_amount'),
+                        'bumped_qty': qty,
+                        'reason': preflight_result.get('bump_reason')
+                    }
+
+            except Exception as preflight_error:
+                # Don't fail the entire buy on preflight errors - log and continue with original values
+                log_event(
+                    "BUY_PREFLIGHT_ERROR",
+                    level="WARNING",
+                    symbol=symbol,
+                    message=f"Preflight check failed with error: {preflight_error}",
+                    ctx={"step": idx, "error": str(preflight_error)}
+                )
+
             order = self._place_limit_ioc(symbol, qty, px, decision_id=dec_id)
             if not order:
                 continue
 
             status = (order.get("status") or "").upper()
+            # CRITICAL FIX (P0 Issue #2): Handle PARTIAL fills properly
+            # A PARTIAL fill should still update portfolio with filled_qty (not skip)
             filled = status in ("FILLED", "CLOSED")
+            partially_filled = status in ("PARTIALLY_FILLED", "PARTIAL")
+            any_fill = filled or partially_filled
+
             ctx[f"step_{idx}_status"] = status
             ctx[f"step_{idx}_premium_bps"] = step_config.get("premium_bps", 0)
-            if filled:
+
+            if any_fill:
                 # Trades einlesen (falls nicht im Orderobjekt)
                 trades = order.get("trades")
                 if trades is None and hasattr(self.exchange, "fetch_my_trades"):
@@ -478,7 +536,27 @@ class BuyService:
                     ctx["ladder_stopped_reason"] = "SLIPPAGE_BREACH"
                     break
 
-                break
+                # CRITICAL FIX (P0 Issue #2): Only stop ladder on FULL fill
+                # PARTIAL fills should continue to next step to fill remaining quantity
+                if filled:
+                    ctx["ladder_stopped_reason"] = "FILLED"
+                    break
+                elif partially_filled:
+                    # Log partial fill but continue ladder
+                    log_event(
+                        "BUY_PARTIAL_FILL",
+                        level="INFO",
+                        symbol=symbol,
+                        message=f"Partial fill at step {idx}: {filled_qty:.6f} / {qty:.6f}",
+                        ctx={
+                            "step": idx,
+                            "filled_qty": float(filled_qty),
+                            "requested_qty": float(qty),
+                            "fill_pct": float((filled_qty / qty) * 100) if qty > 0 else 0
+                        }
+                    )
+                    # Continue to next step to attempt filling remainder
+                    continue
 
         decision_end(
             dec_id,

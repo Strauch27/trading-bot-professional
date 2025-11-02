@@ -24,9 +24,14 @@ class RecoveryManager:
         self.snapshot_manager = get_snapshot_manager()
         self.recovered_states: Dict[str, CoinState] = {}
 
-    def recover_all_states(self) -> Dict[str, CoinState]:
+    def recover_all_states(self, exchange=None) -> Dict[str, CoinState]:
         """
         Recover all FSM states from snapshots.
+
+        CRITICAL FIX (Punkt 7): Added exchange sync for open orders/positions
+
+        Args:
+            exchange: Optional exchange instance for reconciling open orders
 
         Returns:
             Dict mapping symbol -> CoinState
@@ -64,6 +69,11 @@ class RecoveryManager:
                             f"Recovered {symbol}: {coin_state.phase.name} "
                             f"(amount={coin_state.amount:.6f}, entry={coin_state.entry_price:.4f})"
                         )
+
+                        # CRITICAL FIX (Punkt 7): Reconcile with exchange if in WAIT_FILL or WAIT_SELL_FILL
+                        if exchange and coin_state.order_id:
+                            self._reconcile_open_order(symbol, coin_state, exchange)
+
                     else:
                         # State is invalid - reset to IDLE
                         logger.warning(
@@ -104,6 +114,78 @@ class RecoveryManager:
             logger.debug(f"Failed to log recovery event: {e}")
 
         return self.recovered_states
+
+    def _reconcile_open_order(self, symbol: str, coin_state: CoinState, exchange) -> None:
+        """
+        Reconcile recovered state with actual exchange order status.
+
+        CRITICAL FIX (Punkt 7): Idempotent reconciliation of open orders
+        """
+        try:
+            order_id = coin_state.order_id
+            if not order_id:
+                return
+
+            logger.info(f"[RECONCILE] Fetching order {order_id} for {symbol} from exchange...")
+
+            # Fetch order from exchange
+            order = exchange.fetch_order(order_id, symbol)
+
+            if not order:
+                logger.warning(f"[RECONCILE] Order {order_id} not found on exchange for {symbol}")
+                return
+
+            status = (order.get('status') or '').upper()
+            filled_qty = float(order.get('filled', 0.0))
+            avg_price = float(order.get('average') or 0.0)
+
+            logger.info(
+                f"[RECONCILE] {symbol} order {order_id}: status={status}, "
+                f"filled={filled_qty:.6f}, avg_price={avg_price:.6f}"
+            )
+
+            # Update coin state based on actual exchange status
+            from core.fsm.phases import Phase
+
+            if coin_state.phase == Phase.WAIT_FILL:
+                if status in ('FILLED', 'CLOSED'):
+                    # Order filled - update position
+                    coin_state.amount = filled_qty
+                    coin_state.entry_price = avg_price
+                    coin_state.entry_ts = order.get('timestamp', 0) / 1000.0
+                    coin_state.phase = Phase.POSITION
+                    logger.info(f"[RECONCILE] {symbol}: WAIT_FILL → POSITION (order filled)")
+                elif status in ('CANCELED', 'CANCELLED', 'EXPIRED'):
+                    # Order not filled - reset to IDLE
+                    coin_state.phase = Phase.IDLE
+                    coin_state.order_id = None
+                    logger.info(f"[RECONCILE] {symbol}: WAIT_FILL → IDLE (order canceled/expired)")
+                elif filled_qty > 0:
+                    # Partial fill - update position
+                    coin_state.amount = filled_qty
+                    coin_state.entry_price = avg_price
+                    coin_state.entry_ts = order.get('timestamp', 0) / 1000.0
+                    logger.info(f"[RECONCILE] {symbol}: WAIT_FILL with partial fill {filled_qty:.6f}")
+
+            elif coin_state.phase == Phase.WAIT_SELL_FILL:
+                if status in ('FILLED', 'CLOSED'):
+                    # Order filled - position closed
+                    coin_state.amount = 0.0
+                    coin_state.entry_price = 0.0
+                    coin_state.entry_ts = 0.0
+                    coin_state.phase = Phase.POST_TRADE
+                    logger.info(f"[RECONCILE] {symbol}: WAIT_SELL_FILL → POST_TRADE (order filled)")
+                elif status in ('CANCELED', 'CANCELLED', 'EXPIRED'):
+                    # Order not filled - back to position
+                    coin_state.phase = Phase.POSITION
+                    coin_state.order_id = None
+                    logger.info(f"[RECONCILE] {symbol}: WAIT_SELL_FILL → POSITION (order canceled/expired)")
+
+        except Exception as reconcile_error:
+            logger.error(
+                f"[RECONCILE] Failed to reconcile order for {symbol}: {reconcile_error}",
+                exc_info=True
+            )
 
     def get_recovery_summary(self) -> Dict:
         """Get summary of recovery operation"""

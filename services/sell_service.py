@@ -308,12 +308,18 @@ class SellService:
             filled_any = False
 
             # Leiter: mehrere BPS-Schritte unter Bid
-            for bps in self.exit_ladder_bps:
+            # CRITICAL FIX (Punkt 5): Add delay between IOC orders to prevent cache race
+            import time as time_module
+            for step_idx, bps in enumerate(self.exit_ladder_bps):
                 target_price = bid * (1 - bps / 10_000.0)
                 q_adj, ok = self.sizing.validate_sell_qty(symbol, qty, target_price)
                 if not ok:
                     log_event("EXIT_BELOW_MIN_NOTIONAL", symbol=symbol, ctx={"qty": q_adj, "price": target_price})
                     break
+
+                # Add small delay after first step to allow previous IOC to settle
+                if step_idx > 0:
+                    time_module.sleep(0.1)  # 100ms delay between ladder steps
 
                 order = self._place_limit_ioc(symbol, q_adj, target_price)
                 if not order:

@@ -97,10 +97,23 @@ class ExitHandler:
 
             position_data = self.engine.positions[symbol]
 
-            # Record exit in PnL Service with trade-based fee collection using cache
+            # CRITICAL FIX (P2 Issue #6): Aggregate fees from ALL orders (multi-leg exits)
+            # Multi-leg exits (e.g., IOC ladder with partial fills) may have multiple orders
             exit_fee = 0.0
-            if hasattr(result, 'order') and result.order:
-                order = result.order
+
+            # Get all orders from result (supports multi-leg exits)
+            orders_to_process = []
+            if hasattr(result, 'all_orders') and result.all_orders:
+                orders_to_process = result.all_orders
+            elif hasattr(result, 'order') and result.order:
+                # Fallback: single order (backward compatibility)
+                orders_to_process = [result.order]
+
+            # Aggregate fees from ALL orders
+            for order in orders_to_process:
+                if not order:
+                    continue
+
                 trades = order.get("trades") or []
                 if not trades and order.get("id"):
                     try:
@@ -114,9 +127,20 @@ class ExitHandler:
                             params={"orderId": order["id"]},
                             cache_ttl=60.0  # Cache for 1 minute
                         )
-                    except Exception:
-                        pass
-                exit_fee = sum(t.get("fee", {}).get("cost", 0) for t in (trades or []))
+                    except Exception as fetch_error:
+                        logger.debug(f"Failed to fetch trades for order {order.get('id')}: {fetch_error}")
+                        trades = []
+
+                # Aggregate fees from this order's trades
+                for trade in (trades or []):
+                    fee_info = trade.get("fee", {})
+                    if fee_info and fee_info.get("cost"):
+                        exit_fee += float(fee_info.get("cost", 0))
+
+            logger.debug(
+                f"Aggregated exit fees for {symbol}: {exit_fee:.6f} USDT "
+                f"(from {len(orders_to_process)} order(s))"
+            )
 
             realized_pnl = self.engine.pnl_service.record_fill(
                 symbol=symbol,
@@ -197,22 +221,38 @@ class ExitHandler:
             except Exception as e:
                 logger.debug(f"Failed to log order_done for sell order {symbol}: {e}")
 
-            # Remove/update position store
-            del self.engine.positions[symbol]
+            # CRITICAL FIX (P1 Issue #9): Atomic position cleanup
+            # Use lock to prevent race between cleanup and new buy signals
+            # Portfolio cleanup MUST happen before engine position removal
+            with self.engine._lock:
+                # Step 1: Portfolio cleanup FIRST (stricter check)
+                # This prevents new buy signals from seeing "no portfolio position"
+                try:
+                    portfolio = getattr(self.engine, 'portfolio', None)
+                    if portfolio and hasattr(portfolio, 'held_assets'):
+                        asset = portfolio.held_assets.get(symbol)
+                        if asset:
+                            remaining = float(asset.get('amount') or 0.0) - float(result.filled_amount or 0.0)
+                            if remaining <= 1e-9:
+                                portfolio.remove_held_asset(symbol)
+                                logger.debug(f"Portfolio position removed for {symbol}")
+                            else:
+                                portfolio.update_held_asset(symbol, {"amount": max(0.0, remaining)})
+                                logger.debug(f"Portfolio position updated for {symbol}: {remaining:.6f} remaining")
+                except Exception as portfolio_error:
+                    logger.warning(
+                        f"Failed to sync portfolio after exit for {symbol}: {portfolio_error}",
+                        exc_info=True
+                    )
+                    # Continue cleanup even if portfolio sync failed
 
-            # Synchronize PortfolioManager holdings so UI/portfolio views update
-            try:
-                portfolio = getattr(self.engine, 'portfolio', None)
-                if portfolio and hasattr(portfolio, 'held_assets'):
-                    asset = portfolio.held_assets.get(symbol)
-                    if asset:
-                        remaining = float(asset.get('amount') or 0.0) - float(result.filled_amount or 0.0)
-                        if remaining <= 1e-9:
-                            portfolio.remove_held_asset(symbol)
-                        else:
-                            portfolio.update_held_asset(symbol, {"amount": max(0.0, remaining)})
-            except Exception as portfolio_error:
-                logger.debug(f"Failed to sync portfolio after exit for {symbol}: {portfolio_error}")
+                # Step 2: Engine position cleanup SECOND
+                # Only after portfolio is clean to avoid race window
+                if symbol in self.engine.positions:
+                    del self.engine.positions[symbol]
+                    logger.debug(f"Engine position removed for {symbol}")
+
+                # Both operations completed atomically - no race window
 
             # Notify BuySignalService of trade completion (for Mode 4 anchor reset)
             self.engine.buy_signal_service.on_trade_completed(symbol)

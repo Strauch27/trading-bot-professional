@@ -31,17 +31,21 @@ class TimeoutManager:
             self.buy_timeout_secs = getattr(config, 'BUY_FILL_TIMEOUT_SECS', 30)
             self.sell_timeout_secs = getattr(config, 'SELL_FILL_TIMEOUT_SECS', 30)
             self.cooldown_secs = getattr(config, 'COOLDOWN_SECS', 60)
+            # CRITICAL FIX (P2 Issue #7): Position TTL enforcement
+            self.position_ttl_min = getattr(config, 'TRADE_TTL_MIN', 60)  # Default 60 minutes
         except ImportError:
             logger.warning("Config not found, using default timeout values")
             self.buy_timeout_secs = 30
             self.sell_timeout_secs = 30
             self.cooldown_secs = 60
+            self.position_ttl_min = 60
 
         logger.info(
             f"TimeoutManager initialized: "
             f"buy={self.buy_timeout_secs}s, "
             f"sell={self.sell_timeout_secs}s, "
-            f"cooldown={self.cooldown_secs}s"
+            f"cooldown={self.cooldown_secs}s, "
+            f"position_ttl={self.position_ttl_min}min"
         )
 
     def check_buy_timeout(
@@ -126,6 +130,48 @@ class TimeoutManager:
 
         return None
 
+    def check_position_ttl(
+        self,
+        symbol: str,
+        coin_state
+    ) -> Optional[EventContext]:
+        """
+        Check if position has exceeded TTL (time-to-live).
+
+        CRITICAL FIX (P2 Issue #7): Force exit stale positions after TRADE_TTL_MIN.
+        Prevents positions from being held indefinitely.
+
+        Returns:
+            EventContext with EXIT_SIGNAL_TIMEOUT event, or None
+        """
+        # Need entry_ts to calculate position age
+        if not hasattr(coin_state, 'entry_ts') or coin_state.entry_ts == 0:
+            return None
+
+        # Calculate position age in minutes
+        position_age_secs = time.time() - coin_state.entry_ts
+        position_age_min = position_age_secs / 60.0
+
+        # Check if position exceeded TTL
+        if position_age_min > self.position_ttl_min:
+            logger.info(
+                f"Position TTL exceeded: {symbol} "
+                f"(age={position_age_min:.1f}min, ttl={self.position_ttl_min}min)"
+            )
+
+            return EventContext(
+                event=FSMEvent.EXIT_SIGNAL_TIMEOUT,
+                symbol=symbol,
+                timestamp=time.time(),
+                data={
+                    'position_age_minutes': position_age_min,
+                    'ttl_threshold_minutes': self.position_ttl_min,
+                    'exit_reason': 'POSITION_TTL_EXCEEDED'
+                }
+            )
+
+        return None
+
     def check_all_timeouts(
         self,
         symbol: str,
@@ -158,6 +204,12 @@ class TimeoutManager:
         # Check cooldown expiry (COOLDOWN phase)
         elif coin_state.phase == Phase.COOLDOWN:
             event = self.check_cooldown_expired(symbol, state_data)
+            if event:
+                events.append(event)
+
+        # CRITICAL FIX (P2 Issue #7): Check position TTL (POSITION phase)
+        elif coin_state.phase == Phase.POSITION:
+            event = self.check_position_ttl(symbol, coin_state)
             if event:
                 events.append(event)
 

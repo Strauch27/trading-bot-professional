@@ -35,11 +35,23 @@ class IdempotencyStore:
         """
         Create event fingerprint.
 
+        CRITICAL FIX (Punkt 6): Include decision_id and phase for proper scoping
+        Schema: (symbol, decision_id, phase, event, order_id, timestamp_bucket)
+
         Timestamp is bucketed to 1-second intervals to handle slight timing variations.
         """
         timestamp_bucket = int(ctx.timestamp)
+
+        # Get decision_id from context (if available)
+        decision_id = ctx.data.get('decision_id', '') if hasattr(ctx, 'data') and ctx.data else ''
+
+        # Get phase from context (if available)
+        phase = ctx.data.get('phase', '') if hasattr(ctx, 'data') and ctx.data else ''
+
         return (
             ctx.symbol,
+            decision_id,
+            phase,
             ctx.event,
             ctx.order_id or "",
             timestamp_bucket

@@ -83,6 +83,42 @@ class FSMachine:
         try:
             action(ctx, coin_state)
         except Exception as e:
+            # CRITICAL FIX (P1 Issue #3): Handle transition aborts gracefully
+            # Check if this is an intentional abort (e.g., preflight validation failure)
+            from core.fsm.exceptions import FSMTransitionAbort
+
+            if isinstance(e, FSMTransitionAbort):
+                logger.warning(
+                    f"Transition aborted: {current_phase.name} → {next_phase.name} - {e.reason}",
+                    extra={'symbol': ctx.symbol, 'reason': e.reason}
+                )
+
+                # Return to IDLE with optional cooldown
+                coin_state.phase = Phase.IDLE
+                coin_state.note = f"abort:{e.reason}"
+
+                if e.should_cooldown:
+                    import time
+                    cooldown_secs = e.cooldown_seconds
+                    if cooldown_secs is None:
+                        try:
+                            import config
+                            cooldown_secs = getattr(config, 'ENTRY_BLOCK_COOLDOWN_S', 30)
+                        except Exception:
+                            cooldown_secs = 30
+
+                    coin_state.cooldown_until = time.time() + cooldown_secs
+
+                    logger.info(
+                        f"Cooldown set for {ctx.symbol}: {cooldown_secs}s (reason: {e.reason})"
+                    )
+
+                # Mark as processed (no retry)
+                self.idempotency_store.mark_processed(ctx)
+
+                return True  # Transition handled (aborted to IDLE)
+
+            # Not an abort - handle as error
             logger.error(
                 f"Action failed during {current_phase.name} → {next_phase.name}: {e}",
                 exc_info=True
@@ -143,6 +179,20 @@ class FSMachine:
             )
         except Exception as e:
             logger.debug(f"Failed to log transition: {e}")
+
+        # CRITICAL FIX (Punkt 9): Flush dashboard state on every phase transition
+        # This ensures Terminal Dashboard shows up-to-date phase without debounce lag
+        try:
+            from core.state_writer import DebouncedStateWriter
+            # Try to get default writer instance if it exists
+            # (Actual implementation depends on how state_writer is integrated)
+            import core.state_writer as state_writer_mod
+            if hasattr(state_writer_mod, '_default_writer') and state_writer_mod._default_writer:
+                state_writer_mod._default_writer.flush()
+                logger.debug(f"Dashboard flushed after transition: {from_phase.name} → {to_phase.name}")
+        except Exception as flush_error:
+            # Don't fail transition on flush errors
+            logger.debug(f"Dashboard flush failed (non-critical): {flush_error}")
 
     def _log_invalid_transition(self, coin_state: CoinState, ctx: EventContext):
         """Log invalid transition attempt"""

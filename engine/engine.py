@@ -703,6 +703,22 @@ class TradingEngine:
         """Stop the trading engine"""
         self.running = False
 
+        # Stop market data loop first to avoid dangling background threads
+        md_started = getattr(self, '_md_started', False)
+        md_running = hasattr(self, 'market_data') and getattr(self.market_data, '_running', False)
+        if hasattr(self, 'market_data') and (md_started or md_running):
+            try:
+                logger.info("Stopping market data service...", extra={'event_type': 'MARKET_DATA_STOPPING'})
+                self.market_data.stop()
+                logger.info("Market data service stopped", extra={'event_type': 'MARKET_DATA_STOPPED'})
+            except Exception as md_stop_error:
+                logger.warning(
+                    f"Failed to stop market data service cleanly: {md_stop_error}",
+                    extra={'event_type': 'MARKET_DATA_STOP_FAILED', 'error': str(md_stop_error)}
+                )
+            finally:
+                self._md_started = False
+
         # Signal UI fallback thread to stop (if exists)
         if hasattr(self, '_ui_fallback_shutdown_event') and self._ui_fallback_shutdown_event:
             logger.debug("Signaling UI fallback thread shutdown")

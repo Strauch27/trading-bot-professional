@@ -63,6 +63,69 @@ def action_prepare_buy(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: ENTRY_EVAL → PLACE_BUY"""
     coin_state.note = "preparing buy order"
 
+    # CRITICAL FIX (Punkt 2): Preflight validation before placing order
+    # This ensures FSM parity with Legacy buy flow for min_notional auto-bump
+    try:
+        from services.exchange_filters import get_filters
+        from services.order_validation import preflight
+        from services.quantize import q_price, q_amount
+
+        # Get exchange instance from context or config
+        exchange = ctx.data.get('exchange')
+        if not exchange:
+            # Try to get exchange from imported module
+            try:
+                from adapters import get_exchange
+                exchange = get_exchange()
+            except Exception:
+                logger.warning(f"No exchange available for preflight check on {ctx.symbol}")
+                exchange = None
+
+        if exchange:
+            # 1. Load exchange filters
+            filters = get_filters(exchange, ctx.symbol)
+
+            # 2. Get raw price/amount from context
+            raw_price = ctx.data.get('order_price')
+            raw_amount = ctx.data.get('order_qty')
+
+            if raw_price and raw_amount:
+                # 3. Run preflight (quantize + min_notional auto-bump)
+                ok, result = preflight(ctx.symbol, raw_price, raw_amount, filters)
+
+                if not ok:
+                    # CRITICAL FIX (P1 Issue #3): Abort transition properly
+                    # Use FSMTransitionAbort to return to IDLE with cooldown
+                    from core.fsm.exceptions import FSMTransitionAbort
+
+                    reason = result.get('reason', 'preflight_failed')
+                    logger.warning(
+                        f"[PREFLIGHT_FAILED] {ctx.symbol}: {reason} "
+                        f"(need={result.get('need')}, got={result.get('got')})"
+                    )
+
+                    # Abort transition with cooldown
+                    raise FSMTransitionAbort(
+                        reason=f"preflight:{reason}",
+                        should_cooldown=True
+                    )
+
+                # 4. Update context with quantized/auto-bumped values
+                ctx.data['order_price'] = result['price']
+                ctx.data['order_qty'] = result['amount']
+
+                logger.info(
+                    f"[PREFLIGHT_OK] {ctx.symbol}: "
+                    f"price={result['price']:.8f}, qty={result['amount']:.6f}, "
+                    f"notional={result['price'] * result['amount']:.2f}"
+                )
+        else:
+            logger.debug(f"Skipping preflight for {ctx.symbol} (no exchange available)")
+
+    except Exception as preflight_error:
+        logger.error(f"Preflight check failed for {ctx.symbol}: {preflight_error}", exc_info=True)
+        # Don't block on preflight errors - continue with original values
+
     if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
         coin_state.fsm_data.buy_order_prepared_at = ctx.timestamp
 
@@ -85,9 +148,20 @@ def action_log_blocked(ctx: EventContext, coin_state: CoinState) -> None:
 
     coin_state.note = f"blocked: {ctx.data.get('block_reason', 'unknown')}"
 
-    # CRITICAL FIX: Set cooldown to prevent IDLE->ENTRY_EVAL->IDLE loop
-    # When guards block, wait 30s before re-evaluating
-    coin_state.cooldown_until = time.time() + 30.0
+    # CRITICAL FIX (Punkt 3): Set cooldown to prevent IDLE->ENTRY_EVAL->IDLE loop
+    # Use config value instead of hardcoded 30s
+    try:
+        import config
+        cooldown_secs = getattr(config, 'ENTRY_BLOCK_COOLDOWN_S', 30)
+    except Exception:
+        cooldown_secs = 30  # Fallback to 30s default
+
+    coin_state.cooldown_until = time.time() + cooldown_secs
+
+    logger.info(
+        f"[GUARD_BLOCK] {ctx.symbol}: Cooldown set for {cooldown_secs}s "
+        f"(reason: {ctx.data.get('block_reason', 'unknown')})"
+    )
 
     try:
         from core.logger_factory import DECISION_LOG, log_event
@@ -96,7 +170,8 @@ def action_log_blocked(ctx: EventContext, coin_state: CoinState) -> None:
                   from_phase="ENTRY_EVAL",
                   to_phase="IDLE",
                   event=ctx.event.name,
-                  block_reason=ctx.data.get('block_reason'))
+                  block_reason=ctx.data.get('block_reason'),
+                  cooldown_secs=cooldown_secs)
     except Exception as e:
         logger.debug(f"Failed to log blocked: {e}")
 
@@ -182,18 +257,87 @@ def action_open_position(ctx: EventContext, coin_state: CoinState) -> None:
 
 
 def action_handle_partial_buy(ctx: EventContext, coin_state: CoinState) -> None:
-    """Transition: WAIT_FILL → WAIT_FILL (partial fill)"""
-    coin_state.note = f"partial fill: {ctx.filled_qty:.6f}"
+    """
+    Transition: WAIT_FILL → WAIT_FILL (partial fill)
 
+    CRITICAL FIX (Punkt 4): Open/update position on PARTIAL fills with weighted average
+    """
+    filled_qty = ctx.filled_qty or 0.0
+    avg_price = ctx.avg_price or 0.0
+
+    coin_state.note = f"partial fill: {filled_qty:.6f} @ {avg_price:.4f}"
+
+    # Update FSM data
     if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data and coin_state.fsm_data.buy_order:
         order_ctx = coin_state.fsm_data.buy_order
-        order_ctx.cumulative_qty = (order_ctx.cumulative_qty or 0.0) + (ctx.filled_qty or 0.0)
+        order_ctx.cumulative_qty = (order_ctx.cumulative_qty or 0.0) + filled_qty
+
+    # CRITICAL FIX: Open or update position with weighted average
+    if filled_qty > 0 and avg_price > 0:
+        if coin_state.amount == 0.0:
+            # First partial fill - open position
+            coin_state.amount = filled_qty
+            coin_state.entry_price = avg_price
+            coin_state.entry_ts = ctx.timestamp
+
+            logger.info(
+                f"[PARTIAL_OPEN] {ctx.symbol}: Position opened with PARTIAL fill "
+                f"{filled_qty:.6f} @ {avg_price:.4f}"
+            )
+
+            # Initialize TP/SL prices after first fill
+            try:
+                tp_pct = getattr(config, 'TP_PCT', 3.0)
+                sl_pct = getattr(config, 'SL_PCT', 5.0)
+                price_tick = ctx.data.get("price_tick", 0.00000001)
+                decimals = int(abs(math.log10(price_tick)))
+
+                coin_state.tp_px = round(avg_price * (1 + tp_pct / 100), decimals)
+                coin_state.sl_px = round(avg_price * (1 - sl_pct / 100), decimals)
+                coin_state.tp_active = True
+                coin_state.sl_active = True
+                coin_state.peak_price = avg_price
+                coin_state.trailing_trigger = 0.0
+
+                logger.info(
+                    f"{ctx.symbol}: TP/SL initialized - "
+                    f"TP: {coin_state.tp_px:.8f} (+{tp_pct}%), "
+                    f"SL: {coin_state.sl_px:.8f} (-{sl_pct}%)"
+                )
+            except Exception as tp_sl_error:
+                logger.warning(f"Failed to initialize TP/SL for {ctx.symbol}: {tp_sl_error}")
+
+        else:
+            # Subsequent partial fill - update with weighted average
+            new_total_qty = coin_state.amount + filled_qty
+            weighted_avg = (
+                (coin_state.entry_price * coin_state.amount + avg_price * filled_qty)
+                / max(new_total_qty, 1e-12)
+            )
+
+            logger.info(
+                f"[PARTIAL_UPDATE] {ctx.symbol}: Position updated "
+                f"{coin_state.amount:.6f} @ {coin_state.entry_price:.4f} + "
+                f"{filled_qty:.6f} @ {avg_price:.4f} = "
+                f"{new_total_qty:.6f} @ {weighted_avg:.4f}"
+            )
+
+            coin_state.amount = new_total_qty
+            coin_state.entry_price = weighted_avg
+
+        # Update FSM data position tracking
+        if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
+            coin_state.fsm_data.position_qty = coin_state.amount
+            coin_state.fsm_data.position_entry_price = coin_state.entry_price
 
     try:
         from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "order_partial_fill",
                   symbol=ctx.symbol,
-                  filled_qty=ctx.filled_qty,
+                  filled_qty=filled_qty,
+                  avg_price=avg_price,
+                  cumulative_qty=coin_state.amount,
+                  weighted_avg_entry=coin_state.entry_price,
                   order_id=ctx.order_id)
     except Exception as e:
         logger.debug(f"Failed to log partial_buy: {e}")
@@ -272,9 +416,68 @@ def action_update_pnl(ctx: EventContext, coin_state: CoinState) -> None:
 
 
 def action_prepare_sell(ctx: EventContext, coin_state: CoinState) -> None:
-    """Transition: EXIT_EVAL → PLACE_SELL"""
+    """
+    Transition: EXIT_EVAL → PLACE_SELL
+
+    CRITICAL FIX (P1 Issue #8): Validate exit price against slippage limits
+    Prevents disaster sells during flash crashes
+    """
     coin_state.exit_reason = ctx.data.get('exit_signal', 'unknown')
     coin_state.note = f"preparing sell: {coin_state.exit_reason}"
+
+    # CRITICAL FIX (P1 Issue #8): Slippage pre-check before sell
+    # Prevent selling at disaster prices (flash crash protection)
+    current_price = ctx.data.get('current_price', 0.0)
+    entry_price = coin_state.entry_price
+
+    if current_price > 0 and entry_price > 0:
+        try:
+            import config
+
+            # Calculate slippage vs entry
+            price_change_pct = ((current_price - entry_price) / entry_price) * 100
+            slippage_bps = abs(price_change_pct) * 100
+
+            max_slippage_bps = getattr(config, 'MAX_SLIPPAGE_BPS_EXIT', 500)  # Default 5%
+
+            # Check if slippage is too extreme (potential flash crash)
+            if slippage_bps > max_slippage_bps:
+                # Price too far from entry - may be flash crash or data error
+                logger.warning(
+                    f"[SLIPPAGE_BREACH] {ctx.symbol}: Exit slippage too high: "
+                    f"{slippage_bps:.1f} bps > {max_slippage_bps} bps "
+                    f"(current: {current_price:.8f}, entry: {entry_price:.8f}, "
+                    f"change: {price_change_pct:+.2f}%)"
+                )
+
+                # Option 1: Block sell if it's a massive loss (flash crash)
+                # Only block if it's a significant downward move
+                if price_change_pct < -10.0:  # More than -10% loss
+                    from core.fsm.exceptions import FSMTransitionAbort
+
+                    logger.error(
+                        f"[FLASH_CRASH_PROTECTION] {ctx.symbol}: Blocking sell - "
+                        f"price dropped {price_change_pct:.2f}% from entry. "
+                        f"Waiting for recovery or manual intervention."
+                    )
+
+                    # Abort transition - return to POSITION and wait
+                    raise FSMTransitionAbort(
+                        reason=f"flash_crash_protection:slippage_{slippage_bps:.0f}bps",
+                        should_cooldown=False  # No cooldown - allow re-check on next cycle
+                    )
+
+                # Option 2: Log warning but proceed (for take-profit scenarios)
+                logger.warning(
+                    f"[SLIPPAGE_WARNING] {ctx.symbol}: Proceeding with sell despite high slippage "
+                    f"(change: {price_change_pct:+.2f}%)"
+                )
+
+        except Exception as slippage_check_error:
+            logger.warning(
+                f"Slippage check failed for {ctx.symbol}: {slippage_check_error}"
+            )
+            # Don't block sell on check errors
 
     if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
         coin_state.fsm_data.exit_signal = ctx.data.get('exit_signal')
@@ -287,7 +490,10 @@ def action_prepare_sell(ctx: EventContext, coin_state: CoinState) -> None:
                   from_phase="EXIT_EVAL",
                   to_phase="PLACE_SELL",
                   event=ctx.event.name,
-                  exit_signal=coin_state.exit_reason)
+                  exit_signal=coin_state.exit_reason,
+                  current_price=current_price,
+                  entry_price=entry_price,
+                  price_change_pct=((current_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0)
     except Exception as e:
         logger.debug(f"Failed to log prepare_sell: {e}")
 

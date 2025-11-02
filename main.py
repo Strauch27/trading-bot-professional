@@ -98,10 +98,21 @@ def setup_exchange():
     load_dotenv()
 
     # Validate environment variables (fail-fast on missing/invalid config)
+    raw_api_key = os.environ.get('API_KEY')
+    raw_api_secret = os.environ.get('API_SECRET')
+    strict_validation = bool(raw_api_key and raw_api_secret)
+
+    env_info = {}
     try:
         from core.utils.env_validator import validate_environment
-        validate_environment(strict=True)  # Exit if validation fails
-        logger.info("Environment validation passed", extra={'event_type': 'ENV_VALIDATION_SUCCESS'})
+        env_info = validate_environment(strict=strict_validation)
+        if strict_validation:
+            logger.info("Environment validation passed", extra={'event_type': 'ENV_VALIDATION_SUCCESS'})
+        else:
+            logger.warning(
+                "Environment validation completed with warnings (observe mode fallback)",
+                extra={'event_type': 'ENV_VALIDATION_WARN', 'strict': strict_validation}
+            )
     except SystemExit:
         # Validation failed and already logged - re-raise to exit
         raise
@@ -110,12 +121,21 @@ def setup_exchange():
         raise
 
     # Robust API key loading (already validated by env_validator)
-    api_key = os.environ.get('API_KEY')
-    api_secret = os.environ.get('API_SECRET')
+    api_key = os.environ.get('API_KEY') or os.environ.get('MEXC_API_KEY')
+    api_secret = os.environ.get('API_SECRET') or os.environ.get('MEXC_API_SECRET')
 
-    if not api_key or not api_secret:
-        log_event("API_KEYS_MISSING", message="API_KEY oder API_SECRET nicht in Umgebungsvariablen gefunden. Bot startet im Observe-Modus.", level="ERROR")
-        return None, False
+    # If validation returned sanitized values, prefer them
+    api_key = env_info.get('API_KEY', api_key)
+    api_secret = env_info.get('API_SECRET', api_secret)
+
+    has_api_keys = bool(api_key and api_secret)
+
+    if not has_api_keys:
+        log_event(
+            "API_KEYS_MISSING",
+            message="API_KEY oder API_SECRET nicht in Umgebungsvariablen gefunden. Bot startet im Observe-Modus.",
+            level="ERROR"
+        )
 
     # Konservative requests Session für TLS-Stabilität (verhindert Windows crashes)
     import requests
@@ -144,8 +164,8 @@ def setup_exchange():
     session.mount('http://', adapter)
 
     exchange = ccxt.mexc({
-        'apiKey': api_key,
-        'secret': api_secret,
+        'apiKey': api_key or '',
+        'secret': api_secret or '',
         'enableRateLimit': True,
         'timeout': 30000,  # 30 Sekunden Timeout
         'session': session,  # type: ignore[arg-type]
@@ -201,7 +221,7 @@ def setup_exchange():
             logger.warning("Timestamp-Fehler: Systemzeit möglicherweise nicht synchron mit MEXC-Servern",
                           extra={'event_type': 'TIMESTAMP_ERROR_WARNING'})
 
-    return exchange, True
+    return exchange, has_api_keys
 
 
 def setup_topcoins(exchange):
@@ -589,11 +609,12 @@ def main():
 
     # Manager initialisieren
     DUST_MIN_COST_USD = config_module.DUST_MIN_COST_USD
-    dust_sweeper = DustSweeper(exchange, min_sweep_value=DUST_MIN_COST_USD) if exchange else None
+    dust_sweeper = DustSweeper(exchange, min_sweep_value=DUST_MIN_COST_USD) if exchange and has_api_keys else None
     settlement_manager = SettlementManager(dust_sweeper)
 
     # Portfolio Manager
-    portfolio = PortfolioManager(exchange, settlement_manager, dust_sweeper)
+    portfolio_exchange = exchange if has_api_keys else None
+    portfolio = PortfolioManager(portfolio_exchange, settlement_manager, dust_sweeper)
 
     # Periodischer Dust-Sweep (Background-Thread)
     DUST_SWEEP_ENABLED = config_module.DUST_SWEEP_ENABLED

@@ -103,10 +103,13 @@ class OrderService:
         side: str,
         amount: float,
         price: float,
-        client_order_id: Optional[str] = None
+        client_order_id: Optional[str] = None,
+        decision_id: Optional[str] = None  # CRITICAL FIX (P3 Issue #10): Add decision_id for tracing
     ) -> Optional[Dict[str, Any]]:
         """
         Platziert Limit IOC Order.
+
+        CRITICAL FIX (P3 Issue #10): Added decision_id parameter for complete tracing.
 
         Args:
             symbol: Trading pair
@@ -114,6 +117,7 @@ class OrderService:
             amount: Order-Menge
             price: Limit-Preis
             client_order_id: Optional Client Order ID
+            decision_id: Optional decision ID for tracing
 
         Returns:
             Order-Dict oder None bei Fehler

@@ -40,13 +40,26 @@ class ExitContext:
 
 @dataclass
 class ExitResult:
-    """Result of an exit operation"""
+    """
+    Result of an exit operation.
+
+    CRITICAL FIX (P2 Issue #6): Extended to support multi-leg exits (IOC ladder).
+    When multiple orders are placed (e.g., IOC ladder with partial fills),
+    all orders are tracked for accurate fee calculation.
+    """
     success: bool
     order_id: Optional[str] = None
     filled_amount: float = 0.0
     avg_price: float = 0.0
     reason: str = ""
     error: Optional[str] = None
+    # CRITICAL FIX (P2 Issue #6): Track all orders for multi-leg exits
+    all_orders: List[Dict[str, Any]] = None  # List of all order dicts from ladder steps
+
+    def __post_init__(self):
+        """Initialize mutable default"""
+        if self.all_orders is None:
+            self.all_orders = []
 
 
 class ExitEvaluator:
@@ -664,12 +677,14 @@ class ExitOrderManager:
             logger.info(f"SELL IOC pricing for {context.symbol}: BID={bid:.6f}, premium={premium_bps}bp, "
                        f"aggressive_price={aggressive_price:.6f} (vs current={context.current_price:.6f})")
 
+            # CRITICAL FIX (P3 Issue #10): Propagate decision_id from context to order
             order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
                 price=aggressive_price,
-                client_order_id=f"exit_{reason}_{int(time.time())}"
+                client_order_id=f"exit_{reason}_{int(time.time())}",
+                decision_id=context.decision_id  # Propagate decision_id for tracing ✅
             )
 
             # Phase 0: Check and log order fills
@@ -681,12 +696,14 @@ class ExitOrderManager:
                     logger.debug(f"Fill logging failed for exit order: {fill_log_error}")
 
             if order and order.get('status') == 'closed':
+                # CRITICAL FIX (P2 Issue #6): Include order in all_orders for fee tracking
                 return ExitResult(
                     success=True,
                     order_id=order['id'],
                     filled_amount=order.get('filled', 0),
                     avg_price=order.get('average', 0),
-                    reason=reason
+                    reason=reason,
+                    all_orders=[order]  # Track order for multi-leg fee calculation
                 )
 
             return ExitResult(success=False, reason=reason, error="Limit IOC not filled")
@@ -726,12 +743,14 @@ class ExitOrderManager:
 
             # Use limit IOC at bid price instead of market order
             # This works better on MEXC and provides price protection
+            # CRITICAL FIX (P3 Issue #10): Propagate decision_id from context to order
             order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
                 price=exit_price,
-                client_order_id=f"market_exit_{reason}_{int(time.time())}"
+                client_order_id=f"market_exit_{reason}_{int(time.time())}",
+                decision_id=context.decision_id  # Propagate decision_id for tracing ✅
             )
 
             # Phase 0: Check and log order fills
@@ -743,12 +762,14 @@ class ExitOrderManager:
                     logger.debug(f"Fill logging failed for market exit: {fill_log_error}")
 
             if order and order.get('status') == 'closed':
+                # CRITICAL FIX (P2 Issue #6): Include order in all_orders for fee tracking
                 return ExitResult(
                     success=True,
                     order_id=order['id'],
                     filled_amount=order.get('filled', 0),
                     avg_price=order.get('average', 0),
-                    reason=reason
+                    reason=reason,
+                    all_orders=[order]  # Track order for multi-leg fee calculation
                 )
 
             return ExitResult(success=False, reason=reason, error="Market order not filled")
@@ -771,12 +792,14 @@ class ExitOrderManager:
 
             # Use BID directly for maximum aggression in fallback scenario
             # (no premium deduction since this is already a retry)
+            # CRITICAL FIX (P3 Issue #10): Propagate decision_id from context to order
             order = self.order_service.place_limit_ioc(
                 symbol=context.symbol,
                 side="sell",
                 amount=context.amount,
                 price=bid,
-                client_order_id=f"ioc_fallback_{reason}_{int(time.time())}"
+                client_order_id=f"ioc_fallback_{reason}_{int(time.time())}",
+                decision_id=context.decision_id  # Propagate decision_id for tracing ✅
             )
 
             # Phase 0: Check and log order fills
@@ -788,12 +811,14 @@ class ExitOrderManager:
                     logger.debug(f"Fill logging failed for IOC fallback: {fill_log_error}")
 
             if order and order.get('status') == 'closed':
+                # CRITICAL FIX (P2 Issue #6): Include order in all_orders for fee tracking
                 return ExitResult(
                     success=True,
                     order_id=order['id'],
                     filled_amount=order.get('filled', 0),
                     avg_price=order.get('average', 0),
-                    reason=reason
+                    reason=reason,
+                    all_orders=[order]  # Track order for multi-leg fee calculation
                 )
 
             return ExitResult(success=False, reason=reason, error="IOC fallback not filled")
@@ -1039,14 +1064,22 @@ class ExitManager:
 
     def evaluate_position_exits(self, symbol: str, position_data: Dict,
                               current_price: float) -> List[str]:
-        """Evaluate exit conditions for a position"""
+        """
+        Evaluate exit conditions for a position.
+
+        CRITICAL FIX (P3 Issue #10): Extract decision_id from position_data for tracing.
+        """
+        # CRITICAL FIX (P3 Issue #10): Extract decision_id from position for tracing
+        decision_id = position_data.get('decision_id')
+
         context = ExitContext(
             symbol=symbol,
             current_price=current_price,
             amount=position_data.get('amount', 0),
             buying_price=position_data.get('buying_price', 0),
             elapsed_minutes=(time.time() - position_data.get('time', 0)) / 60,
-            position_data=position_data
+            position_data=position_data,
+            decision_id=decision_id  # Propagate decision_id for tracing ✅
         )
 
         return self.evaluator.evaluate_exit_signals(context)
@@ -1075,14 +1108,22 @@ class ExitManager:
 
     def execute_immediate_exit(self, symbol: str, position_data: Dict,
                              current_price: float, reason: str = "MANUAL_EXIT") -> ExitResult:
-        """Execute immediate exit bypassing queue"""
+        """
+        Execute immediate exit bypassing queue.
+
+        CRITICAL FIX (P3 Issue #10): Extract decision_id from position_data for tracing.
+        """
+        # CRITICAL FIX (P3 Issue #10): Extract decision_id from position for tracing
+        decision_id = position_data.get('decision_id')
+
         context = ExitContext(
             symbol=symbol,
             current_price=current_price,
             amount=position_data.get('amount', 0),
             buying_price=position_data.get('buying_price', 0),
             elapsed_minutes=(time.time() - position_data.get('time', 0)) / 60,
-            position_data=position_data
+            position_data=position_data,
+            decision_id=decision_id  # Propagate decision_id for tracing ✅
         )
 
         return self.order_manager.execute_exit_order(context, reason)

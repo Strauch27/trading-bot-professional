@@ -103,6 +103,8 @@ class TransitionTable:
         # ===== POSITION Phase =====
         self._add(Phase.POSITION, FSMEvent.TICK_RECEIVED, Phase.EXIT_EVAL, action_check_exit)
         self._add(Phase.POSITION, FSMEvent.POSITION_UPDATED, Phase.POSITION, action_update_pnl)
+        # CRITICAL FIX (P2 Issue #7): Direct transition on position TTL timeout
+        self._add(Phase.POSITION, FSMEvent.EXIT_SIGNAL_TIMEOUT, Phase.EXIT_EVAL, action_check_exit)
 
         # ===== EXIT_EVAL Phase =====
         self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TP, Phase.PLACE_SELL, action_prepare_sell)

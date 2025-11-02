@@ -1,0 +1,154 @@
+# ===================================================================
+# PRODUCTION-READY CONFIG PATCH
+# ===================================================================
+# Apply these changes to config.py before going live with all fixes
+#
+# HOW TO APPLY:
+# 1. Review each change carefully
+# 2. Manually update config.py with these values
+# 3. Run smoke tests (see tests/smoke_tests.py)
+# 4. Only then enable FSM_ENABLED=True in production
+# ===================================================================
+
+# =============================================================================
+# CRITICAL SAFETY SETTINGS (MUST SET)
+# =============================================================================
+
+# FSM Activation
+FSM_ENABLED = True  # ✅ Enable FSM (all P0-P3 fixes active)
+
+# Market Order Protection
+NEVER_MARKET_SELLS = True  # ✅ CRITICAL: Block market orders until exit ladder verified
+# IMPORTANT: Only set to False after verifying exit ladder works correctly in paper trading
+
+# Entry Guards (Parity with Legacy)
+MAX_SPREAD_BPS_ENTRY = 50  # ✅ Already set correctly (0.5% max spread)
+MAX_SLIPPAGE_BPS_ENTRY = 30  # ✅ Already set correctly (0.3% max slippage on entry)
+
+# Exit Guards
+MAX_SLIPPAGE_BPS_EXIT = 500  # ⚠️ CHANGE from 12 to 500 (5% max exit slippage)
+# Reason: Exit protection (P1 Fix #8) blocks sells > 10% loss (flash crash)
+#         Normal exit slippage cap should be higher to allow TP scenarios
+
+# Cooldowns (NEW - Add these to config.py)
+ENTRY_BLOCK_COOLDOWN_S = 60  # ⚠️ ADD: Cooldown after GUARDS_BLOCKED (min 60s recommended)
+# This prevents rapid re-entry loops when guards block a buy
+# Default was 30s in code, increase to 60s for safety
+
+COOLDOWN_SECS = 60  # ✅ Already set correctly (post-trade cooldown)
+
+# =============================================================================
+# TIMEOUTS & TTL
+# =============================================================================
+
+# Position TTL (NEW - P2 Fix #7)
+TRADE_TTL_MIN = 120  # ✅ Already set (force-close positions after 120 minutes)
+
+# Order Fill Timeouts (NEW - Add if missing)
+BUY_FILL_TIMEOUT_SECS = 30  # ⚠️ ADD if missing: Max wait for buy fill
+SELL_FILL_TIMEOUT_SECS = 30  # ⚠️ ADD if missing: Max wait for sell fill
+
+# =============================================================================
+# ENTRY/EXIT ESCALATION (Verify parity Legacy ↔ FSM)
+# =============================================================================
+
+# Buy Escalation Steps
+BUY_ESCALATION_STEPS = [
+    # ⚠️ VERIFY: This must match exactly in Legacy and FSM buy flows
+    # Current value should be checked - example format:
+    {"premium_bps": 10, "ttl_ms": 1000},
+    {"premium_bps": 20, "ttl_ms": 1000},
+    {"premium_bps": 30, "ttl_ms": 1000}
+]
+
+# Exit Ladder (IOC Limit steps)
+EXIT_LADDER_BPS = [10, 30, 70, 120]  # ✅ Verify this matches sell_service.py
+# Each step tries: BID * (1 - bps/10000)
+# With NEVER_MARKET_SELLS=True, no market fallback after exhausting ladder
+
+# Exit IOC TTL
+EXIT_IOC_TTL_MS = 500  # ⚠️ ADD if missing: Time-to-live per IOC step (500ms recommended)
+
+# =============================================================================
+# RISK LIMITS (For paper trading, keep conservative)
+# =============================================================================
+
+# Max concurrent positions
+MAX_OPEN_POSITIONS = 3  # ⚠️ REDUCE from 5 to 3 for initial testing
+
+# Position sizing (keep small for paper trading)
+POSITION_SIZE_USDT = 15.0  # ⚠️ REDUCE to ~15 USDT for paper trading
+MAX_POSITION_VALUE_USDT = 25.0  # ⚠️ Keep conservative
+MAX_TOTAL_EXPOSURE_USDT = 75.0  # ⚠️ Total exposure cap (3 positions * 25 USDT)
+
+# =============================================================================
+# LOGGING & DEBUGGING (Enable detailed logging for initial testing)
+# =============================================================================
+
+# Log Level
+LOG_LEVEL = "DEBUG"  # ⚠️ SET to DEBUG for smoke tests (can reduce to INFO later)
+
+# Order Event Logging
+ENABLE_ORDER_LOGGING = True  # ✅ Ensure order events are logged to JSONL
+
+# Dashboard Updates
+DASHBOARD_UPDATE_INTERVAL_MS = 100  # ⚠️ ADD/SET: Fast updates for testing (P1 Fix #9)
+
+# =============================================================================
+# PAPER TRADING / SIMULATION (CRITICAL for initial testing)
+# =============================================================================
+
+# ⚠️ IMPORTANT: Use paper trading API keys or isolated sub-account
+# DO NOT test with real capital until all smoke tests pass!
+
+# Example environment variable pattern:
+# export MEXC_API_KEY="<paper-trading-key>"
+# export MEXC_API_SECRET="<paper-trading-secret>"
+
+# Or use sub-account with minimal funds (~$50 max)
+
+# =============================================================================
+# SMOKE TEST CONFIGURATION (Single symbol testing)
+# =============================================================================
+
+# For initial smoke tests, use only ONE symbol
+WHITELIST = ["BLESS/USDT"]  # ⚠️ Start with BLESS for preflight parity test
+# After BLESS works: Add 1-2 more low-volume symbols
+
+# =============================================================================
+# STOP CRITERIA (Auto-halt conditions)
+# =============================================================================
+
+# ⚠️ ADD these to enable auto-halt on critical errors:
+
+# Auto-halt on reconciliation mismatch
+HALT_ON_RECONCILE_MISMATCH = True  # Recommended: True for initial testing
+
+# Auto-halt on order cache race
+HALT_ON_ORDER_RACE_DETECTED = True  # Recommended: True for initial testing
+
+# Max consecutive errors before halt
+MAX_CONSECUTIVE_ERRORS = 3  # Recommended: 3 for initial testing
+
+# =============================================================================
+# SUMMARY OF REQUIRED CHANGES
+# =============================================================================
+#
+# MUST CHANGE:
+# ✓ NEVER_MARKET_SELLS = True
+# ✓ MAX_SLIPPAGE_BPS_EXIT = 500 (from 12)
+# ✓ ENTRY_BLOCK_COOLDOWN_S = 60 (ADD)
+# ✓ BUY_FILL_TIMEOUT_SECS = 30 (ADD if missing)
+# ✓ SELL_FILL_TIMEOUT_SECS = 30 (ADD if missing)
+# ✓ EXIT_IOC_TTL_MS = 500 (ADD if missing)
+#
+# RECOMMENDED FOR TESTING:
+# ✓ MAX_OPEN_POSITIONS = 3 (reduce)
+# ✓ POSITION_SIZE_USDT = 15.0 (reduce)
+# ✓ MAX_TOTAL_EXPOSURE_USDT = 75.0 (reduce)
+# ✓ LOG_LEVEL = "DEBUG"
+# ✓ WHITELIST = ["BLESS/USDT"] (single symbol)
+# ✓ HALT_ON_RECONCILE_MISMATCH = True (ADD)
+# ✓ HALT_ON_ORDER_RACE_DETECTED = True (ADD)
+#
+# ===================================================================

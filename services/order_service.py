@@ -400,6 +400,33 @@ class OrderService:
                     f"{symbol} {side} {qty} @ {price or 'market'} - {last_error_type.value}: {last_error}"
                 )
 
+                # CRITICAL FIX (P1 Issue #4): Check for duplicate order on exchange
+                # If order was placed but network response failed, treat as success
+                if last_error_type == OrderErrorType.DUPLICATE_ORDER and coid:
+                    logger.info(
+                        f"Duplicate order error - checking if order exists on exchange (COID: {coid})"
+                    )
+
+                    try:
+                        # Try to fetch order by client order ID
+                        existing_order = self._fetch_order_by_coid(symbol, coid)
+
+                        if existing_order:
+                            logger.info(
+                                f"Found existing order via COID: {existing_order.get('id')} "
+                                f"(status: {existing_order.get('status')})"
+                            )
+                            # Treat as success - parse the existing order
+                            return self._parse_order_response(existing_order, coid, attempts=attempt)
+                        else:
+                            logger.warning(
+                                f"Duplicate error but order not found via COID {coid} - may be false positive"
+                            )
+                    except Exception as fetch_error:
+                        logger.warning(
+                            f"Failed to fetch order by COID during duplicate check: {fetch_error}"
+                        )
+
                 # Check if error is retryable
                 if not self._is_retryable(last_error_type):
                     logger.error(f"Fatal error, not retrying: {last_error_type.value}")
@@ -566,6 +593,56 @@ class OrderService:
             OrderErrorType.UNKNOWN
         }
         return error_type in retryable_types
+
+    def _fetch_order_by_coid(self, symbol: str, coid: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch order by client order ID (COID).
+
+        CRITICAL FIX (P1 Issue #4): Fetch order via COID to handle duplicate errors.
+        If an order was placed but response failed, this allows recovery.
+
+        Args:
+            symbol: Trading pair
+            coid: Client order ID
+
+        Returns:
+            Order dict if found, None otherwise
+        """
+        try:
+            # Try CCXT's fetch_orders with client order ID filter
+            # Note: Not all exchanges support this - MEXC does via clientOrderId param
+            if hasattr(self.exchange, 'fetch_orders'):
+                orders = self.exchange.fetch_orders(
+                    symbol=symbol,
+                    params={'clientOrderId': coid}
+                )
+
+                if orders and len(orders) > 0:
+                    # Return most recent order matching COID
+                    return orders[0]
+
+            # Fallback: Try fetch_open_orders (if order is still open)
+            if hasattr(self.exchange, 'fetch_open_orders'):
+                open_orders = self.exchange.fetch_open_orders(symbol=symbol)
+                for order in open_orders:
+                    if order.get('clientOrderId') == coid:
+                        return order
+
+            # Fallback: Try fetch_closed_orders (if order was filled quickly)
+            if hasattr(self.exchange, 'fetch_closed_orders'):
+                closed_orders = self.exchange.fetch_closed_orders(
+                    symbol=symbol,
+                    limit=50  # Check recent orders only
+                )
+                for order in closed_orders:
+                    if order.get('clientOrderId') == coid:
+                        return order
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch order by COID {coid}: {e}")
+            return None
 
 
 # Utility function for backwards compatibility
