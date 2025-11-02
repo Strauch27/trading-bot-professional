@@ -735,13 +735,13 @@ class FSMTradingEngine:
 
             # CRITICAL FIX: Duplicate purchase protection
             # Prevent buying the same coin twice (race condition prevention)
-            if st.symbol in self.portfolio.held_assets:
+            if self.portfolio.is_holding(st.symbol):
                 logger.warning(f"[DUPLICATE_BLOCKED] {st.symbol} already has an active position! Aborting duplicate buy.")
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
             # Check if there's already a pending buy order for this symbol
-            if st.symbol in self.portfolio.open_buy_orders:
+            if self.portfolio.has_open_order(st.symbol):
                 logger.warning(f"[DUPLICATE_BLOCKED] {st.symbol} already has a pending buy order! Aborting duplicate buy.")
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
