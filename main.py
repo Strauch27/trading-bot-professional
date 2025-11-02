@@ -227,6 +227,13 @@ def setup_topcoins(exchange):
     for k in config_module.topcoins_keys:
         symbol = normalized.get(k)
 
+        # CRITICAL FIX: Skip invalid 1-char base symbols (4/USDT, C/USDT, etc.)
+        if symbol and '/' in symbol:
+            base = symbol.split('/')[0]
+            if len(base) <= 1:
+                logger.warning(f"Skipping invalid symbol (1-char base): {symbol}", extra={'event_type': 'INVALID_SYMBOL_FILTERED'})
+                continue
+
         # Skip blacklisted coins
         if symbol in liquidity_blacklist:
             logger.debug(f"Skipping blacklisted coin (low liquidity): {symbol}")

@@ -1680,6 +1680,32 @@ class PortfolioManager:
             "fees": pos.fees_paid
         }
 
+    def save_open_buy_order(self, symbol: str, order_data: dict) -> None:
+        """
+        Persist open buy order to disk for crash recovery.
+
+        Args:
+            symbol: Trading symbol
+            order_data: Dict with order_id, client_order_id, price, amount, etc.
+        """
+        with self._lock:
+            self.open_buy_orders[symbol] = order_data
+            self.save_state()  # Persist to disk immediately
+            logger.debug(f"Persisted buy order for {symbol}: order_id={order_data.get('order_id')}")
+
+    def get_open_buy_order(self, symbol: str) -> Optional[dict]:
+        """
+        Retrieve persisted buy order data.
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Order data dict or None if not found
+        """
+        with self._lock:
+            return self.open_buy_orders.get(symbol)
+
     def _emit_event(self, ev: dict) -> None:
         """
         Emit position event for audit trail.

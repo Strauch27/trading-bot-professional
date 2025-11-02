@@ -610,8 +610,9 @@ class FSMTradingEngine:
             amount = quote_budget / ctx.price
 
             # P1-1: Use OrderRouter for idempotent order placement
-            # Generate intent_id from decision_id for idempotency
-            intent_id = f"buy_{st.symbol}_{st.decision_id}_{int(time.time()*1000)}"
+            # CRITICAL FIX: Remove timestamp to enable proper idempotency
+            # decision_id is already unique per buy attempt - timestamp breaks deduplication
+            intent_id = f"buy_{st.symbol}_{st.decision_id}"
 
             result = self.order_router.submit(
                 intent_id=intent_id,
@@ -630,6 +631,20 @@ class FSMTradingEngine:
                 st.order_id = result.order_id
                 st.client_order_id = intent_id  # Use intent_id as client order id
                 st.order_placed_ts = time.time()
+
+                # CRITICAL FIX: Persist order state immediately after placement
+                # This prevents order_id loss on crashes or phase transitions
+                try:
+                    self.portfolio.save_open_buy_order(st.symbol, {
+                        "order_id": st.order_id,
+                        "client_order_id": intent_id,
+                        "price": ctx.price,
+                        "amount": amount,
+                        "timestamp": st.order_placed_ts,
+                        "phase": "WAIT_FILL"
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to persist order state for {st.symbol}: {e}")
 
                 if st.fsm_data:
                     st.fsm_data.buy_order = OrderContext(
@@ -690,6 +705,18 @@ class FSMTradingEngine:
         """WAIT_FILL: Poll order status and handle fills with PartialFillHandler."""
         # Note: Timeouts handled by _tick_timeouts
         try:
+            # CRITICAL FIX: Rehydrate order_id from persistence if missing
+            if not st.order_id:
+                logger.warning(f"[WAIT_FILL] {st.symbol} order_id is None - attempting rehydration from persistence")
+                try:
+                    persisted = self.portfolio.get_open_buy_order(st.symbol)
+                    if persisted and persisted.get("order_id"):
+                        st.order_id = persisted["order_id"]
+                        st.client_order_id = persisted.get("client_order_id")
+                        logger.info(f"[WAIT_FILL] {st.symbol} order_id rehydrated: {st.order_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to rehydrate order_id for {st.symbol}: {e}")
+
             # CRITICAL FIX: Validate order_id exists before fetching
             if not st.order_id:
                 logger.error(f"[WAIT_FILL_ERROR] {st.symbol} order_id is None/empty! Cannot fetch order status. Transitioning to IDLE.")
