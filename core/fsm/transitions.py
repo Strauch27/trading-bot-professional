@@ -114,6 +114,7 @@ class TransitionTable:
         self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_SL, Phase.PLACE_SELL, action_prepare_sell)
         self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TIMEOUT, Phase.PLACE_SELL, action_prepare_sell)
         self._add(Phase.EXIT_EVAL, FSMEvent.EXIT_SIGNAL_TRAILING, Phase.PLACE_SELL, action_prepare_sell)
+        self._add(Phase.EXIT_EVAL, FSMEvent.NO_EXIT_SIGNAL, Phase.POSITION, action_continue_holding)  # CRITICAL FIX: Return to POSITION if no exit
         self._add(Phase.EXIT_EVAL, FSMEvent.TICK_RECEIVED, Phase.POSITION, action_continue_holding)
 
         # ===== PLACE_SELL Phase =====
