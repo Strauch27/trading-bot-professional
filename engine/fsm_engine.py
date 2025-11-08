@@ -817,6 +817,7 @@ class FSMTradingEngine:
                     }
                 )
                 budget_reserved = True  # Mark as successfully reserved
+                st.reserved_budget = quote_budget  # Track reserved amount for cleanup
                 logger.info(f"[BUDGET_RESERVED] {st.symbol}: {quote_budget:.2f} USDT reserved (available: {self.portfolio.get_free_usdt():.2f})")
             except ValueError as e:
                 logger.error(f"[BUDGET_RESERVE_FAILED] {st.symbol}: {e}")
@@ -1279,80 +1280,87 @@ class FSMTradingEngine:
                     except Exception as e:
                         logger.debug(f"Failed to emit ORDER_FILLED: {e}")
 
-                    # Atomic portfolio update
-                    with self.portfolio_tx.begin(st.symbol, st):
-                        st.amount = final_qty
-                        st.entry_price = final_price
-                        st.entry_ts = time.time()
-                        st.entry_fee_per_unit = (final_fee / final_qty) if final_qty > 0 else 0
+                    # CRITICAL FIX (P0): Removed portfolio_tx.begin() to prevent "Nested transactions" error
+                    # Update portfolio and state directly - snapshot manager handles persistence
+                    st.amount = final_qty
+                    st.entry_price = final_price
+                    st.entry_ts = time.time()
+                    st.entry_fee_per_unit = (final_fee / final_qty) if final_qty > 0 else 0
 
-                        self.portfolio.add_held_asset(st.symbol, {
-                            "amount": final_qty,
-                            "entry_price": final_price,
-                            "buy_fee_quote_per_unit": st.entry_fee_per_unit,
-                            "buy_price": final_price
-                        })
+                    self.portfolio.add_held_asset(st.symbol, {
+                        "amount": final_qty,
+                        "entry_price": final_price,
+                        "buy_fee_quote_per_unit": st.entry_fee_per_unit,
+                        "buy_price": final_price
+                    })
 
-                        # CRITICAL FIX: Commit reserved budget after successful fill
-                        # Budget was reserved in _process_place_buy, now commit it
-                        actual_cost = final_qty * final_price
-                        try:
-                            self.portfolio.commit_budget(
-                                quote_amount=actual_cost,
-                                symbol=st.symbol,
-                                order_id=st.order_id,
-                                intent_id=st.client_order_id
-                            )
-                            logger.info(f"[BUDGET_COMMITTED] {st.symbol}: {actual_cost:.2f} USDT committed (fill: {final_qty:.6f}@{final_price:.8f})")
-                        except Exception as commit_error:
-                            logger.error(f"[BUDGET_COMMIT_ERROR] {st.symbol}: Failed to commit budget: {commit_error}")
+                    # CRITICAL FIX: Commit reserved budget after successful fill
+                    # Budget was reserved in _process_place_buy, now commit it
+                    actual_cost = final_qty * final_price
+                    try:
+                        self.portfolio.commit_budget(
+                            quote_amount=actual_cost,
+                            symbol=st.symbol,
+                            order_id=st.order_id,
+                            intent_id=st.client_order_id
+                        )
+                        st.reserved_budget = 0.0  # Clear tracked reservation after commit
+                        logger.info(f"[BUDGET_COMMITTED] {st.symbol}: {actual_cost:.2f} USDT committed (fill: {final_qty:.6f}@{final_price:.8f})")
+                    except Exception as commit_error:
+                        logger.error(f"[BUDGET_COMMIT_ERROR] {st.symbol}: Failed to commit budget: {commit_error}")
 
-                        self.pnl_service.record_fill(
+                    self.pnl_service.record_fill(
+                        symbol=st.symbol,
+                        side="buy",
+                        quantity=final_qty,
+                        avg_price=final_price,
+                        fee_quote=final_fee,
+                        order_id=st.order_id,
+                        client_order_id=st.client_order_id
+                    )
+
+                    # Save snapshot after successful fill
+                    try:
+                        self.snapshot_manager.save_snapshot(st.symbol, st)
+                    except Exception as snap_err:
+                        logger.warning(f"[SNAPSHOT_ERROR] {st.symbol}: Failed to save snapshot: {snap_err}")
+
+                    # P2-1: Log trade open
+                    try:
+                        self.jsonl.trade_open(
                             symbol=st.symbol,
                             side="buy",
-                            quantity=final_qty,
-                            avg_price=final_price,
-                            fee_quote=final_fee,
-                            order_id=st.order_id,
-                            client_order_id=st.client_order_id
+                            amount=final_qty,
+                            entry_price=final_price,
+                            notional=final_qty * final_price,
+                            fee=final_fee,
+                            decision_id=st.decision_id,
+                            entry_ts=st.entry_ts
                         )
+                    except Exception as e:
+                        logger.debug(f"Failed to log trade_open: {e}")
 
-                        # P2-1: Log trade open
-                        try:
-                            self.jsonl.trade_open(
-                                symbol=st.symbol,
-                                side="buy",
-                                amount=final_qty,
-                                entry_price=final_price,
-                                notional=final_qty * final_price,
-                                fee=final_fee,
-                                decision_id=st.decision_id,
-                                entry_ts=st.entry_ts
-                            )
-                        except Exception as e:
-                            logger.debug(f"Failed to log trade_open: {e}")
+                    # P2-3: Log fill step and end buy flow
+                    try:
+                        self.buy_flow.step(4, "Wait for Fill", "SUCCESS", f"{final_qty:.6f} @ {final_price:.4f}")
+                        duration_ms = (time.time() - self.buy_flow.start_time) * 1000 if self.buy_flow.start_time else 0
+                        self.buy_flow.end_evaluation("BUY_COMPLETED", duration_ms)
+                    except Exception as e:
+                        logger.debug(f"Failed to log buy_flow completion: {e}")
 
-                        # P2-3: Log fill step and end buy flow
-                        try:
-                            self.buy_flow.step(4, "Wait for Fill", "SUCCESS", f"{final_qty:.6f} @ {final_price:.4f}")
-                            duration_ms = (time.time() - self.buy_flow.start_time) * 1000 if self.buy_flow.start_time else 0
-                            self.buy_flow.end_evaluation("BUY_COMPLETED", duration_ms)
-                        except Exception as e:
-                            logger.debug(f"Failed to log buy_flow completion: {e}")
+                    # UI EVENT: POSITION_OPENED (for dashboard)
+                    try:
+                        from core.logging.events import emit
+                        emit("POSITION_OPENED",
+                             symbol=st.symbol,
+                             qty=final_qty,
+                             price=final_price,
+                             notional=final_qty * final_price,
+                             decision_id=st.decision_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to emit POSITION_OPENED: {e}")
 
-                        # UI EVENT: POSITION_OPENED (for dashboard)
-                        try:
-                            from core.logging.events import emit
-                            emit("POSITION_OPENED",
-                                 symbol=st.symbol,
-                                 qty=final_qty,
-                                 price=final_price,
-                                 notional=final_qty * final_price,
-                                 decision_id=st.decision_id)
-                        except Exception as e:
-                            logger.debug(f"Failed to emit POSITION_OPENED: {e}")
-
-                        self._emit_event(st, FSMEvent.BUY_ORDER_FILLED, ctx)
+                    self._emit_event(st, FSMEvent.BUY_ORDER_FILLED, ctx)
 
                     # Telegram notification
                     if self.telegram:
@@ -1381,10 +1389,32 @@ class FSMTradingEngine:
                 self.cooldown_manager.set(st.symbol, cooldown_duration)
                 logger.info(f"Symbol cooldown set for {st.symbol}: {cooldown_duration}s after order canceled")
 
+                # CRITICAL FIX (P0): Release reserved budget on order cancellation
+                if hasattr(st, 'reserved_budget') and st.reserved_budget:
+                    _release_budget_with_retry(
+                        self.portfolio,
+                        st.reserved_budget,
+                        st.symbol,
+                        "order_canceled"
+                    )
+                    st.reserved_budget = 0.0
+
                 self._emit_event(st, FSMEvent.ORDER_CANCELED, ctx)
 
         except Exception as e:
             logger.error(f"Wait fill error {st.symbol}: {e}")
+
+            # CRITICAL FIX (P0): Release reserved budget on error in WAIT_FILL
+            # Budget was reserved in PLACE_BUY but not committed due to error
+            if hasattr(st, 'reserved_budget') and st.reserved_budget:
+                _release_budget_with_retry(
+                    self.portfolio,
+                    st.reserved_budget,
+                    st.symbol,
+                    "wait_fill_error"
+                )
+                st.reserved_budget = 0.0
+
             self._emit_event(st, FSMEvent.ERROR_OCCURRED, ctx)
 
     def _process_position(self, st: CoinState, ctx: EventContext):
