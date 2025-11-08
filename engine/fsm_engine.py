@@ -1454,26 +1454,20 @@ class FSMTradingEngine:
         """EXIT_EVAL: Check TP, SL, trailing, timeout using ExitEngine priority logic."""
         # P0-4: Use ExitEngine for prioritized exit evaluation
         try:
-            # Evaluate all exit rules
-            decisions = self.exit_engine.evaluate_all_exits(
-                entry_price=st.entry_price,
+            # CRITICAL FIX: Use correct FSMExitEngine API
+            # choose_exit() evaluates all rules internally and returns highest priority
+            exit_decision = self.exit_engine.choose_exit(
+                coin_state=st,
                 current_price=ctx.price,
-                peak_price=st.peak_price,
-                entry_ts=st.entry_ts,
-                tp_px=st.tp_px,
-                sl_px=st.sl_px,
-                trailing_trigger=st.trailing_trigger
+                current_time=time.time()
             )
-
-            # Choose highest priority triggered exit
-            exit_decision = self.exit_engine.choose_exit(decisions)
 
             if exit_decision:
                 st.exit_reason = exit_decision.reason
                 if st.fsm_data:
                     st.fsm_data.exit_signal = exit_decision.reason
                     st.fsm_data.exit_detected_at = time.time()
-                    st.fsm_data.exit_price = exit_decision.exit_price
+                    st.fsm_data.exit_price = exit_decision.price  # Fixed: was exit_price, should be price
 
                 # Emit appropriate event based on exit rule
                 if exit_decision.rule == "HARD_SL":
@@ -1482,7 +1476,7 @@ class FSMTradingEngine:
                     self._emit_event(st, FSMEvent.EXIT_SIGNAL_TP, ctx)
                 elif exit_decision.rule == "TRAILING":
                     self._emit_event(st, FSMEvent.EXIT_SIGNAL_TRAILING, ctx)
-                elif exit_decision.rule == "TIME_EXIT":
+                elif exit_decision.rule == "TIME":  # Fixed: was TIME_EXIT, should be TIME
                     self._emit_event(st, FSMEvent.EXIT_SIGNAL_TIMEOUT, ctx)
                 else:
                     logger.warning(f"Unknown exit rule: {exit_decision.rule}")
