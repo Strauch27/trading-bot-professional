@@ -84,6 +84,9 @@ class TransitionTable:
         self._add(Phase.ENTRY_EVAL, FSMEvent.GUARDS_BLOCKED, Phase.IDLE, action_log_blocked)
         self._add(Phase.ENTRY_EVAL, FSMEvent.RISK_LIMITS_BLOCKED, Phase.IDLE, action_log_blocked)
         self._add(Phase.ENTRY_EVAL, FSMEvent.NO_SIGNAL, Phase.IDLE, action_log_blocked)  # No signal = back to IDLE with cooldown
+        # CRITICAL FIX: Handle TICK_RECEIVED during evaluation to prevent infinite loop
+        # Without this, TICK events cause invalid transitions and coins get stuck re-evaluating forever
+        self._add(Phase.ENTRY_EVAL, FSMEvent.TICK_RECEIVED, Phase.ENTRY_EVAL, action_idle_tick)
 
         # ===== PLACE_BUY Phase =====
         self._add(Phase.PLACE_BUY, FSMEvent.BUY_ORDER_PLACED, Phase.WAIT_FILL, action_wait_for_fill)

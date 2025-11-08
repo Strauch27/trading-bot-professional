@@ -548,6 +548,16 @@ class OrderRouter:
                 "timestamp": time.time()
             })
 
+            # CRITICAL FIX (P1): Release FSM's reserved budget on early abort
+            # FSM reserves budget before calling OrderRouter, so we must release on failure
+            estimated_price = limit_px if limit_px else 0.0
+            if estimated_price > 0:
+                self._release_budget(
+                    symbol, side, qty, estimated_price,
+                    exchange_error="kill_switch_disabled",
+                    intent_id=intent_id
+                )
+
             # Publish order.failed event to notify engine
             if self.event_bus:
                 try:
@@ -575,6 +585,15 @@ class OrderRouter:
                 "timestamp": time.time()
             })
 
+            # CRITICAL FIX (P1): Release FSM's reserved budget on early abort
+            # Use limit_price as fallback for budget release calculation
+            release_price = limit_px if limit_px and limit_px > 0 else 1.0  # Fallback to 1.0 if no price available
+            self._release_budget(
+                symbol, side, qty, release_price,
+                exchange_error="no_price_available",
+                intent_id=intent_id
+            )
+
             # Publish order.failed event to notify engine
             if self.event_bus:
                 try:
@@ -589,30 +608,13 @@ class OrderRouter:
                     logger.warning(f"Failed to publish order.failed event: {e}")
             return
 
-        # State: RESERVE
-        if not self._reserve_budget(symbol, side, qty, last_price):
-            error_msg = f"Budget reservation failed for {symbol}"
-            logger.error(error_msg, extra={'intent_id': intent_id})
-            self.tl.write("order_audit", {
-                "intent_id": intent_id,
-                "state": "FAILED",
-                "reason": "reserve_failed",
-                "timestamp": time.time()
-            })
-
-            # Publish order.failed event to notify engine
-            if self.event_bus:
-                try:
-                    self.event_bus.publish("order.failed", {
-                        "intent_id": intent_id,
-                        "symbol": symbol,
-                        "side": side,
-                        "reason": "reserve_failed",
-                        "error": error_msg
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to publish order.failed event: {e}")
-            return
+        # CRITICAL FIX (P0): Budget reservation removed - FSM already reserves budget
+        # before calling OrderRouter. Double reservation was causing budget accounting errors.
+        # FSM handles full budget lifecycle:
+        #   - reserve_budget() before OrderRouter call
+        #   - commit_budget() on successful fill
+        #   - release_budget() on abort/failure
+        # OrderRouter only executes orders, doesn't manage budget.
 
         self.tl.write("order_audit", {
             "intent_id": intent_id,

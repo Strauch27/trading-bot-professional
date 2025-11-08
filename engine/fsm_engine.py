@@ -21,6 +21,46 @@ def _debug_write(msg: str) -> None:
     if getattr(config, 'ENGINE_DEBUG_TRACE', False):
         _debug_write(msg)
         sys.stdout.flush()
+
+# CRITICAL FIX (P2): Helper function to release budget with retry logic
+def _release_budget_with_retry(portfolio, quote_amount: float, symbol: str, reason: str, max_retries: int = 3) -> bool:
+    """
+    Release budget with retry logic to handle transient failures.
+
+    Args:
+        portfolio: Portfolio instance
+        quote_amount: Amount to release in quote currency
+        symbol: Trading symbol
+        reason: Reason for release
+        max_retries: Maximum retry attempts (default: 3)
+
+    Returns:
+        True if release successful, False otherwise
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            portfolio.release_budget(
+                quote_amount=quote_amount,
+                symbol=symbol,
+                reason=reason
+            )
+            logging.getLogger(__name__).info(
+                f"[BUDGET_RELEASED] {symbol}: {quote_amount:.2f} USDT released (reason: {reason}, attempt: {attempt})"
+            )
+            return True
+        except Exception as e:
+            if attempt < max_retries:
+                logging.getLogger(__name__).warning(
+                    f"[BUDGET_RELEASE_RETRY] {symbol}: Attempt {attempt}/{max_retries} failed: {e}, retrying..."
+                )
+                time.sleep(0.1 * attempt)  # 100ms, 200ms, 300ms backoff
+            else:
+                logging.getLogger(__name__).error(
+                    f"[BUDGET_RELEASE_FAILED] {symbol}: All {max_retries} attempts failed: {e}"
+                )
+                return False
+    return False
+
 from adapters.exchange import ExchangeAdapter as ExchangeAdapterClass
 from core.fsm.fsm_events import EventContext, FSMEvent
 from core.fsm.fsm_machine import FSMachine
@@ -716,6 +756,21 @@ class FSMTradingEngine:
     def _process_place_buy(self, st: CoinState, ctx: EventContext):
         """PLACE_BUY: Calculate size and place buy order."""
         try:
+            # CRITICAL FIX (P3): Re-check cooldown to close race window
+            # Race condition: Coin passes cooldown check in ENTRY_EVAL, but another instance
+            # of the same symbol might have entered cooldown before PLACE_BUY executes.
+            # This prevents duplicate orders for the same symbol within cooldown period.
+            if hasattr(st, 'cooldown_until') and st.cooldown_until:
+                import time
+                remaining_cooldown = st.cooldown_until - time.time()
+                if remaining_cooldown > 0:
+                    logger.warning(
+                        f"[COOLDOWN_RACE_BLOCKED] {st.symbol} entered cooldown before PLACE_BUY "
+                        f"(remaining: {remaining_cooldown:.1f}s). Aborting buy."
+                    )
+                    self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                    return
+
             # Calculate position size
             available_budget = self.portfolio.get_free_usdt()
             max_trades = getattr(config, 'MAX_TRADES', 10)
@@ -781,17 +836,14 @@ class FSMTradingEngine:
                 market_info = self.exchange.market(st.symbol)
             except Exception as e:
                 logger.error(f"[BUY_INTENT_ABORTED] {st.symbol} intent={intent_id[:8]} reason=market_info_unavailable error={e}")
-                # CRITICAL FIX: Release reserved budget on abort
+                # CRITICAL FIX (P2): Release reserved budget with retry logic
                 if budget_reserved:
-                    try:
-                        self.portfolio.release_budget(
-                            quote_amount=quote_budget,
-                            symbol=st.symbol,
-                            reason="market_info_unavailable"
-                        )
-                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: market_info_unavailable)")
-                    except Exception as release_error:
-                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
+                    _release_budget_with_retry(
+                        self.portfolio,
+                        quote_budget,
+                        st.symbol,
+                        "market_info_unavailable"
+                    )
                 # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
@@ -873,17 +925,14 @@ class FSMTradingEngine:
                 except Exception:
                     pass
 
-                # CRITICAL FIX: Release reserved budget on abort
+                # CRITICAL FIX (P2): Release reserved budget with retry logic
                 if budget_reserved:
-                    try:
-                        self.portfolio.release_budget(
-                            quote_amount=quote_budget,
-                            symbol=st.symbol,
-                            reason=f"quantization_{abort_reason}"
-                        )
-                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: {abort_reason})")
-                    except Exception as release_error:
-                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
+                    _release_budget_with_retry(
+                        self.portfolio,
+                        quote_budget,
+                        st.symbol,
+                        f"quantization_{abort_reason}"
+                    )
 
                 # FSM PARITY FIX (LÜCKE 3): Use BUY_ABORTED for clean aborts
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
@@ -998,17 +1047,14 @@ class FSMTradingEngine:
                 # CRITICAL FIX: Log detailed failure reason
                 logger.error(f"[PLACE_BUY_FAILED] {st.symbol} Order placement failed: success={result.success}, order_id={result.order_id!r}, error={result.error}")
 
-                # CRITICAL FIX: Release reserved budget on order placement failure
+                # CRITICAL FIX (P2): Release reserved budget with retry logic
                 if budget_reserved:
-                    try:
-                        self.portfolio.release_budget(
-                            quote_amount=quote_budget,
-                            symbol=st.symbol,
-                            reason="order_placement_failed"
-                        )
-                        logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: order_placement_failed)")
-                    except Exception as release_error:
-                        logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
+                    _release_budget_with_retry(
+                        self.portfolio,
+                        quote_budget,
+                        st.symbol,
+                        "order_placement_failed"
+                    )
 
                 # P2-2: Track failed trade (order placement failed)
                 try:
@@ -1021,17 +1067,14 @@ class FSMTradingEngine:
         except Exception as e:
             logger.error(f"Place buy error {st.symbol}: {e}")
 
-            # CRITICAL FIX: Release reserved budget on exception
+            # CRITICAL FIX (P2): Release reserved budget with retry logic
             if budget_reserved:
-                try:
-                    self.portfolio.release_budget(
-                        quote_amount=quote_budget,
-                        symbol=st.symbol,
-                        reason="buy_order_exception"
-                    )
-                    logger.info(f"[BUDGET_RELEASED] {st.symbol}: {quote_budget:.2f} USDT released (reason: exception)")
-                except Exception as release_error:
-                    logger.error(f"[BUDGET_RELEASE_ERROR] {st.symbol}: Failed to release budget: {release_error}")
+                _release_budget_with_retry(
+                    self.portfolio,
+                    quote_budget,
+                    st.symbol,
+                    "buy_order_exception"
+                )
 
             # P2-2: Track error for adaptive logging
             try:
