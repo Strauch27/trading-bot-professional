@@ -21,7 +21,7 @@ class TimeoutManager:
     Timeouts:
     - Buy order fill: 30s (config.BUY_FILL_TIMEOUT_SECS)
     - Sell order fill: 30s (config.SELL_FILL_TIMEOUT_SECS)
-    - Cooldown: 60s (config.COOLDOWN_SECS)
+    - Cooldown: 15min (config.COOLDOWN_MIN converted to seconds)
     """
 
     def __init__(self):
@@ -30,14 +30,16 @@ class TimeoutManager:
             import config
             self.buy_timeout_secs = getattr(config, 'BUY_FILL_TIMEOUT_SECS', 30)
             self.sell_timeout_secs = getattr(config, 'SELL_FILL_TIMEOUT_SECS', 30)
-            self.cooldown_secs = getattr(config, 'COOLDOWN_SECS', 60)
+            # CRITICAL FIX: Use COOLDOWN_MIN (in minutes) instead of COOLDOWN_SECS
+            cooldown_minutes = getattr(config, 'COOLDOWN_MIN', 15)
+            self.cooldown_secs = cooldown_minutes * 60
             # CRITICAL FIX (P2 Issue #7): Position TTL enforcement
             self.position_ttl_min = getattr(config, 'TRADE_TTL_MIN', 60)  # Default 60 minutes
         except ImportError:
             logger.warning("Config not found, using default timeout values")
             self.buy_timeout_secs = 30
             self.sell_timeout_secs = 30
-            self.cooldown_secs = 60
+            self.cooldown_secs = 15 * 60  # 15 minutes in seconds
             self.position_ttl_min = 60
 
         logger.info(

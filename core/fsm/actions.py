@@ -537,6 +537,19 @@ def action_close_position(ctx: EventContext, coin_state: CoinState) -> None:
 
     coin_state.note = f"position closed: PnL={realized_pnl:.4f}"
 
+    # CRITICAL FIX: Store sell order data BEFORE clearing position
+    # This ensures POST_TRADE has fallback data if order is archived
+    if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
+        if not coin_state.fsm_data.sell_order:
+            coin_state.fsm_data.sell_order = EventContext(
+                timestamp=ctx.timestamp,
+                symbol=ctx.symbol,
+                event=ctx.event
+            )
+        coin_state.fsm_data.sell_order.cumulative_qty = ctx.filled_qty or 0.0
+        coin_state.fsm_data.sell_order.avg_price = ctx.avg_price or 0.0
+        coin_state.fsm_data.sell_order.total_fees = ctx.fee or 0.0
+
     try:
         from core.logger_factory import DECISION_LOG, log_event
         log_event(DECISION_LOG(), "position_closed",
@@ -601,9 +614,12 @@ def action_retry_sell(ctx: EventContext, coin_state: CoinState) -> None:
 def action_start_cooldown(ctx: EventContext, coin_state: CoinState) -> None:
     """Transition: POST_TRADE → COOLDOWN"""
     import config
-    cooldown_secs = getattr(config, 'COOLDOWN_SECS', 60)
+    # CRITICAL FIX: Use COOLDOWN_MIN (in minutes) instead of COOLDOWN_SECS
+    # This was causing cooldown to be only 60 seconds instead of 15 minutes (900 seconds)
+    cooldown_minutes = getattr(config, 'COOLDOWN_MIN', 15)
+    cooldown_secs = cooldown_minutes * 60
     coin_state.cooldown_until = ctx.timestamp + cooldown_secs
-    coin_state.note = f"cooldown for {cooldown_secs}s"
+    coin_state.note = f"cooldown for {cooldown_secs}s ({cooldown_minutes}min)"
 
     if hasattr(coin_state, 'fsm_data') and coin_state.fsm_data:
         coin_state.fsm_data.cooldown_started_at = ctx.timestamp

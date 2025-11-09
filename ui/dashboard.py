@@ -93,9 +93,56 @@ class DashboardEventBus:
         with self._lock:
             return self.last_event
 
+    def get_recent_events(self, n: int = 5) -> List[str]:
+        """Get the N most recent events (thread-safe)."""
+        with self._lock:
+            # Return last N events in reverse order (newest first)
+            return list(self.events)[-n:][::-1]
+
 
 # Global event bus instance
 _event_bus = DashboardEventBus()
+
+# Global FSM event tracking
+_fsm_events = deque(maxlen=100)
+_fsm_events_lock = None
+
+
+def emit_fsm_event(symbol: str, from_phase: str, to_phase: str, event: str):
+    """
+    Track FSM state transitions for dashboard display.
+
+    Call this from FSM engine when state transitions occur.
+    """
+    global _fsm_events, _fsm_events_lock
+
+    # Initialize lock if needed
+    if _fsm_events_lock is None:
+        import threading
+        _fsm_events_lock = threading.Lock()
+
+    timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+    with _fsm_events_lock:
+        _fsm_events.append({
+            'timestamp': timestamp,
+            'symbol': symbol,
+            'from_phase': from_phase,
+            'to_phase': to_phase,
+            'event': event
+        })
+
+
+def get_recent_fsm_events(n: int = 5) -> List[Dict[str, str]]:
+    """Get the N most recent FSM events."""
+    global _fsm_events, _fsm_events_lock
+
+    if _fsm_events_lock is None:
+        return []
+
+    with _fsm_events_lock:
+        # Return last N events in reverse order (newest first)
+        return list(_fsm_events)[-n:][::-1]
 
 
 def emit_dashboard_event(event_type: str, message: str):
@@ -293,11 +340,15 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
                             position_value = current_price * amount
                             total_value += position_value
 
+                            # Extract fees for net PnL calculation
+                            entry_fee_per_unit = pos.get('buy_fee_quote_per_unit', 0) or pos.get('entry_fee_per_unit', 0) or 0
+
                             positions_data.append({
                                 'symbol': symbol,
                                 'amount': amount,
                                 'entry': pos.get('entry_price', 0),
                                 'current': current_price,
+                                'entry_fee_per_unit': entry_fee_per_unit,
                                 'is_ghost': False
                             })
                 except Exception as e:
@@ -332,11 +383,15 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
                     position_value = current_price * amount
                     total_value += position_value
 
+                    # Extract fees for net PnL calculation
+                    entry_fee_per_unit = asset.get('buy_fee_quote_per_unit', 0) or asset.get('entry_fee_per_unit', 0) or 0
+
                     positions_data.append({
                         'symbol': symbol,
                         'amount': amount,
                         'entry': entry_price,
                         'current': current_price,
+                        'entry_fee_per_unit': entry_fee_per_unit,
                         'is_ghost': False
                     })
             except Exception as e:
@@ -662,13 +717,14 @@ def make_header_panel(config_data: Dict[str, Any], system_resources: Dict[str, A
 def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
     """Create the portfolio panel with ghost positions."""
     try:
-        table = Table(expand=True, border_style="magenta", show_header=True)
-        table.add_column("Symbol", style="cyan", no_wrap=True)
-        table.add_column("Menge", style="white", justify="right")
-        table.add_column("Entry", style="yellow", justify="right")
-        table.add_column("Current", style="yellow", justify="right")
-        table.add_column("PnL ($/%)", justify="right")
-        table.add_column("Status", justify="center", no_wrap=True)
+        from rich import box
+        table = Table(show_header=True, box=box.SIMPLE, padding=(0, 1), collapse_padding=True)
+        table.add_column("Symbol", style="cyan", no_wrap=True, width=11)
+        table.add_column("Qty", style="white", justify="right", width=8)
+        table.add_column("Entry", style="yellow", justify="right", width=9)
+        table.add_column("Current", style="yellow", justify="right", width=9)
+        table.add_column("PnL", justify="right", width=13)
+        table.add_column("St", justify="center", no_wrap=True, width=3)
 
         positions = portfolio_data.get("positions", []) if portfolio_data else []
         ghost_count = portfolio_data.get("ghost_count", 0)
@@ -676,7 +732,8 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
         return Panel(Text(f"Portfolio Panel Error: {e}", style="red"), title="PORTFOLIO ERROR", border_style="red")
 
     if not positions:
-        table.add_row("—", "—", "—", "—", "—", "—")
+        # Don't add empty row - keep table minimal
+        pass
     else:
         for pos in positions:
             is_ghost = pos.get('is_ghost', False)
@@ -700,38 +757,57 @@ def make_portfolio_panel(portfolio_data: Dict[str, Any]) -> Panel:
                     Text("👻", style="dim white")
                 )
             else:
-                # Real position
-                pnl = (pos['current'] - pos['entry']) * pos['amount']
-                pnl_pct = ((pos['current'] / pos['entry']) - 1) * 100 if pos['entry'] > 0 else 0
-                style = "green" if pnl >= 0 else "red"
+                # Real position - calculate NET PnL (after fees)
+                amount = pos['amount']
+                entry_price = pos['entry']
+                current_price = pos['current']
+                entry_fee_per_unit = pos.get('entry_fee_per_unit', 0) or 0
+
+                # Gross PnL (price difference)
+                gross_pnl = (current_price - entry_price) * amount
+
+                # Fees: entry fees + estimated exit fees (0.1% maker fee)
+                entry_fees = entry_fee_per_unit * amount
+                estimated_exit_fees = current_price * amount * 0.001  # 0.1% fee estimate
+                total_fees = entry_fees + estimated_exit_fees
+
+                # Net PnL (after all fees)
+                net_pnl = gross_pnl - total_fees
+
+                # Net PnL percentage (relative to invested capital including entry fees)
+                invested_capital = (entry_price * amount) + entry_fees
+                net_pnl_pct = (net_pnl / invested_capital * 100) if invested_capital > 0 else 0
+
+                style = "green" if net_pnl >= 0 else "red"
 
                 table.add_row(
                     pos['symbol'],
-                    f"{pos['amount']:.4f}",
-                    f"${pos['entry']:.4f}",
-                    f"${pos['current']:.4f}",
-                    Text(f"{pnl:+.2f} ({pnl_pct:+.2f}%)", style=style),
+                    f"{amount:.4f}",
+                    f"${entry_price:.4f}",
+                    f"${current_price:.4f}",
+                    Text(f"{net_pnl:+.2f} ({net_pnl_pct:+.2f}%)", style=style),
                     Text("✓", style="green")
                 )
 
     # Add ghost count to title if any
     ghost_suffix = f" | Ghosts: {ghost_count}" if ghost_count > 0 else ""
     title = f"[PORTFOLIO] Wert: ${portfolio_data.get('total_value', 0):.2f} / Budget: ${portfolio_data.get('budget', 0):.2f}{ghost_suffix}"
-    return Panel(table, title=title, border_style="magenta", expand=True)
+    return Panel(table, title=title, border_style="magenta")
 
 
 def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any], engine) -> Panel:
     """Create the top drops panel (V9_3: with current price, anchor and spread columns)."""
     try:
         global _last_symbol, _last_price
-        table = Table(expand=True, show_header=True)
-        table.add_column("#", style="dim", justify="right", width=3)
-        table.add_column("Symbol", style="bold", width=10)
-        table.add_column("Last", justify="right", width=11)
-        table.add_column("Drop %", justify="right", width=8)
-        table.add_column("Spread %", justify="right", width=8)
-        table.add_column("Anchor", justify="right", width=11)
-        table.add_column("To Trig", justify="right", width=8)
+        from rich import box
+        table = Table(show_header=True, box=box.SIMPLE, padding=(0, 1), collapse_padding=True)
+        table.add_column("#", style="dim", justify="right", width=2, no_wrap=True)
+        table.add_column("Symbol", style="bold", width=11, no_wrap=True)
+        table.add_column("Last", justify="right", width=10, no_wrap=True)
+        table.add_column("Drop", justify="right", width=7, no_wrap=True)
+        table.add_column("Spread", justify="right", width=7, no_wrap=True)
+        table.add_column("Anchor", justify="right", width=10, no_wrap=True)
+        table.add_column("Trig", justify="right", width=7, no_wrap=True)
 
         drop_trigger_pct = config_data.get('DT', 0) if config_data else 0
     except Exception as e:
@@ -810,7 +886,113 @@ def make_drop_panel(drop_data: List[Dict[str, Any]], config_data: Dict[str, Any]
         last_snap_info = f" • {_last_symbol}={_last_price:.8f}"
 
     title = f"📉 Top Drops (Trigger: {drop_trigger_pct:.1f}%) • rx={snap_rx} • ts={last_tick_ts}{last_snap_info}"
-    return Panel(table, title=title, border_style="cyan", expand=True)
+    return Panel(table, title=title, border_style="cyan")
+
+
+def make_event_history_panel() -> Panel:
+    """Create panel showing last 5 dashboard events."""
+    try:
+        from rich import box
+        table = Table(show_header=True, box=box.SIMPLE, padding=(0, 1), collapse_padding=True)
+        table.add_column("Zeit", style="dim cyan", width=8, no_wrap=True)
+        table.add_column("Typ", style="yellow", width=12, no_wrap=True)
+        table.add_column("Nachricht", style="white")
+
+        recent_events = _event_bus.get_recent_events(5)
+
+        if not recent_events:
+            # Don't show "no events" row - keep minimal
+            pass
+        else:
+            for event in recent_events:
+                # Parse event format: "[HH:MM:SS] [TYPE] message"
+                try:
+                    parts = event.split("] ", 2)
+                    if len(parts) >= 3:
+                        timestamp = parts[0].replace("[", "").strip()
+                        event_type = parts[1].replace("[", "").strip()
+                        message = parts[2].strip()
+
+                        # Truncate long messages
+                        if len(message) > 80:
+                            message = message[:77] + "..."
+
+                        # Color code by event type
+                        type_style = "yellow"
+                        if "TRADE_EXIT" in event_type:
+                            type_style = "green" if "🟢" in message else "red"
+                        elif "TRADE_ENTRY" in event_type:
+                            type_style = "cyan"
+
+                        table.add_row(
+                            timestamp,
+                            Text(event_type, style=type_style),
+                            message
+                        )
+                    else:
+                        table.add_row("—", "—", event[:80])
+                except Exception:
+                    table.add_row("—", "—", event[:80])
+
+        return Panel(table, title="📋 Event History (Last 5)", border_style="yellow")
+
+    except Exception as e:
+        return Panel(Text(f"Event History Error: {e}", style="red"), title="EVENT ERROR", border_style="red")
+
+
+def make_fsm_status_panel() -> Panel:
+    """Create panel showing last 5 FSM state transitions."""
+    try:
+        from rich import box
+        table = Table(show_header=True, box=box.SIMPLE, padding=(0, 1), collapse_padding=True)
+        table.add_column("Zeit", style="dim cyan", width=8, no_wrap=True)
+        table.add_column("Symbol", style="cyan", width=11, no_wrap=True)
+        table.add_column("Von", style="yellow", width=11, no_wrap=True)
+        table.add_column("→", style="dim white", width=1, no_wrap=True)
+        table.add_column("Nach", style="green", width=11, no_wrap=True)
+        table.add_column("Event", style="white", width=18, no_wrap=True)
+
+        recent_fsm = get_recent_fsm_events(5)
+
+        if not recent_fsm:
+            # Don't show "no events" row - keep minimal
+            pass
+        else:
+            for fsm_event in recent_fsm:
+                timestamp = fsm_event.get('timestamp', '—')
+                symbol = fsm_event.get('symbol', '—')
+                from_phase = fsm_event.get('from_phase', '—')
+                to_phase = fsm_event.get('to_phase', '—')
+                event = fsm_event.get('event', '—')
+
+                # Truncate long event names
+                if len(event) > 30:
+                    event = event[:27] + "..."
+
+                # Color code transitions
+                from_style = "yellow"
+                to_style = "green"
+
+                if to_phase in ["IDLE", "COOLDOWN"]:
+                    to_style = "dim white"
+                elif to_phase in ["POSITION"]:
+                    to_style = "bold green"
+                elif "PLACE" in to_phase:
+                    to_style = "cyan"
+
+                table.add_row(
+                    timestamp,
+                    symbol,
+                    Text(from_phase, style=from_style),
+                    "→",
+                    Text(to_phase, style=to_style),
+                    event
+                )
+
+        return Panel(table, title="🔄 FSM Status (Last 5 Transitions)", border_style="magenta")
+
+    except Exception as e:
+        return Panel(Text(f"FSM Status Error: {e}", style="red"), title="FSM ERROR", border_style="red")
 
 
 def make_footer_panel(last_event: str, health: Dict[str, Any]) -> Panel:
@@ -918,22 +1100,28 @@ def run_dashboard(engine, portfolio, config_module):
     if debug_drops:
         # Layout with debug panel
         layout.split(
-            Layout(name="header", size=6),  # Increased from 5 to 6 for system resources line
-            Layout(ratio=1, name="main"),
-            Layout(size=3, name="footer"),
+            Layout(name="header", size=6),
+            Layout(name="main", ratio=2),  # Takes 2/3 of remaining space
+            Layout(name="bottom", ratio=1),  # Takes 1/3 of remaining space
             Layout(size=12, name="debug"),
         )
     else:
         # Standard layout without debug panel
         layout.split(
-            Layout(name="header", size=6),  # Increased from 5 to 6 for system resources line
-            Layout(ratio=1, name="main"),
-            Layout(size=3, name="footer"),
+            Layout(name="header", size=6),
+            Layout(name="main", ratio=2),  # Takes 2/3 of remaining space
+            Layout(name="bottom", ratio=1),  # Takes 1/3 of remaining space
         )
 
     layout["main"].split_row(
-        Layout(name="side", ratio=1),
-        Layout(name="body", ratio=1)
+        Layout(name="side"),
+        Layout(name="body")
+    )
+
+    # Split bottom area into Event History (left) and FSM Status (right)
+    layout["bottom"].split_row(
+        Layout(name="events", ratio=1),
+        Layout(name="fsm", ratio=1)
     )
 
     start_time = time.time()
@@ -951,7 +1139,7 @@ def run_dashboard(engine, portfolio, config_module):
     logger.info("Starting live dashboard...", extra={'event_type': 'DASHBOARD_START'})
 
     try:
-        with Live(layout, screen=True, redirect_stderr=True, refresh_per_second=2):
+        with Live(layout, screen=True, redirect_stderr=True, refresh_per_second=1):
             while True:
                 # Check for shutdown
                 if shutdown_coordinator and shutdown_coordinator.is_shutdown_requested():
@@ -971,7 +1159,8 @@ def run_dashboard(engine, portfolio, config_module):
                     layout["header"].update(make_header_panel(config_data, system_resources, portfolio_data))
                     layout["side"].update(make_drop_panel(drop_data, config_data, engine))
                     layout["body"].update(make_portfolio_panel(portfolio_data))
-                    layout["footer"].update(make_footer_panel(last_event, health_data))
+                    layout["events"].update(make_event_history_panel())
+                    layout["fsm"].update(make_fsm_status_panel())
 
                     # Update debug panel if enabled
                     if debug_drops:

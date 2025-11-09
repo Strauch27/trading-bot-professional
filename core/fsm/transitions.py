@@ -131,6 +131,7 @@ class TransitionTable:
         self._add(Phase.WAIT_SELL_FILL, FSMEvent.ERROR_OCCURRED, Phase.POSITION, action_retry_sell)
 
         # ===== POST_TRADE Phase =====
+        self._add(Phase.POST_TRADE, FSMEvent.TRADE_COMPLETE, Phase.COOLDOWN, action_start_cooldown)
         self._add(Phase.POST_TRADE, FSMEvent.TICK_RECEIVED, Phase.COOLDOWN, action_start_cooldown)
 
         # ===== COOLDOWN Phase =====

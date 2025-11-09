@@ -285,7 +285,7 @@ COLD_INTERVAL_MS = 5000  # Cold symbols: 5 seconds
 MD_WS_FALLBACK_INTERVAL_MS = 10000  # HTTP fallback interval when WebSocket fails
 
 # Debug Drops - Detailed Logging for Drop% Debugging
-DEBUG_DROPS = True  # Enable detailed drop% debug logging with counters and watchdog
+DEBUG_DROPS = False  # Disable debug panel in terminal dashboard
 
 # Engine / Dashboard diagnostics
 ENGINE_DEBUG_TRACE = False  # If True, emit verbose engine start traces
@@ -397,7 +397,7 @@ MODEL_DIR = "models"
 # =============================================================================
 
 # Buy Execution (V9_3-Compatible)
-BUY_MODE = "PREDICTIVE"  # "RAW" = direct trigger, "PREDICTIVE" = buy zone (stricter)
+BUY_MODE = "RAW"  # "RAW" = direct trigger, "PREDICTIVE" = buy zone (stricter)
 PREDICTIVE_BUY_ZONE_PCT = 0.995  # 99.5% of trigger price (buy below trigger, V9_3)
 PREDICTIVE_BUY_ZONE_BPS = 3  # Legacy: 0.03% über Marktpreis
 PREDICTIVE_BUY_ZONE_CAP_BPS = 15  # Phase 7: Max Cap für Repricing
@@ -653,7 +653,7 @@ LOG_LEVEL = "DEBUG"  # File logs: Vollständiges Debug-Logging
 LOG_SCHEMA_VERSION = 4
 ENABLE_PRETTY_TRADE_LOGS = True
 ENABLE_RICH_LOGGING = True  # Use Rich Console for colored structured logging
-CONSOLE_LEVEL = "INFO"  # Terminal: Nur wichtige Meldungen (INFO, WARNING, ERROR)
+CONSOLE_LEVEL = "WARNING"  # Terminal: Nur Warnungen und Fehler (reduziert Clutter)
 SHOW_EVENT_TYPE_IN_CONSOLE = False  # Weniger Clutter im Terminal
 SHOW_THREAD_NAME_IN_CONSOLE = False  # Weniger Clutter im Terminal
 TRACE_SAMPLE_RATE = 0.1  # Sample 10% of high-frequency TRACE logs to reduce noise
@@ -708,7 +708,8 @@ FSM_MODE = "fsm"  # Options: "legacy", "fsm", or "both" (parallel validation)
 PHASE_LOG_BUFFER_SIZE = 8192  # Write buffer size
 
 # Rich Terminal Status Table (live FSM visualization)
-ENABLE_RICH_TABLE = True  # Enable live-updating FSM status table
+# DISABLED: Conflicts with new dashboard (ui/dashboard.py) which has FSM Status panel
+ENABLE_RICH_TABLE = False  # Disable old status table to prevent flicker
 RICH_TABLE_REFRESH_HZ = 2.0  # Refresh rate (updates per second)
 RICH_TABLE_SHOW_IDLE = False  # Show IDLE/WARMUP symbols in table
 

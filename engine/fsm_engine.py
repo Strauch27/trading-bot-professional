@@ -430,6 +430,18 @@ class FSMTradingEngine:
         except Exception as e:
             logger.debug(f"Phase logging failed: {e}")
 
+        # Emit FSM event to dashboard
+        try:
+            from ui.dashboard import emit_fsm_event
+            emit_fsm_event(
+                symbol=st.symbol,
+                from_phase=prev_phase.value,
+                to_phase=st.phase.value,
+                event=ctx.event.name if ctx.event else "UNKNOWN"
+            )
+        except Exception as e:
+            logger.debug(f"Dashboard FSM event failed: {e}")
+
     def _on_market_snapshots(self, snapshots: list):
         """
         EventBus callback: Receive market snapshots from MarketDataProvider.
@@ -504,7 +516,14 @@ class FSMTradingEngine:
 
         # Check available slots
         max_trades = getattr(config, 'MAX_TRADES', 10)
-        active_positions = sum(1 for s in self.states.values() if s.phase == Phase.POSITION)
+
+        # CRITICAL FIX: Count ALL active phases, not just POSITION
+        # A slot is occupied if a coin is in any of these phases:
+        # - WAIT_FILL (buying), POSITION (holding), EXIT_EVAL (checking exit)
+        # - PLACE_SELL (selling), WAIT_SELL_FILL (selling), POST_TRADE (cleanup)
+        active_phases = {Phase.WAIT_FILL, Phase.POSITION, Phase.EXIT_EVAL,
+                        Phase.PLACE_SELL, Phase.WAIT_SELL_FILL, Phase.POST_TRADE}
+        active_positions = sum(1 for s in self.states.values() if s.phase in active_phases)
 
         if active_positions >= max_trades:
             return  # No slots available
@@ -779,7 +798,10 @@ class FSMTradingEngine:
             min_slot = getattr(config, 'MIN_SLOT_USDT', 5.0)
 
             # DEBUGGING FIX (P4): Add budget diagnostics
-            active_positions = sum(1 for s in self.states.values() if s.phase == Phase.POSITION)
+            # CRITICAL FIX: Count ALL active phases (same as in _process_idle)
+            active_phases = {Phase.WAIT_FILL, Phase.POSITION, Phase.EXIT_EVAL,
+                            Phase.PLACE_SELL, Phase.WAIT_SELL_FILL, Phase.POST_TRADE}
+            active_positions = sum(1 for s in self.states.values() if s.phase in active_phases)
             logger.info(f"[BUDGET_CHECK] Symbol: {st.symbol}, Available: {available_budget:.2f} USDT, Per-trade: {per_trade:.2f}, Quote budget: {quote_budget:.2f}, Min slot: {min_slot:.2f}, Active positions: {active_positions}/{max_trades}")
 
             if quote_budget < min_slot:
@@ -1185,6 +1207,14 @@ class FSMTradingEngine:
                         logger.info(f"[WAIT_FILL] {st.symbol} order canceled successfully")
                     except Exception as e:
                         logger.warning(f"[WAIT_FILL] {st.symbol} cancel failed: {e}")
+
+                    # CRITICAL FIX: Remove buy order from open_buy_orders.json after timeout
+                    try:
+                        self.portfolio.remove_buy_order(st.symbol)
+                        logger.debug(f"[ORDER_CLEANUP] Removed {st.symbol} from open_buy_orders after timeout")
+                    except Exception as cleanup_err:
+                        logger.warning(f"[ORDER_CLEANUP_ERROR] {st.symbol}: Failed to remove buy order: {cleanup_err}")
+
                     self._emit_event(st, FSMEvent.BUY_ORDER_TIMEOUT, ctx)
                     return
 
@@ -1360,7 +1390,25 @@ class FSMTradingEngine:
                     except Exception as e:
                         logger.debug(f"Failed to emit POSITION_OPENED: {e}")
 
+                    # DASHBOARD EVENT: Show successful buy in terminal
+                    try:
+                        from ui.dashboard import emit_dashboard_event
+                        notional = final_qty * final_price
+                        message = f"🟦 {st.symbol} BOUGHT @ ${final_price:.6f} | Qty: {final_qty:.4f} | Cost: ${notional:.2f}"
+                        emit_dashboard_event("TRADE_ENTRY", message)
+                    except Exception as e:
+                        logger.debug(f"Failed to emit dashboard event: {e}")
+
                     self._emit_event(st, FSMEvent.BUY_ORDER_FILLED, ctx)
+
+                    # CRITICAL FIX: Remove buy order from open_buy_orders.json
+                    # This was causing "DUPLICATE_BLOCKED" errors after cooldown
+                    # because the system thought there was still a pending order
+                    try:
+                        self.portfolio.remove_buy_order(st.symbol)
+                        logger.debug(f"[ORDER_CLEANUP] Removed {st.symbol} from open_buy_orders after fill")
+                    except Exception as cleanup_err:
+                        logger.warning(f"[ORDER_CLEANUP_ERROR] {st.symbol}: Failed to remove buy order: {cleanup_err}")
 
                     # Telegram notification
                     if self.telegram:
@@ -1398,6 +1446,13 @@ class FSMTradingEngine:
                         "order_canceled"
                     )
                     st.reserved_budget = 0.0
+
+                # CRITICAL FIX: Remove buy order from open_buy_orders.json after cancellation
+                try:
+                    self.portfolio.remove_buy_order(st.symbol)
+                    logger.debug(f"[ORDER_CLEANUP] Removed {st.symbol} from open_buy_orders after cancel")
+                except Exception as cleanup_err:
+                    logger.warning(f"[ORDER_CLEANUP_ERROR] {st.symbol}: Failed to remove buy order: {cleanup_err}")
 
                 self._emit_event(st, FSMEvent.ORDER_CANCELED, ctx)
 
@@ -1581,19 +1636,29 @@ class FSMTradingEngine:
             if order.get("status") == "closed":
                 filled = order.get("filled", 0)
                 if filled >= st.amount * 0.95:
+                    # Extract order data
+                    avg_exit_price = order.get("average", 0)
+                    fee_dict = order.get('fee') or {}
+                    exit_fee = fee_dict.get('cost', 0) or 0
+
                     # UI EVENT: ORDER_FILLED (for dashboard - sell side)
                     try:
                         from core.logging.events import emit
-                        avg_exit = order.get("average", 0)
                         emit("ORDER_FILLED",
                              symbol=st.symbol,
                              side="sell",
                              order_id=st.order_id,
                              filled=filled,
-                             avg_price=avg_exit,
+                             avg_price=avg_exit_price,
                              decision_id=st.decision_id)
                     except Exception as e:
                         logger.debug(f"Failed to emit ORDER_FILLED (sell): {e}")
+
+                    # CRITICAL FIX: Pass order data to action via ctx
+                    # This ensures action_close_position has correct sell prices for fallback
+                    ctx.filled_qty = filled
+                    ctx.avg_price = avg_exit_price
+                    ctx.fee = exit_fee
 
                     self._emit_event(st, FSMEvent.SELL_ORDER_FILLED, ctx)
                 else:
@@ -1612,13 +1677,33 @@ class FSMTradingEngine:
 
     def _process_post_trade(self, st: CoinState, ctx: EventContext):
         """POST_TRADE: Record PnL, cleanup, transition to COOLDOWN."""
+
+        # CRITICAL FIX: Prevent infinite retry loop when order not found
+        # If we've tried 3 times and failed, use data from FSM state instead of Exchange
+        use_fallback_data = st.retry_count >= 3
+
         try:
-            order = self.exchange.fetch_order(st.order_id, st.symbol)
-            filled = order.get("filled", 0)
-            avg_exit_price = order.get("average", 0)
-            # FIX: Handle None fee dict safely
-            fee_dict = order.get('fee') or {}
-            exit_fee = fee_dict.get('cost', 0) or 0
+            if use_fallback_data:
+                # Use sell_order data from FSM state (already filled in WAIT_SELL_FILL)
+                logger.warning(f"{st.symbol}: Using fallback data after {st.retry_count} retries (order likely archived)")
+                if st.fsm_data and st.fsm_data.sell_order:
+                    filled = st.fsm_data.sell_order.cumulative_qty
+                    avg_exit_price = st.fsm_data.sell_order.avg_price
+                    exit_fee = st.fsm_data.sell_order.total_fees
+                else:
+                    # Ultimate fallback: use position data
+                    filled = st.amount
+                    avg_exit_price = st.current_price
+                    exit_fee = 0.0
+                    logger.warning(f"{st.symbol}: No sell_order data, using position data as fallback")
+            else:
+                # Normal path: fetch from Exchange
+                order = self.exchange.fetch_order(st.order_id, st.symbol)
+                filled = order.get("filled", 0)
+                avg_exit_price = order.get("average", 0)
+                # FIX: Handle None fee dict safely
+                fee_dict = order.get('fee') or {}
+                exit_fee = fee_dict.get('cost', 0) or 0
 
             # Record PnL
             realized_pnl = self.pnl_service.record_fill(
@@ -1675,6 +1760,20 @@ class FSMTradingEngine:
             self.pnl_service.remove_unrealized_position(st.symbol)
             self.portfolio.remove_held_asset(st.symbol)
 
+            # CRITICAL FIX: Release budget after successful sell
+            # Return sale proceeds to available budget
+            try:
+                sale_proceeds = filled * avg_exit_price
+                _release_budget_with_retry(
+                    self.portfolio,
+                    quote_amount=sale_proceeds,
+                    symbol=st.symbol,
+                    reason="position_sold"
+                )
+                logger.debug(f"{st.symbol}: Released {sale_proceeds:.2f} USDT after sell")
+            except Exception as e:
+                logger.error(f"{st.symbol}: Failed to release budget after sell: {e}")
+
             # UI EVENT: POSITION_CLOSED (for dashboard)
             try:
                 from core.logging.events import emit
@@ -1688,6 +1787,24 @@ class FSMTradingEngine:
                      decision_id=st.decision_id)
             except Exception as e:
                 logger.debug(f"Failed to emit POSITION_CLOSED: {e}")
+
+            # DASHBOARD EVENT: Show successful exit in terminal
+            try:
+                from ui.dashboard import emit_dashboard_event
+                # Use net profit (realized_pnl already includes fees deducted)
+                net_pnl = realized_pnl if realized_pnl is not None else 0.0
+
+                # Calculate percentage based on net profit vs invested capital
+                invested_capital = st.entry_price * filled if st.entry_price > 0 and filled > 0 else 0
+                net_pnl_pct = (net_pnl / invested_capital * 100) if invested_capital > 0 else 0.0
+
+                pnl_emoji = "🟢" if net_pnl >= 0 else "🔴"
+                exit_reason_short = (st.exit_reason or "unknown")[:20]  # Truncate long reasons
+
+                message = f"{pnl_emoji} {st.symbol} SOLD @ ${avg_exit_price:.6f} | Net PnL: {net_pnl:+.2f} ({net_pnl_pct:+.2f}%) | {exit_reason_short}"
+                emit_dashboard_event("TRADE_EXIT", message)
+            except Exception as e:
+                logger.debug(f"Failed to emit dashboard event: {e}")
 
             # Telegram notification
             if self.telegram and realized_pnl is not None:
@@ -1714,10 +1831,46 @@ class FSMTradingEngine:
             self._emit_event(st, FSMEvent.TRADE_COMPLETE, ctx)
 
         except Exception as e:
-            logger.error(f"Post trade error {st.symbol}: {e}")
-            st.amount = 0.0
-            st.cooldown_until = time.time() + (15 * 60)
-            self._emit_event(st, FSMEvent.TRADE_COMPLETE, ctx)
+            error_msg = str(e)
+
+            # CRITICAL FIX: Handle "Order does not exist" gracefully
+            # This happens when Exchange archives orders quickly after fill
+            if "does not exist" in error_msg.lower() or "-2013" in error_msg:
+                st.retry_count += 1
+
+                if st.retry_count >= 3:
+                    # After 3 retries, force completion with cleanup
+                    logger.warning(f"{st.symbol}: Order not found after {st.retry_count} attempts, forcing completion")
+                    st.amount = 0.0
+                    st.entry_price = 0.0
+                    st.order_id = None
+                    st.retry_count = 0
+                    cooldown_minutes = getattr(config, 'SYMBOL_COOLDOWN_MINUTES', 15)
+                    st.cooldown_until = time.time() + (cooldown_minutes * 60)
+
+                    # Force transition to COOLDOWN (bypassing POST_TRADE -> TRADE_COMPLETE issue)
+                    st.phase = Phase.COOLDOWN
+                    if st.fsm_data:
+                        st.fsm_data.cooldown_started_at = time.time()
+
+                    logger.info(f"{st.symbol}: Forced transition to COOLDOWN after order fetch failures")
+                    return  # Exit without emitting event to avoid "Invalid transition" error
+                else:
+                    # Retry on next cycle
+                    logger.debug(f"{st.symbol}: Order not found (attempt {st.retry_count}/3), will retry")
+                    return  # Will retry on next main loop iteration
+            else:
+                # Other errors: log and force cleanup
+                logger.error(f"Post trade error {st.symbol}: {e}")
+                st.amount = 0.0
+                st.retry_count = 0
+                st.cooldown_until = time.time() + (15 * 60)
+
+                # Force transition to COOLDOWN
+                st.phase = Phase.COOLDOWN
+                if st.fsm_data:
+                    st.fsm_data.cooldown_started_at = time.time()
+                return
 
     def _process_error(self, st: CoinState, ctx: EventContext):
         """ERROR: Exponential backoff recovery."""
@@ -1969,7 +2122,11 @@ class FSMTradingEngine:
 
         # Check if we have slots available
         max_trades = getattr(config, 'MAX_TRADES', 10)
-        active_positions = sum(1 for s in self.states.values() if s.phase == Phase.POSITION)
+
+        # CRITICAL FIX: Count ALL active phases (same as in _process_idle)
+        active_phases = {Phase.WAIT_FILL, Phase.POSITION, Phase.EXIT_EVAL,
+                        Phase.PLACE_SELL, Phase.WAIT_SELL_FILL, Phase.POST_TRADE}
+        active_positions = sum(1 for s in self.states.values() if s.phase in active_phases)
 
         _debug_write(f"[ACTIVE_SCAN] Slot check: active_positions={active_positions}, max_trades={max_trades}\n")
         sys.stdout.flush()

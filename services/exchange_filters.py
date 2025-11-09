@@ -79,14 +79,28 @@ def get_filters(exchange, symbol: str) -> dict:
     if tick_size is None:
         p = m.get("precision", {}).get("price")
         if p is not None:
-            tick_size = 10 ** (-p)
+            # MEXC returns precision as actual value (0.0001), not decimals (4)
+            # Check if p is already a step value (< 1.0) or a decimal count
+            if isinstance(p, (int, float)) and 0 < p < 1.0:
+                tick_size = float(p)  # Use value directly
+            elif isinstance(p, int) and p >= 0:
+                tick_size = 10 ** (-p)  # Convert decimals to step
+            else:
+                tick_size = 0.0
         else:
             tick_size = 0.0
 
     if step_size is None:
         a = m.get("precision", {}).get("amount")
         if a is not None:
-            step_size = 10 ** (-a)
+            # MEXC returns precision as actual value (0.01), not decimals (2)
+            # Check if a is already a step value (< 1.0) or a decimal count
+            if isinstance(a, (int, float)) and 0 < a < 1.0:
+                step_size = float(a)  # Use value directly
+            elif isinstance(a, int) and a >= 0:
+                step_size = 10 ** (-a)  # Convert decimals to step
+            else:
+                step_size = 0.0
         else:
             step_size = 0.0
 
