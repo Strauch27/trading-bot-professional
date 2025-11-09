@@ -27,7 +27,7 @@ NETWORK_ERRORS = (ccxt.NetworkError, ccxt.DDoSProtection, requests.RequestExcept
 
 # Market filtering constants
 QUOTE_ALLOW = {"USDT", "USDC"}
-BASE_RE = re.compile(r"^[A-Z]{2,}$")  # Min 2 chars, only A-Z
+BASE_RE = re.compile(r"^[A-Z0-9]{2,}$")  # Min 2 chars, A-Z and digits (supports 0G, 1INCH, etc.)
 
 # Import for heartbeat coordination
 # Import robust sizing logic

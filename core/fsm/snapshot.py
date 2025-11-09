@@ -131,6 +131,12 @@ class SnapshotManager:
                 coin_state.entry_ts = cs.get('entry_ts', 0.0)
                 coin_state.order_id = cs.get('order_id')
                 coin_state.cooldown_until = cs.get('cooldown_until', 0.0)
+                # Restore TP/SL fields (CRITICAL for exit management)
+                coin_state.tp_px = cs.get('tp_px', 0.0)
+                coin_state.sl_px = cs.get('sl_px', 0.0)
+                coin_state.peak_price = cs.get('peak_price', 0.0)
+                coin_state.trailing_trigger = cs.get('trailing_trigger', 0.0)
+                coin_state.entry_fee_per_unit = cs.get('entry_fee_per_unit', 0.0)
 
             logger.info(f"State restored: {symbol} → {coin_state.phase.name}")
             return True
@@ -174,7 +180,13 @@ class SnapshotManager:
             'order_id': coin_state.order_id,
             'cooldown_until': coin_state.cooldown_until,
             'error_count': coin_state.error_count,
-            'last_error': coin_state.last_error
+            'last_error': coin_state.last_error,
+            # TP/SL fields (CRITICAL for exit management)
+            'tp_px': getattr(coin_state, 'tp_px', 0.0),
+            'sl_px': getattr(coin_state, 'sl_px', 0.0),
+            'peak_price': getattr(coin_state, 'peak_price', 0.0),
+            'trailing_trigger': getattr(coin_state, 'trailing_trigger', 0.0),
+            'entry_fee_per_unit': getattr(coin_state, 'entry_fee_per_unit', 0.0)
         }
 
         # Serialize state data if present

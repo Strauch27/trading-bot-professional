@@ -120,6 +120,8 @@ class TransitionTable:
         # ===== PLACE_SELL Phase =====
         self._add(Phase.PLACE_SELL, FSMEvent.SELL_ORDER_PLACED, Phase.WAIT_SELL_FILL, action_wait_for_sell)
         self._add(Phase.PLACE_SELL, FSMEvent.SELL_ORDER_REJECTED, Phase.POSITION, action_retry_sell)
+        # CRITICAL FIX: Handle ORDER_PLACEMENT_FAILED (e.g. "Oversold" errors) by returning to POSITION for retry
+        self._add(Phase.PLACE_SELL, FSMEvent.ORDER_PLACEMENT_FAILED, Phase.POSITION, action_retry_sell)
         self._add(Phase.PLACE_SELL, FSMEvent.ERROR_OCCURRED, Phase.ERROR, action_log_error)
 
         # ===== WAIT_SELL_FILL Phase =====

@@ -147,11 +147,14 @@ class FSMExitEngine:
         if not hasattr(coin_state, 'peak_price') or not hasattr(coin_state, 'trailing_trigger'):
             return None
 
-        # Update peak price if current price is higher
-        if current_price > coin_state.peak_price:
+        # Check if trailing stop should be activated
+        activation_threshold = coin_state.entry_price * getattr(config, 'TRAILING_STOP_ACTIVATION_PCT', 1.001)
+
+        # Update peak price if current price is higher AND trailing is activated
+        if current_price >= activation_threshold and current_price > coin_state.peak_price:
             coin_state.peak_price = current_price
             # Recalculate trailing trigger
-            trail_distance_pct = getattr(config, 'TRAILING_DISTANCE_PCT', 0.98)  # 2% below peak
+            trail_distance_pct = getattr(config, 'TRAILING_STOP_DISTANCE_PCT', 0.999)
             coin_state.trailing_trigger = coin_state.peak_price * trail_distance_pct
 
         # Check if trailing stop hit
