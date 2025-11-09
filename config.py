@@ -227,7 +227,7 @@ ANCHOR_MAX_START_DROP_PCT = 8.0  # Start-Drop-Clamp: anchor not >8% below start 
 
 # Drop Tracking (Long-term solution: RollingWindowManager)
 DROP_LOOKBACK_SECONDS = 300  # 5 min Lookback für Drop-Peak-Tracking
-DROP_SNAPSHOT_INTERVAL_MS = 500  # Snapshot-Events alle 500ms
+DROP_SNAPSHOT_INTERVAL_MS = 300  # Snapshot-Events alle 300ms (increased from 500ms for faster position monitoring)
 DROP_PERSIST_WINDOWS = True  # Persistiere RollingWindows zwischen Restarts
 DROP_STORAGE_PATH = "state/drop_windows"  # Persistence-Verzeichnis
 
@@ -255,8 +255,8 @@ MD_JITTER_MS = 50  # Random jitter to spread request spikes (ms)
 
 # Priority-based Market Data Updates (Portfolio positions get faster updates)
 MD_ENABLE_PRIORITY_UPDATES = True  # Enable priority-based TTL for portfolio coins
-MD_PORTFOLIO_TTL_MS = 1500  # Portfolio coins: 1.5s updates (vs 5s default)
-MD_PORTFOLIO_SOFT_TTL_MS = 800  # Portfolio coins soft TTL (vs 2s default)
+MD_PORTFOLIO_TTL_MS = 500   # Portfolio coins: 0.5s updates (vs 5s default) - INCREASED for precise TP/SL
+MD_PORTFOLIO_SOFT_TTL_MS = 300  # Portfolio coins soft TTL (vs 2s default) - INCREASED for responsiveness
 
 # Per-Coin Market Data Debugging
 MD_DEBUG_PER_COIN = True  # Enable detailed per-coin fetch logging
