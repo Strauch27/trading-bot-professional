@@ -309,6 +309,59 @@ class PnLService:
             self._session_start = datetime.now(timezone.utc)
             self._unrealized_positions.clear()
 
+    def export_closed_positions(self, filepath: str) -> int:
+        """
+        Exports all closed positions (SELL trades with PnL) to JSON file.
+
+        Args:
+            filepath: Path to write closed_positions.json
+
+        Returns:
+            Number of closed positions exported
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+
+        with self._lock:
+            # Filter SELL trades (closed positions)
+            closed_trades = [
+                trade for trade in self._trades
+                if trade.side == "SELL" and trade.entry_price is not None
+            ]
+
+            if not closed_trades:
+                logger.debug("No closed positions to export")
+                return 0
+
+            # Convert to JSON-serializable format
+            export_data = []
+            for trade in closed_trades:
+                realized_pnl = (trade.avg_price - trade.entry_price) * trade.quantity - trade.fee_quote
+
+                export_data.append({
+                    "timestamp": trade.timestamp.isoformat(),
+                    "symbol": trade.symbol,
+                    "quantity": trade.quantity,
+                    "entry_price": trade.entry_price,
+                    "exit_price": trade.avg_price,
+                    "realized_pnl_net": round(realized_pnl, 6),
+                    "total_fees": round(trade.fee_quote, 6),
+                    "exit_reason": trade.reason,
+                    "order_id": trade.order_id,
+                    "client_order_id": trade.client_order_id
+                })
+
+            # Write to file
+            try:
+                with open(filepath, 'w') as f:
+                    json.dump(export_data, f, indent=2)
+                logger.info(f"Exported {len(export_data)} closed positions to {filepath}")
+                return len(export_data)
+            except Exception as e:
+                logger.error(f"Failed to export closed positions to {filepath}: {e}")
+                return 0
+
 
 # Helper Functions für Kompatibilität mit bestehenden Utils
 

@@ -1394,6 +1394,7 @@ def main():
         logger.info("🔚 Executing coordinated shutdown...", extra={'event_type': 'COORDINATED_SHUTDOWN_START'})
 
         # Register final cleanup callbacks (use direct function references for better logging)
+        shutdown_coordinator.add_cleanup_callback(_export_closed_positions)
         shutdown_coordinator.add_cleanup_callback(_telegram_shutdown_cleanup)
         shutdown_coordinator.add_cleanup_callback(_telegram_shutdown_summary)
         shutdown_coordinator.add_cleanup_callback(_error_summary_cleanup)
@@ -1454,6 +1455,23 @@ def _error_summary_cleanup():
                        extra={'event_type': 'FINAL_ERROR_SUMMARY', **error_summary})
     except Exception as e:
         logger.warning(f"Error getting error summary: {e}")
+
+
+def _export_closed_positions():
+    """Cleanup callback for exporting closed positions to JSON"""
+    try:
+        if 'engine' in globals() and hasattr(engine, 'pnl_service'):
+            import os
+            import config as cfg
+            filepath = os.path.join(cfg.BASE_DIR, "closed_positions.json")
+            count = engine.pnl_service.export_closed_positions(filepath)
+            if count > 0:
+                logger.info(f"✅ Exported {count} closed positions to {filepath}",
+                           extra={'event_type': 'CLOSED_POSITIONS_EXPORTED', 'count': count, 'filepath': filepath})
+        else:
+            logger.debug("No PnL service available for closed positions export")
+    except Exception as e:
+        logger.warning(f"Failed to export closed positions: {e}")
 
 
 def _pre_shutdown_log_flush():

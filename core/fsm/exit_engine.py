@@ -138,7 +138,11 @@ class FSMExitEngine:
         return None
 
     def _check_trailing(self, coin_state, current_price: float) -> Optional[ExitDecision]:
-        """Trailing stop - only active after activation threshold."""
+        """Trailing stop - only active after activation threshold.
+
+        PROTECTED TRAILING: Ensures exit price is never below TP level.
+        If trailing trigger falls below TP, it is clamped to TP price.
+        """
         # Check if trailing is enabled in config
         if not getattr(config, 'USE_TRAILING_STOP', False):
             return None
@@ -155,7 +159,18 @@ class FSMExitEngine:
             coin_state.peak_price = current_price
             # Recalculate trailing trigger
             trail_distance_pct = getattr(config, 'TRAILING_STOP_DISTANCE_PCT', 0.999)
-            coin_state.trailing_trigger = coin_state.peak_price * trail_distance_pct
+            calculated_trigger = coin_state.peak_price * trail_distance_pct
+
+            # PROTECTED TRAILING: Never let trailing trigger fall below TP
+            tp_price = coin_state.entry_price * getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)
+            coin_state.trailing_trigger = max(calculated_trigger, tp_price)
+
+            # Log protection activation
+            if calculated_trigger < tp_price:
+                self.logger.debug(
+                    f"{coin_state.symbol}: Protected Trailing activated - "
+                    f"Trigger clamped from ${calculated_trigger:.6f} to TP ${tp_price:.6f}"
+                )
 
         # Check if trailing stop hit
         if coin_state.trailing_trigger > 0 and current_price <= coin_state.trailing_trigger:
@@ -163,10 +178,18 @@ class FSMExitEngine:
             drop_from_peak_pct = ((current_price - coin_state.peak_price) / coin_state.peak_price) * 100
             pnl_pct = ((current_price - coin_state.entry_price) / coin_state.entry_price) * 100
 
+            # Check if this is a protected exit (at TP level)
+            tp_price = coin_state.entry_price * getattr(config, 'TAKE_PROFIT_THRESHOLD', 1.005)
+            is_protected = abs(coin_state.trailing_trigger - tp_price) < 0.00001  # Float comparison tolerance
+
             return ExitDecision(
                 rule="TRAILING",
                 price=current_price,
-                reason=f"Trailing stop from peak {coin_state.peak_price:.8f} (drop: {drop_from_peak_pct:.2f}%, PnL: {pnl_pct:.2f}%)",
+                reason=(
+                    f"Protected trailing @ TP ${tp_price:.8f} (peak: ${coin_state.peak_price:.8f}, PnL: {pnl_pct:.2f}%)"
+                    if is_protected else
+                    f"Trailing stop from peak ${coin_state.peak_price:.8f} (drop: {drop_from_peak_pct:.2f}%, PnL: {pnl_pct:.2f}%)"
+                ),
                 priority=2
             )
 
