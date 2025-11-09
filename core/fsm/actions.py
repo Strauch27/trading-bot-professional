@@ -548,7 +548,7 @@ def action_close_position(ctx: EventContext, coin_state: CoinState) -> None:
             )
         coin_state.fsm_data.sell_order.cumulative_qty = ctx.filled_qty or 0.0
         coin_state.fsm_data.sell_order.avg_price = ctx.avg_price or 0.0
-        coin_state.fsm_data.sell_order.total_fees = ctx.fee or 0.0
+        coin_state.fsm_data.sell_order.total_fees = ctx.data.get('fee', 0.0)  # Get fee from ctx.data
 
     try:
         from core.logger_factory import DECISION_LOG, log_event

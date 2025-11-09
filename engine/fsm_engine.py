@@ -1582,6 +1582,12 @@ class FSMTradingEngine:
                 return
 
         # No exit - return to POSITION
+        # DEBUG: Log why no exit was triggered
+        logger.debug(
+            f"{st.symbol}: No exit @ ${ctx.price:.6f} | "
+            f"Entry: ${st.entry_price:.6f}, TP: ${st.tp_px:.6f}, SL: ${st.sl_px:.6f}, "
+            f"Peak: ${st.peak_price:.6f}, Trailing Trigger: ${st.trailing_trigger:.6f}"
+        )
         self._emit_event(st, FSMEvent.NO_EXIT_SIGNAL, ctx)
 
     def _process_place_sell(self, st: CoinState, ctx: EventContext):
@@ -1691,7 +1697,7 @@ class FSMTradingEngine:
                     # This ensures action_close_position has correct sell prices for fallback
                     ctx.filled_qty = filled
                     ctx.avg_price = avg_exit_price
-                    ctx.fee = exit_fee
+                    ctx.data['fee'] = exit_fee  # Use ctx.data for fee (EventContext doesn't have fee attribute)
 
                     self._emit_event(st, FSMEvent.SELL_ORDER_FILLED, ctx)
                 else:
