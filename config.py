@@ -399,7 +399,7 @@ MODEL_DIR = "models"
 # Buy Execution (V9_3-Compatible)
 BUY_MODE = "RAW"  # "RAW" = direct trigger, "PREDICTIVE" = buy zone (stricter)
 PREDICTIVE_BUY_ZONE_PCT = 0.995  # 99.5% of trigger price (buy below trigger, V9_3)
-PREDICTIVE_BUY_ZONE_BPS = 3  # Legacy: 0.03% über Marktpreis
+PREDICTIVE_BUY_ZONE_BPS = -50  # -0.5% below trigger (aligned with PREDICTIVE_BUY_ZONE_PCT)
 PREDICTIVE_BUY_ZONE_CAP_BPS = 15  # Phase 7: Max Cap für Repricing
 USE_PREDICTIVE_BUYS = True
 BUY_LIMIT_PREMIUM_BPS = 8
