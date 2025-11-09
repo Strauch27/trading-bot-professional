@@ -775,6 +775,24 @@ class FSMTradingEngine:
     def _process_place_buy(self, st: CoinState, ctx: EventContext):
         """PLACE_BUY: Calculate size and place buy order."""
         try:
+            # CRITICAL FIX (P0-1): FSM-State-based duplicate prevention
+            # Check if THIS EXACT SYMBOL already has an active FSM state in buy/hold phases
+            # This prevents race conditions where multiple signals for the same symbol execute simultaneously
+            allow_duplicates = getattr(config, 'ALLOW_DUPLICATE_COINS', False)
+            if not allow_duplicates:
+                active_buy_phases = {Phase.PLACE_BUY, Phase.WAIT_FILL, Phase.POSITION,
+                                    Phase.EXIT_EVAL, Phase.PLACE_SELL, Phase.WAIT_SELL_FILL, Phase.POST_TRADE}
+
+                # Check if any OTHER FSM state has this symbol active
+                for other_symbol, other_state in self.states.items():
+                    if other_symbol == st.symbol and other_state.phase in active_buy_phases and other_state is not st:
+                        logger.error(
+                            f"[DUPLICATE_FSM_BLOCKED] {st.symbol} already active in phase {other_state.phase.name}! "
+                            f"Aborting duplicate buy. (ALLOW_DUPLICATE_COINS={allow_duplicates})"
+                        )
+                        self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                        return
+
             # CRITICAL FIX (P3): Re-check cooldown to close race window
             # Race condition: Coin passes cooldown check in ENTRY_EVAL, but another instance
             # of the same symbol might have entered cooldown before PLACE_BUY executes.
@@ -820,6 +838,21 @@ class FSMTradingEngine:
             # Check if there's already a pending buy order for this symbol
             if self.portfolio.has_open_order(st.symbol):
                 logger.warning(f"[DUPLICATE_BLOCKED] {st.symbol} already has a pending buy order! Aborting duplicate buy.")
+                self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
+                return
+
+            # CRITICAL FIX (P0-2): MAX_PER_SYMBOL_USD enforcement
+            # Prevent excessive concentration in a single symbol
+            max_per_symbol = getattr(config, 'MAX_PER_SYMBOL_USD', 60.0)
+            current_exposure = self.portfolio.get_symbol_exposure_usdt(st.symbol)
+            new_total_exposure = current_exposure + quote_budget
+
+            if new_total_exposure > max_per_symbol:
+                logger.error(
+                    f"[MAX_PER_SYMBOL_BLOCKED] {st.symbol}: Current exposure ${current_exposure:.2f} + "
+                    f"new order ${quote_budget:.2f} = ${new_total_exposure:.2f} exceeds limit ${max_per_symbol:.2f}. "
+                    f"Aborting buy."
+                )
                 self._emit_event(st, FSMEvent.BUY_ABORTED, ctx)
                 return
 
