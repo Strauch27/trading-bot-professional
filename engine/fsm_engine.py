@@ -1757,6 +1757,15 @@ class FSMTradingEngine:
                 reason=st.exit_reason
             )
 
+            # Immediately export closed positions to disk (crash-safe)
+            try:
+                import os
+                import config as cfg
+                filepath = os.path.join(cfg.BASE_DIR, "closed_positions.json")
+                self.pnl_service.export_closed_positions(filepath)
+            except Exception as e:
+                self.logger.debug(f"Failed to export closed positions: {e}")
+
             # P2-1: Log sell order fill
             try:
                 self.jsonl.order_filled(

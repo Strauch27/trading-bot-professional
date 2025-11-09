@@ -151,6 +151,15 @@ class ExitHandler:
                 entry_price=position_data.get('buying_price')
             )
 
+            # Immediately export closed positions to disk (crash-safe)
+            try:
+                import os
+                import config as cfg
+                filepath = os.path.join(cfg.BASE_DIR, "closed_positions.json")
+                self.engine.pnl_service.export_closed_positions(filepath)
+            except Exception as e:
+                logger.debug(f"Failed to export closed positions: {e}")
+
             # Phase 3: Log position_closed event
             try:
                 from core.event_schemas import PositionClosed
@@ -345,6 +354,15 @@ class ExitHandler:
                     fee_quote=0.0,
                     entry_price=entry_price
                 )
+
+                # Immediately export closed positions to disk (crash-safe)
+                try:
+                    import os
+                    import config as cfg
+                    filepath = os.path.join(cfg.BASE_DIR, "closed_positions.json")
+                    self.engine.pnl_service.export_closed_positions(filepath)
+                except Exception as export_err:
+                    logger.debug(f"Failed to export closed positions: {export_err}")
 
         except Exception as e:
             # Never crash on event handling
