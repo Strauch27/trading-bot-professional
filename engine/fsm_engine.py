@@ -2283,8 +2283,9 @@ class FSMTradingEngine:
         return self.states
 
     def get_positions(self) -> Dict[str, CoinState]:
-        """Get active positions."""
-        return {symbol: st for symbol, st in self.states.items() if st.phase == Phase.POSITION}
+        """Get active positions (POSITION or EXIT_EVAL phases)."""
+        from core.fsm.phases import POSITION_PHASES
+        return {symbol: st for symbol, st in self.states.items() if st.phase in POSITION_PHASES}
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get engine statistics."""

@@ -11,6 +11,7 @@ Manages price anchors for drop-trigger logic with 4 operating modes:
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -219,7 +220,8 @@ class AnchorManager:
                 json.dump(self._anchors, f, indent=2)
 
             # Atomic rename (crashes can't corrupt the file)
-            tmp_path.rename(path)
+            # Use os.replace() for cross-platform compatibility (Windows + Unix/Mac)
+            os.replace(str(tmp_path), str(path))
 
             logger.debug(f"Saved {len(self._anchors)} anchors to {path} (atomic)")
         except Exception as e:

@@ -8,6 +8,7 @@ Enables recovery from crashes without losing positions.
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Dict, Optional
@@ -62,11 +63,13 @@ class SnapshotManager:
                 snapshot_path = self._get_snapshot_path(symbol)
 
                 # Write atomically (write to temp, then rename)
+                # Use os.replace() for cross-platform compatibility (Windows + Unix/Mac)
                 temp_path = snapshot_path.with_suffix('.tmp')
                 with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(snapshot, f, indent=2)
 
-                temp_path.rename(snapshot_path)
+                # os.replace() is atomic on Unix/Mac and handles existing files on Windows
+                os.replace(str(temp_path), str(snapshot_path))
 
                 self._write_count += 1
 

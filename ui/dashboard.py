@@ -300,6 +300,52 @@ def get_portfolio_data(portfolio, engine) -> Dict[str, Any]:
     ghost_count = 0
     total_value = portfolio.my_budget
 
+    # FSM-Mode: Get positions directly from engine (highest priority)
+    if hasattr(engine, 'get_positions'):
+        try:
+            fsm_positions = engine.get_positions()
+            if fsm_positions:
+                logger.debug(f"[DASHBOARD] Found {len(fsm_positions)} FSM positions")
+                for symbol, coin_state in fsm_positions.items():
+                    try:
+                        current_price = engine.get_current_price(symbol)
+                        if not current_price:
+                            snap, snap_ts = engine.get_snapshot_entry(symbol) if hasattr(engine, 'get_snapshot_entry') else (None, None)
+                            if snap:
+                                current_price = snap.get('price', {}).get('last')
+                        if not current_price:
+                            current_price = coin_state.entry_price
+
+                        amount = coin_state.amount
+                        if amount > 0:
+                            position_value = current_price * amount
+                            total_value += position_value
+
+                            entry_fee_per_unit = getattr(coin_state, 'entry_fee_per_unit', 0) or 0
+
+                            positions_data.append({
+                                'symbol': symbol,
+                                'amount': amount,
+                                'entry': coin_state.entry_price,
+                                'current': current_price,
+                                'entry_fee_per_unit': entry_fee_per_unit,
+                                'is_ghost': False
+                            })
+                            logger.debug(f"[DASHBOARD] Added FSM position: {symbol} - {amount} @ {coin_state.entry_price}")
+                    except Exception as e:
+                        logger.debug(f"Error processing FSM position {symbol}: {e}")
+                        continue
+
+                # Return early if we found FSM positions
+                if positions_data:
+                    return {
+                        "positions": positions_data,
+                        "total_value": total_value,
+                        "ghost_count": ghost_count,
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to get FSM positions: {e}")
+
     # Try to use get_positions_with_ghosts if available (new method)
     if hasattr(portfolio, 'get_positions_with_ghosts'):
         try:
